@@ -1,0 +1,17 @@
+/.idea
+*.a
+*.o
+*.gcda
+*.gcno
+*.gcov
+*.so
+*.log
+*.bak
+cmake*
+.make-*
+.prerequisites
+locktest
+shuke-server
+dnsbench
+callgrind*
+.cache
