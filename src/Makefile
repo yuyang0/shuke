@@ -23,7 +23,8 @@ include $(RTE_SDK)/mk/rte.vars.mk
 APP = shuke-server
 
 # all source are stored in SRCS-y
-SRCS-y := shuke.c dpdk_module.c str.c conf.c utils.c
+SRCS-y := shuke.c dpdk_module.c str.c conf.c utils.c ds.c protocol.c \
+          dict.c zone_parser.c sds.c
 
 # CFLAGS += -O3
 # CFLAGS += $(WERROR_FLAGS)

@@ -16,4 +16,7 @@
 #define MIN(x1, x2) (x1) < (x2)? (x1): (x2)
 #define MAX(x1, x2) (x1) > (x2)? (x1): (x2)
 
+#define ERR_CODE -1
+#define OK_CODE   0
+
 #endif /* _DEFINES_H_ */

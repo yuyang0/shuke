@@ -15,3 +15,4 @@ shuke-server
 dnsbench
 callgrind*
 .cache
+build

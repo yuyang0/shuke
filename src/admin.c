@@ -1,0 +1,654 @@
+//
+// Created by yangyu on 2/18/17.
+//
+
+#include "shuke.h"
+
+#include <limits.h>
+#include <sys/resource.h>
+#include <sys/utsname.h>
+
+#define LEN_BYTES 4
+#define ADMIN_CONN_EXPIRE 3600
+
+typedef struct _adminReply {
+    struct _adminReply *next;
+    int state;
+    size_t wsize;    // total size in data
+    size_t wcur;     // write cursor
+    char len[LEN_BYTES];
+    sds data;
+} adminReply;
+
+typedef struct _adminConn {
+    int fd;
+    int state;
+    aeEventLoop *el;
+    char data[MAX_UDP_SIZE];
+    size_t packetSize;    // size of current dns query packet
+    size_t nRead;
+    char len[LEN_BYTES];
+
+    struct list_head node;
+    long lastActiveTs;
+
+    adminReply *replyList;
+} adminConn;
+
+static void adminAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask);
+static void adminReadHandler(aeEventLoop *el, int fd, void *privdata, int mask);
+static void adminWriteHandler(aeEventLoop *el, int fd, void *privdata, int mask);
+static int adminCron(struct aeEventLoop *el, long long id, void *clientData);
+
+void adminConnDestroy(adminConn *c);
+
+static void versionCommand(int argc, char *argv[], adminConn *c);
+static void infoCommand(int argc, char *argv[], adminConn *c);
+static void debugCommand(int argc, char *argv[], adminConn *c);
+static void zoneCommand(int argc, char *argv[], adminConn *c);
+static void configCommand(int argc, char *argv[], adminConn *c);
+
+typedef void adminCommandProc(int argc, char *argv[], adminConn *c);
+typedef struct {
+    char *name;
+    adminCommandProc *proc;
+}adminCommand;
+
+static adminCommand adminCommandTable[] = {
+    {"version", versionCommand},
+    {"debug", debugCommand},
+    {"info", infoCommand},
+    {"zone", zoneCommand},
+    {"config", configCommand}
+};
+
+static inline void adminConnMoveTail(adminConn *c) {
+    c->lastActiveTs = sk.unixtime;
+    list_del(&(c->node));
+    list_add_tail(&(c->node), &(sk.head));
+}
+
+int initAdminServer() {
+    char *host = sk.admin_host;
+    int port = sk.admin_port;
+
+    sk.commands = dictCreate(&commandTableDictType, NULL);
+    int numcommands = sizeof(adminCommandTable)/sizeof(adminCommand);
+    for (int j = 0; j < numcommands; j++) {
+        adminCommand *c = adminCommandTable+j;
+        if (dictAdd(sk.commands, zstrdup(c->name), c) != DICT_OK) {
+            LOG_FATAL(USER1, "can't add command %s to dict", c->name);
+        }
+    }
+    INIT_LIST_HEAD(&(sk.head));
+
+    if (strchr(host, ':') == NULL) {
+        sk.fd = anetTcpServer(sk.errstr, port, host, sk.tcp_backlog);
+    } else {
+        sk.fd = anetTcp6Server(sk.errstr, port, host, sk.tcp_backlog);
+    }
+    if (sk.fd == ANET_ERR) {
+        return C_ERR;
+    }
+    anetNonBlock(NULL,sk.fd);
+    if (aeCreateFileEvent(sk.el, sk.fd, AE_READABLE, adminAcceptHandler, NULL) == AE_ERR) {
+        LOG_ERROR(USER1, "Can't create file event for listen socket %d", sk.fd);
+        return C_ERR;
+    }
+    if (aeCreateTimeEvent(sk.el, TIME_INTERVAL, adminCron, NULL, NULL) == AE_ERR) {
+        return C_ERR;
+    }
+    return C_OK;
+}
+
+void releaseAdminServer() {
+    dictRelease(sk.commands);
+    struct list_head *pos, *temp;
+    list_for_each_safe(pos, temp, &(sk.head)) {
+        adminConn *c = list_entry(pos, adminConn, node);
+        adminConnDestroy(c);
+    }
+}
+
+adminReply *adminReplyCreate(sds data) {
+    size_t dataLen = sdslen(data);
+
+    adminReply *rep = zcalloc(sizeof(*rep));
+    rep->data = data;
+    rep->state = CONN_WRITE_LEN;
+    dump32be(dataLen, rep->len);
+    rep->wsize = dataLen;
+    return rep;
+}
+
+void adminReplyDestroy(adminReply *rep) {
+    sdsfree(rep->data);
+    zfree(rep);
+}
+
+adminConn* adminConnCreate(int fd) {
+    adminConn *c = zcalloc(sizeof(*c));
+    c->fd = fd;
+    c->state = CONN_READ_LEN;
+    c->el = sk.el;
+    c->lastActiveTs = sk.unixtime;
+    list_add_tail(&(c->node), &(sk.head));
+
+    return c;
+}
+
+void adminConnAppendW(adminConn *c, adminReply *rep) {
+    if (c->replyList == NULL) {
+        LOG_DEBUG(USER1, "admin add write event");
+        aeCreateFileEvent(c->el, c->fd, AE_WRITABLE, adminWriteHandler, c);
+    }
+    rep->next = c->replyList;
+    c->replyList = rep;
+}
+
+void adminConnDestroy(adminConn *c) {
+    list_del(&(c->node));
+    aeDeleteFileEvent(c->el, c->fd, AE_READABLE|AE_WRITABLE);
+    close(c->fd);
+    while(c->replyList) {
+        adminReply *rep = c->replyList;
+        c->replyList = rep->next;
+        adminReplyDestroy(rep);
+    }
+    zfree(c);
+}
+
+static void dispatchCommand(adminConn *c) {
+    char *ptr = c->data;
+    char *argv[10];
+    int argc = 10;
+    sds s = NULL;
+
+    if (tokenize(ptr, argv, &argc) < 0) {
+        s = sdsnewprintf("command contains too many tokens or syntax error.");
+        goto error;
+    }
+    if (argc < 1) {
+        s = sdsnew("need a command.");
+        goto error;
+    }
+    for (int i = 0; i < argc; ++i) {
+        argv[i] = strip(argv[i], "\"");
+    }
+
+    strtoupper(argv[0]);
+    LOG_INFO(USER1, "receive %s command.", argv[0]);
+    adminCommand *cmd = dictFetchValue(sk.commands, argv[0]);
+    if (cmd == NULL) goto error;
+    cmd->proc(argc, argv, c);
+    return;
+
+error:
+    if (s == NULL) {
+        s = sdsnewprintf("invalid command %s.", argv[0]);
+    }
+    LOG_DEBUG(USER1, "Buf: %s, cmd: %s", s, argv[0]);
+    adminReply *rep = adminReplyCreate(s);
+    adminConnAppendW(c, rep);
+    return;
+}
+
+static int adminCron(struct aeEventLoop *el, long long id, void *clientData) {
+    // LOG_DEBUG(USER1, "admin time event");
+    ((void) el); ((void) id); ((void) clientData);
+
+    struct list_head *pos, *temp;
+    list_for_each_safe(pos, temp, &(sk.head)) {
+        adminConn *c = list_entry(pos, adminConn, node);
+        if (sk.unixtime - c->lastActiveTs < ADMIN_CONN_EXPIRE) break;
+
+        LOG_INFO(USER1, "admin connection is idle more than %ds, close it.", ADMIN_CONN_EXPIRE);
+        adminConnDestroy(c);
+    }
+    return TIME_INTERVAL;
+}
+
+static void adminReadHandler(struct aeEventLoop *el, int fd, void *privdata, int mask) {
+    ((void) el); ((void) mask);
+    ssize_t n = 0;
+    int remainRead;
+    adminConn *conn = (adminConn *) (privdata);
+    cdnsAssert(conn->fd == fd);
+    // move this connection to tail.
+    adminConnMoveTail(conn);
+
+    while(1) {
+        switch (conn->state) {
+        case CONN_READ_LEN:
+            remainRead = LEN_BYTES - conn->nRead;
+            n = read(conn->fd, conn->len + conn->nRead, remainRead);
+            if (n < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    return;
+                }
+                LOG_WARN(USER1, "tcp read: %s", strerror(errno));
+                adminConnDestroy(conn);
+                return;
+            }
+            if (n == 0) {   // the peer close the socket prematurely.
+                if (conn->nRead > 0) {
+                    LOG_WARN(USER1, "the connection peer closed socket prematurely.");
+                }
+                adminConnDestroy(conn);
+                return;
+            }
+            conn->nRead += n;
+            if (conn->nRead < LEN_BYTES) return;
+
+            cdnsAssert(conn->packetSize == 0);
+            conn->packetSize = load32be(conn->len);
+            conn->nRead = 0;
+            conn->state = CONN_READ_N;
+            break;
+        case CONN_READ_N:
+            remainRead = (int)(conn->packetSize - conn->nRead);
+            if (remainRead > 0) {
+                n = read(conn->fd, conn->data + conn->nRead, remainRead);
+                if (n < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        return;
+                    }
+                    LOG_WARN(USER1, "tcp read: %s", strerror(errno));
+                    adminConnDestroy(conn);
+                    return;
+                } else if (n == 0) {   // the peer close the socket prematurely.
+                    LOG_WARN(USER1, "the connection peer closed socket prematurely.");
+                    adminConnDestroy(conn);
+                    return;
+                }
+            }
+            conn->nRead += n;
+            if (conn->nRead < conn->packetSize) return;
+
+            conn->data[conn->nRead] = 0;
+            dispatchCommand(conn);
+
+            // reset connection read state
+            conn->nRead = 0;
+            conn->packetSize = 0;
+            conn->state = CONN_READ_LEN;
+            break;
+        }
+    }
+}
+
+static void adminWriteHandler(struct aeEventLoop *el, int fd,
+                              void *privdata, int mask) {
+    UNUSED(mask);
+    ssize_t n;
+    adminReply *rep;
+    int remainWrite;
+    adminConn *c = (adminConn *) (privdata);
+    // move this connection to tail.
+    adminConnMoveTail(c);
+
+    while (c->replyList) {
+        rep = c->replyList;
+        switch(rep->state) {
+        case CONN_WRITE_LEN:
+            remainWrite = (int)(LEN_BYTES-rep->wcur);
+            n = write(fd, rep->len+rep->wcur, remainWrite);
+            if (n <= 0) {
+                if ((n < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+                LOG_WARN(USER1, "admin server can't write data to client: %s", strerror(errno));
+                adminConnDestroy(c);
+                return;
+            }
+            rep->wcur += n;
+            if (rep->wcur < LEN_BYTES) return;
+
+            rep->state = CONN_WRITE_N;
+            rep->wcur = 0;
+            break;
+        case CONN_WRITE_N:
+            n = write(fd, rep->data+rep->wcur, rep->wsize-rep->wcur);
+            if (n <= 0) {
+                if ((n < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+                LOG_WARN(USER1, "admin server can't write data to client: %s", strerror(errno));
+                adminConnDestroy(c);
+                return;
+            }
+            rep->wcur += n;
+            if (rep->wcur == rep->wsize) {
+                c->replyList = rep->next;
+                adminReplyDestroy(rep);
+            }
+            break;
+        }
+        n = write(fd, rep->data+rep->wcur, rep->wsize-rep->wcur);
+        if (n <= 0) {
+            if ((n < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+            LOG_WARN(USER1, "admin server can't write data to client: %s", strerror(errno));
+            adminConnDestroy(c);
+            return;
+        }
+        rep->wcur += n;
+        if (rep->wcur == rep->wsize) {
+            c->replyList = rep->next;
+            adminReplyDestroy(rep);
+        }
+    }
+    LOG_DEBUG(USER1, "admin delete write event");
+    aeDeleteFileEvent(el, fd, AE_WRITABLE);
+}
+
+#define MAX_ACCEPTS_PER_CALL 1000
+static void adminAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
+    ((void) privdata);
+    int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
+    char cip[IP_STR_LEN];
+    UNUSED(mask);
+
+    while(max--) {
+        cfd = anetTcpAccept(sk.errstr, fd, cip, sizeof(cip), &cport);
+        if (cfd == ANET_ERR) {
+            if (errno != EWOULDBLOCK)
+                LOG_WARN(USER1, "Accepting client connection: %s", sk.errstr);
+            return;
+        }
+        LOG_INFO(USER1, "Admin server accepted %s:%d", cip, cport);
+        anetNonBlock(NULL, cfd);
+        anetEnableTcpNoDelay(NULL, cfd);
+        if (sk.tcp_keepalive) {
+            anetKeepAlive(NULL, fd, sk.tcp_keepalive);
+        }
+        adminConn *c = adminConnCreate(cfd);
+
+        if (aeCreateFileEvent(el, cfd, AE_READABLE, adminReadHandler, c) == AE_ERR) {
+            LOG_ERROR(USER1, "admin server can't create file event for client. %s", strerror(errno));
+            return;
+        }
+    }
+}
+
+static void versionCommand(int argc, char *argv[], adminConn *c) {
+    ((void) argv);
+    adminReply *rep;
+    sds s;
+    if (argc > 1) {
+        s = sdsnewprintf("VERSION command needs 0 arguments but gives %d.", argc-1);
+        goto end;
+    }
+    s = sdsnewprintf("%s", CDNS_VERSION);
+end:
+    rep = adminReplyCreate(s);
+    adminConnAppendW(c, rep);
+}
+
+static sds genInfoString(char *section) {
+    time_t uptime = sk.unixtime - sk.starttime;
+    struct rusage self_ru;
+    sds s = sdsempty();
+    int allsections = 0, defsections = 0;
+    int sections = 0;
+    if (section == NULL) section = "default";
+    allsections = (strcasecmp(section, "all") == 0);
+    defsections = (strcasecmp(section, "default") == 0);
+
+    getrusage(RUSAGE_SELF, &self_ru);
+
+    // server
+    if (allsections || defsections || (strcasecmp(section, "server") == 0)) {
+        static bool call_uname = true;
+        static struct utsname name;
+        if (call_uname) {
+            uname(&name);
+            call_uname = false;
+        }
+
+        if (sections++) s = sdscat(s, "\r\n");
+        s = sdscatprintf(s,
+                         "# Server\r\n"
+                         "version:%s\r\n"
+                         "os:%s %s %s\r\n"
+                         "arch_bits:%d\r\n"
+                         "multiplexing_api:%s\r\n"
+                         "process_id:%ld\r\n"
+                         "port:%d\r\n"
+                         "uptime_in_seconds:%jd\r\n"
+                         "uptime_in_days:%jd\r\n"
+                         "config_file:%s\r\n",
+                         CDNS_VERSION,
+                         name.sysname, name.release, name.machine,
+                         sk.arch_bits,
+                         aeGetApiName(),
+                         (long)getpid(),
+                         sk.port,
+                         (intmax_t)uptime,
+                         (intmax_t)(uptime/(3600*24)),
+                         sk.configfile);
+    }
+    // memory
+    if (allsections || defsections || (strcasecmp(section, "memory") == 0)) {
+        char hmem[64];
+        char peak_hmem[64];
+        size_t zmalloc_used = zmalloc_used_memory();
+
+        /* Peak memory is updated from time to time by serverCron() so it
+         * may happen that the instantaneous value is slightly bigger than
+         * the peak value. This may confuse users, so we update the peak
+         * if found smaller than the current memory usage. */
+        if (zmalloc_used > sk.peak_memory)
+            sk.peak_memory = zmalloc_used;
+
+        bytesToHuman(hmem,zmalloc_used);
+        bytesToHuman(peak_hmem,sk.peak_memory);
+        if (sections++) s = sdscat(s, "\r\n");
+        s = sdscatprintf(s,
+                         "# Memory\r\n"
+                         "used_memory:%zu\r\n"
+                         "used_memory_human:%s\r\n"
+                         "used_memory_rss:%zu\r\n"
+                         "used_memory_peak:%zu\r\n"
+                         "used_memory_peak_human:%s\r\n"
+                         "mem_fragmentation_ratio:%.2f\r\n"
+                         "mem_allocator:%s\r\n",
+                         zmalloc_used,
+                         hmem,
+                         sk.resident_set_size,
+                         sk.peak_memory,
+                         peak_hmem,
+                         zmalloc_get_fragmentation_ratio(sk.resident_set_size),
+                         ZMALLOC_LIB);
+    }
+    // statistics
+    if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
+        if (sections++) s = sdscat(s, "\r\n");
+        s = sdscatprintf(s,
+                         "# Stats\r\n"
+                         "total_requests:%llu\r\n"
+                         "total_net_input_bytes:%llu\r\n"
+                         "total_net_output_bytes:%llu\r\n"
+                         "total_tcp_conn:%llu\r\n"
+                         "num_tcp_conn:%d\r\n"
+                         "rejected_tcp_conn:%d\r\n"
+                         "num_zones:%d\r\n",
+                         ATOM_GET(&(sk.nr_req)),
+                         ATOM_GET(&(sk.nr_input_bytes)),
+                         ATOM_GET(&(sk.nr_output_bytes)),
+                         ATOM_GET(&(sk.total_tcp_conn)),
+                         ATOM_GET(&(sk.num_tcp_conn)),
+                         ATOM_GET(&(sk.rejected_tcp_conn)),
+                         zoneDictGetNumZones(sk.zd));
+    }
+    // cpu usage
+    if (allsections || defsections || (strcasecmp(section, "cpu") == 0)) {
+        if (sections++) s = sdscat(s, "\r\n");
+        s = sdscatprintf(s,
+                         "# CPU\r\n"
+                         "used_cpu_sys:%.2f\r\n"
+                         "used_cpu_user:%.2f\r\n",
+                         (float) self_ru.ru_stime.tv_sec + (float) self_ru.ru_stime.tv_usec / 1000000,
+                         (float) self_ru.ru_utime.tv_sec + (float) self_ru.ru_utime.tv_usec / 1000000);
+    }
+    return s;
+}
+
+static void infoCommand(int argc, char *argv[], adminConn *c) {
+    ((void) argv);
+    char *section = argc == 2 ? argv[1] : "default";
+    adminReply *rep;
+    sds s = NULL;
+
+    if (argc > 2) {
+        s = sdsnewprintf(s, "INFO command needs 0 or 1 argument but gives %d", argc-1);
+        goto end;
+    }
+    s = genInfoString(section);
+
+end:
+    rep = adminReplyCreate(s);
+    adminConnAppendW(c, rep);
+    return;
+}
+
+static void debugCommand(int argc, char *argv[], adminConn *c) {
+    ((void) argc); ((void) argv);
+    adminReply *rep;
+    sds s = NULL;
+
+    if (argc != 2) {
+        s = sdsnewprintf("DEBUG command needs 1 arguments, but gives ", argc-1);
+        goto end;
+    }
+    if (strcasecmp(argv[1], "segfault") == 0) {
+        *((char *) -1) = 'x';
+    } else if (strcasecmp(argv[1], "oom") == 0) {
+        void *ptr = zmalloc(ULONG_MAX);
+        zfree(ptr);
+        s = sdsnew("OK");
+    } else {
+        s = sdsnewprintf("unknown debug subcommand %s.", argv[1]);
+    }
+
+end:
+    rep = adminReplyCreate(s);
+    adminConnAppendW(c, rep);
+    return;
+}
+
+static void configCommand(int argc, char *argv[], adminConn *c) {
+    adminReply *rep;
+    sds s = NULL;
+
+    if (argc < 2) {
+        s = sdsnewprintf("CONFIG command needs at least 1 argument, but got %d", argc-1);
+        goto end;
+    }
+    if (strcasecmp(argv[1], "GET") == 0) {
+        ;
+    } else if (strcasecmp(argv[1], "GETALL")) {
+        ;
+    } else if (strcasecmp(argv[1], "SET")) {
+        ;
+    }
+end:
+    rep = adminReplyCreate(s);
+    adminConnAppendW(c, rep);
+}
+
+static void zoneCommand(int argc, char *argv[], adminConn *c) {
+    adminReply *rep;
+    zone *z;
+    sds s = NULL;
+    char origin[MAX_DOMAIN_LEN+2];
+    char dotOrigin[MAX_DOMAIN_LEN+2];
+    char errstr[ERR_STR_LEN];
+
+    if (argc < 2) {
+        s = sdsnewprintf("ZONE command needs at least 1 arguments, but gives %d", argc-1);
+        goto end;
+    }
+    if (strcasecmp(argv[1], "GET") == 0) {
+        if (argc != 3) {
+            s = sdsnewprintf("ZONE GET needs 1 argument, but gives %d.", argc-2);
+            goto end;
+        }
+        strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
+        if (isAbsDotDomain(dotOrigin) == false) {
+            strcat(dotOrigin, ".");
+        }
+        dot2lenlabel(dotOrigin, origin);
+        z = zoneDictFetchVal(sk.zd, origin);
+        if (z == NULL) {
+            s = sdsnewprintf("zone %s not found", argv[2]);
+            goto end;
+        }
+        s = zoneToStr(z);
+        zoneDecRef(z);
+    } else if (strcasecmp(argv[1], "GETALL") == 0) {
+        if (argc != 2) {
+            s = sdsnewprintf("ZONE GETALL needs no arguments, but gives %d.", argc-2);
+            goto end;
+        }
+        s = zoneDictToStr(sk.zd);
+    } else if (strcasecmp(argv[1], "RELOAD") == 0) {
+        if (argc < 3) {
+            s = sdsnewprintf("ZONE RELOAD command needs at least 1 arguments but gives  %d.", argc-2);
+            goto end;
+        }
+        for (int i = 2; i < argc; ++i) {
+            strncpy(dotOrigin, argv[i], MAX_DOMAIN_LEN);
+            if (!isAbsDotDomain(dotOrigin)) strcat(dotOrigin, ".");
+            enqueueZoneReloadTaskRaw(dotOrigin, 0, -1);
+        }
+    } else if (strcasecmp(argv[1], "RELOADALL") == 0) {
+        if (argc != 2) {
+            s = sdsnewprintf("ZONE RELOADALL command needs 0 argument, but gives %d.", argc-2);
+            goto end;
+        }
+        // just reset last_all_reload_ts, then it will trigger reload all immediately.
+        sk.last_all_reload_ts -= sk.all_reload_interval;
+    } else if (strcasecmp(argv[1], "DELETE") == 0) {
+        if (argc != 3) {
+            s = sdsnewprintf("ZONE DELETE needs 1 argument, but gives %d.", argc-2);
+            goto end;
+        }
+        strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
+        if (isAbsDotDomain(dotOrigin) == false) {
+            strcat(dotOrigin, ".");
+        }
+        dot2lenlabel(dotOrigin, origin);
+        zoneDictDelete(sk.zd, origin);
+    } else if (strcasecmp(argv[1], "FLUSHALL") == 0) {
+        if (argc != 2) {
+            s = sdsnewprintf("ZONE FLUSHALL needs no arguments, but gives %d.", argc-2);
+            goto end;
+        }
+        // delete all zone
+        zoneDictEmpty(sk.zd);
+    } else if (strcasecmp(argv[1], "SET") == 0) {
+        if (argc != 4) {
+            s = sdsnewprintf("ZONE SET needs 2 argument, but gives %d.", argc-2);
+            goto end;
+        }
+        strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
+        if (isAbsDotDomain(dotOrigin) == false) {
+            strcat(dotOrigin, ".");
+        }
+        // set zone
+        if (loadZoneFromStr(errstr, argv[3], &z) == DS_ERR) {
+            s = sdsnewprintf("Error: %s", errstr);
+        } else {
+            if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
+                zoneDestroy(z);
+                s = sdsnewprintf("the origin of the zone loading from string is not %s.", dotOrigin);
+                goto end;
+            }
+            zoneDictReplace(sk.zd, z);
+            s = sdsnew("ok");
+        }
+    } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
+        int n = zoneDictGetNumZones(sk.zd);
+        s = sdsnewprintf("%d", n);
+    }
+end:
+    if (s == NULL) s = sdsnew("OK");
+    rep = adminReplyCreate(s);
+    adminConnAppendW(c, rep);
+}

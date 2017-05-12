@@ -159,7 +159,7 @@ check_lcore_params(void)
             return -1;
         }
         if ((socketid = rte_lcore_to_socket_id(lcore) != 0) &&
-            (sk.cfg.numa_on == false)) {
+            (sk.numa_on == false)) {
             LOG_WARNING(USER1, "lcore %hhu is on socket %d with numa off \n",
                    lcore, socketid);
         }
@@ -175,7 +175,7 @@ check_port_config(const unsigned nb_ports)
 
     for (i = 0; i < nb_lcore_params; ++i) {
         portid = lcore_params[i].port_id;
-        if ((sk.cfg.portmask & (1 << portid)) == 0) {
+        if ((sk.portmask & (1 << portid)) == 0) {
             LOG_ERR(USER1, "port %u is not enabled in port mask", portid);
             return -1;
         }
@@ -268,7 +268,7 @@ parse_config(const char *q_arg)
                 return -1;
         }
         if (nb_lcore_params >= MAX_LCORE_PARAMS) {
-            printf("exceeded max number of lcore params: %hu\n",
+            LOG_WARN(USER1, "exceeded max number of lcore params: %hu.",
                    nb_lcore_params);
             return -1;
         }
@@ -303,7 +303,7 @@ init_mem(unsigned nb_mbuf)
         if (rte_lcore_is_enabled(lcore_id) == 0)
             continue;
 
-        if (sk.cfg.numa_on)
+        if (sk.numa_on)
             socketid = rte_lcore_to_socket_id(lcore_id);
         else
             socketid = 0;
@@ -325,8 +325,7 @@ init_mem(unsigned nb_mbuf)
                          "Cannot init mbuf pool on socket %d\n",
                          socketid);
             else
-                printf("Allocated mbuf pool on socket %d\n",
-                       socketid);
+                LOG_INFO(USER1, "Allocated mbuf pool on socket %d.", socketid);
 
         }
     }
@@ -475,26 +474,30 @@ verify_cksum(struct rte_mbuf *m) {
 }
 
 static inline __attribute__((always_inline)) void
-__handle_packets(struct rte_mbuf *m, uint8_t portid,
+__handle_packet(struct rte_mbuf *m, uint8_t portid,
                  struct lcore_conf *qconf)
 {
     uint32_t ipv4_addr;
     uint16_t udp_port;
     void *l3_h = NULL;
     struct ether_hdr *eth_h;
-    struct ipv4_hdr *ipv4_h;
-    struct ipv6_hdr *ipv6_h;
+    struct ipv4_hdr *ipv4_h = NULL;
+    struct ipv6_hdr *ipv6_h = NULL;
     struct udp_hdr  *udp_h = NULL;
     uint32_t is_udp;
     uint32_t l3_ptypes;
+    bool is_ipv4;
     struct ether_addr eth_addr;
     char ipv6_addr[16];
     void *udp_data;
-    int udp_data_len;
+    size_t udp_data_len;
+    int n, total_h_len;
+    void *src_addr = NULL;
 
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
     is_udp = m->packet_type & RTE_PTYPE_L4_UDP;
     l3_ptypes = m->packet_type & RTE_PTYPE_L3_MASK;
+    is_ipv4 = (l3_ptypes == RTE_PTYPE_L3_IPV4);
 
     if (!is_udp || (l3_ptypes != RTE_PTYPE_L3_IPV4 && l3_ptypes != RTE_PTYPE_L3_IPV6))
     {
@@ -512,35 +515,56 @@ __handle_packets(struct rte_mbuf *m, uint8_t portid,
         /* Handle IPv4 headers.*/
         ipv4_h = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *,
                                          sizeof(struct ether_hdr));
-        udp_h = (struct udp_hdr *) ((char *) ipv4_h + sizeof(*ipv6_h));
-
-        ipv4_addr = ipv4_h->src_addr;
-        ipv4_h->src_addr = ipv4_h->dst_addr;
-        ipv4_h->dst_addr = ipv4_addr;
-
-        ipv4_h->hdr_checksum = 0;
-        m->ol_flags |= PKT_TX_IP_CKSUM;
+        udp_h = (struct udp_hdr *) (ipv4_h + 1);
         m->l3_len = 20;
-        m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
         l3_h = ipv4_h;
+        src_addr = &(ipv4_h->src_addr);
     } else if (l3_ptypes == RTE_PTYPE_L3_IPV6) {
         /* Handle IPv6 headers.*/
         ipv6_h = rte_pktmbuf_mtod_offset(m, struct ipv6_hdr *,
                                          sizeof(struct ether_hdr));
-        rte_memcpy(ipv6_addr, ipv6_h->dst_addr, 16);
-        rte_memcpy(ipv6_h->dst_addr, ipv6_h->src_addr, 16);
-        rte_memcpy(ipv6_h->src_addr, ipv6_addr, 16);
+        udp_h = (struct udp_hdr *) (ipv6_h + 1);
 
-        udp_h = (struct udp_hdr *) ((char *) ipv6_h + sizeof(*ipv6_h));
         m->l3_len = sizeof(*ipv6_h);
         m->ol_flags |= PKT_TX_IPV6;
-
         l3_h = ipv6_h;
+        src_addr = ipv6_h->src_addr;
+    }
+
+    m->l2_len = sizeof(struct ether_hdr);
+    m->l4_len = 8;
+
+    udp_data = (void *) (udp_h + 1);
+    udp_data_len = (size_t )(rte_be_to_cpu_16(udp_h->dgram_len) - 8);
+    void *data_end = rte_pktmbuf_mtod(m, char*) + rte_pktmbuf_data_len(m);
+    // move data end to the start of udp data.
+    rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
+
+    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m),
+                           src_addr, udp_h->src_port, is_ipv4);
+    if(n == ERR_CODE) {
+        rte_pktmbuf_free(m);
+        return;
     }
 
     ether_addr_copy(&eth_h->s_addr, &eth_addr);
     ether_addr_copy(&eth_h->d_addr, &eth_h->s_addr);
     ether_addr_copy(&eth_addr, &eth_h->d_addr);
+
+    if (l3_ptypes == RTE_PTYPE_L3_IPV4) {
+        ipv4_addr = ipv4_h->src_addr;
+        ipv4_h->src_addr = ipv4_h->dst_addr;
+        ipv4_h->dst_addr = ipv4_addr;
+
+        ipv4_h->hdr_checksum = 0;
+        m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
+        ipv4_h->total_length = rte_cpu_to_be_16(m->l3_len+m->l4_len+n);
+    } else {
+        rte_memcpy(ipv6_addr, ipv6_h->dst_addr, 16);
+        rte_memcpy(ipv6_h->dst_addr, ipv6_h->src_addr, 16);
+        rte_memcpy(ipv6_h->src_addr, ipv6_addr, 16);
+        ipv6_h->payload_len = rte_cpu_to_be_16(m->l3_len+m->l4_len+n);
+    }
 
     udp_port = udp_h->src_port;
     udp_h->src_port = udp_h->dst_port;
@@ -548,14 +572,15 @@ __handle_packets(struct rte_mbuf *m, uint8_t portid,
     /* set checksum parameters for HW offload */
     udp_h->dgram_cksum = 0;
     m->ol_flags |= PKT_TX_UDP_CKSUM;
-
-    m->l2_len = sizeof(struct ether_hdr);
-    m->l4_len = 8;
-
-    udp_data = (void *) (udp_h + 1);
-    udp_data_len = udp_h->dgram_len - 8;
-
+    udp_h->dgram_len = rte_cpu_to_be_16(m->l4_len + n);
     udp_h->dgram_cksum = get_psd_sum(l3_h, l3_ptypes, m->ol_flags);
+
+    // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
+    total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
+    if (n + total_h_len < 60) n = 60 - total_h_len;
+    rte_pktmbuf_append(m, (uint16_t)n);
+    LOG_INFO(USER1, "pkt_len: %d, udp len: %d, port: %d",
+             rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
     send_single_packet(qconf, m, portid);
 }
 
@@ -575,12 +600,12 @@ static void handle_packets(int nb_rx, struct rte_mbuf **pkts_burst,
     for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
         rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
                                            j + PREFETCH_OFFSET], void *));
-        __handle_packets(pkts_burst[j], portid, qconf);
+        __handle_packet(pkts_burst[j], portid, qconf);
     }
 
     /* Forward remaining prefetched packets */
     for (; j < nb_rx; j++)
-        __handle_packets(pkts_burst[j], portid, qconf);
+        __handle_packet(pkts_burst[j], portid, qconf);
 }
 
 int
@@ -605,14 +630,14 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         return 0;
     }
 
-    LOG_INFO(USER1, "entering main loop on lcore %u\n", lcore_id);
+    LOG_INFO(USER1, "entering main loop on lcore %u.", lcore_id);
 
     for (i = 0; i < qconf->n_rx_queue; i++) {
 
         portid = qconf->rx_queue_list[i].port_id;
         queueid = qconf->rx_queue_list[i].queue_id;
         LOG_INFO(USER1,
-                " -- lcoreid=%u portid=%hhu rxqueueid=%hhu\n",
+                " -- lcoreid=%u portid=%hhu rxqueueid=%hhu.",
                 lcore_id, portid, queueid);
     }
 
@@ -776,7 +801,7 @@ cb_parse_ptype(uint8_t port __rte_unused, uint16_t queue __rte_unused,
 static int
 prepare_ptype_parser(uint8_t portid, uint16_t queueid)
 {
-    if (sk.cfg.parse_ptype) {
+    if (sk.parse_ptype) {
         printf("Port %d: softly parse packet type info\n", portid);
         if (rte_eth_add_rx_callback(portid, queueid, cb_parse_ptype, NULL))
             return 1;
@@ -795,22 +820,22 @@ prepare_ptype_parser(uint8_t portid, uint16_t queueid)
 
 static void
 config_log() {
-    if (strcasecmp(sk.cfg.logLevelStr, "debug") == 0) {
+    if (strcasecmp(sk.logLevelStr, "debug") == 0) {
         rte_set_log_level(RTE_LOG_DEBUG);
-    } else if (strcasecmp(sk.cfg.logLevelStr, "info") == 0) {
+    } else if (strcasecmp(sk.logLevelStr, "info") == 0) {
         rte_set_log_level(RTE_LOG_INFO);
-    } else if (strcasecmp(sk.cfg.logLevelStr, "notice") == 0) {
+    } else if (strcasecmp(sk.logLevelStr, "notice") == 0) {
         rte_set_log_level(RTE_LOG_NOTICE);
-    } else if (strcasecmp(sk.cfg.logLevelStr, "warn") == 0) {
+    } else if (strcasecmp(sk.logLevelStr, "warn") == 0) {
         rte_set_log_level(RTE_LOG_WARNING);
-    } else if (strcasecmp(sk.cfg.logLevelStr, "error") == 0) {
+    } else if (strcasecmp(sk.logLevelStr, "error") == 0) {
         rte_set_log_level(RTE_LOG_ERR);
-    } else if (strcasecmp(sk.cfg.logLevelStr, "critical") == 0) {
+    } else if (strcasecmp(sk.logLevelStr, "critical") == 0) {
         rte_set_log_level(RTE_LOG_CRIT);
     } else {
-        rte_exit(EXIT_FAILURE, "unkown log level %s\n", sk.cfg.logLevelStr);
+        rte_exit(EXIT_FAILURE, "unkown log level %s\n", sk.logLevelStr);
     }
-    char *logfile = sk.cfg.logfile;
+    char *logfile = sk.logfile;
     if (logfile != NULL && logfile[0] != 0) {
         FILE *fp;
         if (strcasecmp(logfile, "stdout") == 0) {
@@ -818,9 +843,9 @@ config_log() {
         } else if (strcasecmp(logfile, "stderr") == 0) {
             fp = stderr;
         } else {
-            fp = fopen(sk.cfg.logfile, "wb");
+            fp = fopen(sk.logfile, "wb");
             if (fp == NULL)
-                rte_exit(EXIT_FAILURE, "can't open log file %s\n", sk.cfg.logfile);
+                rte_exit(EXIT_FAILURE, "can't open log file %s\n", sk.logfile);
         }
         if(rte_openlog_stream(fp) < 0)
             rte_exit(EXIT_FAILURE, "can't openstream\n");
@@ -857,9 +882,9 @@ initDpdkModule() {
 		char *argv[] = {
         "",
         "-c",
-        sk.cfg.coremask,
+        sk.coremask,
         "-n",
-        sk.cfg.mem_channels,
+        sk.mem_channels,
         "--proc-type=auto",
         ""
 		};
@@ -871,17 +896,17 @@ initDpdkModule() {
         rte_exit(EXIT_FAILURE, "Invalid EAL parameters\n");
 
     /* parse application arguments (after the EAL ones) */
-    if (sk.cfg.jumbo_on) {
+    if (sk.jumbo_on) {
         port_conf.rxmode.jumbo_frame = 1;
-        if ((sk.cfg.max_pkt_len < 64) ||
-            (sk.cfg.max_pkt_len > MAX_JUMBO_PKT_LEN)) {
+        if ((sk.max_pkt_len < 64) ||
+            (sk.max_pkt_len > MAX_JUMBO_PKT_LEN)) {
             printf("Invalid packet length\n");
             return -1;
         }
-        port_conf.rxmode.max_rx_pkt_len = sk.cfg.max_pkt_len;
+        port_conf.rxmode.max_rx_pkt_len = sk.max_pkt_len;
     }
 
-    parse_config(sk.cfg.rx_queue_config);
+    parse_config(sk.rx_queue_config);
 
     if (check_lcore_params() < 0)
         rte_exit(EXIT_FAILURE, "check_lcore_params failed\n");
@@ -901,7 +926,7 @@ initDpdkModule() {
     /* initialize all ports */
     for (portid = 0; portid < nb_ports; portid++) {
         /* skip ports that are not enabled */
-        if ((sk.cfg.portmask & (1 << portid)) == 0) {
+        if ((sk.portmask & (1 << portid)) == 0) {
             printf("\nSkipping disabled port %d\n", portid);
             continue;
         }
@@ -944,7 +969,7 @@ initDpdkModule() {
             if (rte_lcore_is_enabled(lcore_id) == 0)
                 continue;
 
-            if (sk.cfg.numa_on)
+            if (sk.numa_on)
                 socketid =
                     (uint8_t)rte_lcore_to_socket_id(lcore_id);
             else
@@ -985,7 +1010,7 @@ initDpdkModule() {
             portid = qconf->rx_queue_list[queue].port_id;
             queueid = qconf->rx_queue_list[queue].queue_id;
 
-            if (sk.cfg.numa_on)
+            if (sk.numa_on)
                 socketid =
                     (uint8_t)rte_lcore_to_socket_id(lcore_id);
             else
@@ -1009,7 +1034,7 @@ initDpdkModule() {
 
     /* start ports */
     for (portid = 0; portid < nb_ports; portid++) {
-        if ((sk.cfg.portmask & (1 << portid)) == 0) {
+        if ((sk.portmask & (1 << portid)) == 0) {
             continue;
         }
         /* Start device */
@@ -1025,7 +1050,7 @@ initDpdkModule() {
          * to itself through 2 cross-connected  ports of the
          * target machine.
          */
-        if (sk.cfg.promiscuous_on)
+        if (sk.promiscuous_on)
             rte_eth_promiscuous_enable(portid);
     }
 
@@ -1043,7 +1068,7 @@ initDpdkModule() {
         }
     }
 
-    check_all_ports_link_status((uint8_t)nb_ports, sk.cfg.portmask);
+    check_all_ports_link_status((uint8_t)nb_ports, sk.portmask);
 
     ret = 0;
     for (unsigned i = 0; i < RTE_MAX_LCORE; i++) {
@@ -1067,7 +1092,7 @@ int cleanupDpdkModule() {
 
     /* stop ports */
     for (portid = 0; portid < nb_ports; portid++) {
-        if ((sk.cfg.portmask & (1 << portid)) == 0)
+        if ((sk.portmask & (1 << portid)) == 0)
             continue;
         LOG_INFO(USER1, "Closing port %d...", portid);
         rte_eth_dev_stop(portid);
