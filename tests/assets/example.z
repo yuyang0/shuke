@@ -1,0 +1,61 @@
+$ORIGIN exAmPle.cOm.
+$TTL 86400
+@	SOA	dns1.example.com.	hostmaster.example.com. (
+		2001062501 ; serial
+		21600      ; refresh after 6 hours
+		3600       ; retry after 1 hour
+		604800     ; expire after 1 week
+		86400 )    ; minimum TTL of 1 day
+;
+;
+	NS	dns1.examPle.com.
+	NS	dNs2.exAmple.com.
+dns1	A	10.0.1.1
+	AAAA	aaaa:bbbb::1
+Dns2	A	10.0.1.2
+	AAAA	aaaa:bbbb::2
+;
+;
+
+test-cname	CNAME	www1.example.com.
+
+www1.example.com. A 10.0.0.33
+www1              A 10.0.0.34
+                  A 10.0.0.35
+
+www        CNAME   www.other.com.
+
+test-a              A   10.0.0.1
+teSt-A              A   10.0.0.2
+TEst-A.example.CoM.   A 10.0.0.3
+
+test-aaaa    AAAA	aaaa:bbbb::5
+TeST-aAAA    AAAA   aaaa:bbbb::6
+TEST-AAaa.example.com.  AAAA  aaaa:bbbb::7
+
+test-mx 	MX	10	maIl.examplE.com.
+	       MX	20	mail2.example.com.
+
+           A      123.5.6.7
+
+test-txt              IN      TXT    " 11 " " 22 "
+tESt-Txt              IN      TXT    " 33 " " 44 "
+TESt-TXT.exampLE.COM.  IN      TXT    " 55 " " 66 "
+
+_sip._tcp.example.com.   86400 IN    SRV 10       60     5060 biGbox.example.com.
+_sip._tcp.example.com.   86400 IN    SRV 10       20     5060 smallbox1.example.com.
+_sIp._tcP.exaMple.com.   86400 IN    SRV 10       20     5060 smallbox2.example.com.
+_sip._tcp.example.com.   86400 IN    SRV 20       0      5060 backupbox.example.com.
+
+bigbox.example.com.  A 197.2.3.4
+Bigbox               A 197.2.3.5
+
+mail	A	10.0.1.5
+	AAAA	aaaa:bbbb::5
+mail2	A	10.0.1.6
+	AAAA	aaaa:bbbb::6
+
+test-sub.sub     IN A 10.0.0.1
+                 IN A 10.0.0.2
+;
+;

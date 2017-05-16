@@ -18,5 +18,6 @@
 
 #define ERR_CODE -1
 #define OK_CODE   0
+#define EOF_CODE  1
 
 #endif /* _DEFINES_H_ */

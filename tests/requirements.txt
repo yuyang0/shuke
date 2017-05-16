@@ -1,0 +1,3 @@
+redis
+pytest
+dnspython

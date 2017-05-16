@@ -12,13 +12,12 @@
 #include "dict.h"
 #include "protocol.h"
 #include "log.h"
-#include "shuke.h"
-
+#include "utils.h"
 #include "ds.h"
 
 #define RRSET_MAX_PREALLOC (1024*1024)
 
-dnsDictValue *dnsDictValueCreate() {
+dnsDictValue *dnsDictValueCreate(void) {
     dnsDictValue *dv = zcalloc(sizeof(*dv));
     return dv;
 }
@@ -241,7 +240,7 @@ int dumpCompressedName(struct context *ctx, char *name, compressInfo *cps, size_
 /*!
  * dump the RRSet object to sds
  *
- * @param s:  sds object, used to store the dumped bytes
+ * @param ctx:  context object, used to store the dumped bytes
  * @param rs:  the RRSet object needs to be dumped
  * @param nameOffset: the offset of the name in sds, used to compress the name
  * @param cps: the compress information of s
@@ -509,7 +508,7 @@ zone *zoneCreate(char *ss) {
     zn->dotOrigin = zstrdup(dotOrigin);
     zn->d = dictCreate(&dnsDictType, NULL);
     rte_atomic32_set(&(zn->refcnt), 1);
-    zn->ts = time(NULL);
+    rte_atomic64_set(&(zn->ts), (int64_t )time(NULL));
     return zn;
 }
 
@@ -702,7 +701,7 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
  * element with such key and dictReplace() just performed a value update
  * operation. */
 int zoneDictReplace(zoneDict *zd, zone *z) {
-    z->ts = time(NULL);
+    rte_atomic64_set(&(z->ts), (int64_t)time(NULL));
     zoneUpdateRRSetOffsets(z);
 
     zoneDictLock(zd);

@@ -11,17 +11,47 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
 
 #include "defines.h"
+#include "version.h"
+#include "ae.h"
+#include "anet.h"
+#include "zmalloc.h"
+#include "endianconv.h"
 #include "list.h"
 #include "log.h"
 #include "ds.h"
-#include "ae.h"
 
-#define IP_STR_LEN  INET6_ADDRSTRLEN
+#define TIME_INTERVAL 1000
+
+#define TASK_RELOAD_ZONE     1
+#define TASK_RELOAD_ALL      2
+
+#define CONN_READ_N     0     /**< reading in a fixed number of bytes */
+#define CONN_READ_LEN   1     /**< reading length bytes */
+#define CONN_SWALLOW    2     /**< swallowing unnecessary bytes w/o storing */
+#define CONN_WRITE_N    3     /**< writing out fixed number of bytes */
+#define CONN_WRITE_LEN  4     /**< writing out the length bytes */
+#define CONN_CLOSING    5     /**< closing this connection */
+#define CONN_CLOSED     6     /**< connection is closed */
+#define CONN_MAX_STATE  7     /**< Max state value (used for assertion) */
+
+#define TQLock() rte_spinlock_lock(&(sk.tq_lock))
+#define TQUnlock() rte_spinlock_unlock(&(sk.tq_lock))
+#define TQInitLock() rte_spinlock_init(&(sk.tq_lock))
+
+enum taskStates {
+    TASK_PENDING = 0,
+    TASK_RUNNING = 1,
+    TASK_ERROR = 2,
+    TASK_FINISHED = 3,
+};
+
+typedef struct {
+    int type;
+} object;
 
 typedef struct {
     int type;
@@ -38,25 +68,7 @@ typedef struct {
     zone *new_zn;
 }zoneReloadTask;
 
-struct context {
-    char cliaddr[IP_STR_LEN];    // client address of udp peer.
-    socklen_t  clilen;
-
-    // information parsed from dns query packet.
-    dnsHeader_t hdr;
-    // information of question.
-    // name just points to the buffer in tcpConn or fdInfo, so never free this pointer
-    char *name;
-    size_t nameLen;
-    uint16_t qType;
-    uint16_t qClass;
-
-    char *resp;
-    size_t totallen;
-    int cur;
-};
-
-struct stat {
+struct sk_stat {
     unsigned long long nr_req;                   // number of processed requests
     unsigned long long nr_input_bytes;
     unsigned long long nr_output_bytes;
@@ -112,15 +124,15 @@ struct shuke {
     bool minimize_resp;
     // end config
 
-    struct stat stat;
+    struct sk_stat stat;
 
     volatile bool force_quit;
     zoneDict *zd;
     FILE *query_log_fp;
 
-    int (*syncGetAllZone)();
-    int (*initAsyncContext)();
-    int (*checkAsyncContext)();
+    int (*syncGetAllZone)(void);
+    int (*initAsyncContext)(void);
+    int (*checkAsyncContext)(void);
     /*
      * these two functions should be called only in mainThreadCron.
      *
@@ -128,7 +140,7 @@ struct shuke {
      * if all zone reloading is needed, just set `last_all_reload_ts` to `now-all_reload_interval`
      * then mainThreadCron will do reloading automatically.
      */
-    int (*asyncReloadAllZone)();
+    int (*asyncReloadAllZone)(void);
     int (*asyncReloadZone)(zoneReloadTask *t);
 
     // admin server
@@ -143,9 +155,9 @@ struct shuke {
 
     aeEventLoop *el;      // event loop for main thread.
 
-    // struct spinlock tq_lock;
-    // queue *tq;            // task queue, used for async tasks
-    // dict *tq_origins;     // the origins which is reloading.
+    rte_spinlock_t tq_lock;
+    struct rte_ring *tq;            // task queue, used for async tasks
+    dict *tq_origins;     // the origins which is reloading.
 
     // redis context
     // it will be NULL when cdns is disconnected with redis,
@@ -162,24 +174,38 @@ struct shuke {
     long long zone_load_time;
 
 };
-
+/*----------------------------------------------
+ *     Extern declarations
+ *---------------------------------------------*/
 extern struct shuke sk;
+extern dictType commandTableDictType;
+extern dictType zoneFileDictType;
 
 int snpack(char *buf, int offset, size_t size, char const *fmt, ...);
 /*----------------------------------------------
+ *     zoneReloadTask
+ *---------------------------------------------*/
+zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, uint32_t sn, long ts);
+void zoneReloadTaskReset(zoneReloadTask *t);
+void zoneReloadTaskDestroy(zoneReloadTask *t);
+
+int enqueueZoneReloadTaskRaw(char *dotOrigin, uint32_t sn, long ts);
+int enqueueZoneReloadTask(zoneReloadTask *t);
+void *dequeueTask(void);
+/*----------------------------------------------
  *     admin server
  *---------------------------------------------*/
-int initAdminServer();
-void releaseAdminServer();
+int initAdminServer(void);
+void releaseAdminServer(void);
 
 /*----------------------------------------------
  *     mongo
  *---------------------------------------------*/
-int initMongo();
-int checkMongo();
-int mongoGetAllZone();
+int initMongo(void);
+int checkMongo(void);
+int mongoGetAllZone(void);
 int mongoAsyncReloadZone(zoneReloadTask *t);
-int mongoAsyncReloadAllZone();
+int mongoAsyncReloadAllZone(void);
 
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
                        char *src_addr, uint16_t src_port, bool is_ipv4);

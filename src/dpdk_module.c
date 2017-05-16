@@ -489,7 +489,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     bool is_ipv4;
     struct ether_addr eth_addr;
     char ipv6_addr[16];
-    void *udp_data;
+    char *udp_data;
     size_t udp_data_len;
     int n, total_h_len;
     void *src_addr = NULL;
@@ -501,14 +501,12 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
     if (!is_udp || (l3_ptypes != RTE_PTYPE_L3_IPV4 && l3_ptypes != RTE_PTYPE_L3_IPV6))
     {
-        /* Free the mbuf that contains non-IPV4/IPV6 packet */
-        rte_pktmbuf_free(m);
-        return;
+        LOG_DEBUG(USER1, "not a ip or udp packet.");
+        goto invalid;
     }
 
     if (!verify_cksum(m)) {
-        rte_pktmbuf_free(m);
-        return;
+        goto invalid;
     }
 
     if (l3_ptypes == RTE_PTYPE_L3_IPV4) {
@@ -531,21 +529,23 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         src_addr = ipv6_h->src_addr;
     }
 
+    // check the udp port
+    if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
+        goto invalid;
+    }
+
     m->l2_len = sizeof(struct ether_hdr);
     m->l4_len = 8;
 
     udp_data = (void *) (udp_h + 1);
     udp_data_len = (size_t )(rte_be_to_cpu_16(udp_h->dgram_len) - 8);
-    void *data_end = rte_pktmbuf_mtod(m, char*) + rte_pktmbuf_data_len(m);
+    char *data_end = rte_pktmbuf_mtod(m, char*) + rte_pktmbuf_data_len(m);
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
     n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m),
                            src_addr, udp_h->src_port, is_ipv4);
-    if(n == ERR_CODE) {
-        rte_pktmbuf_free(m);
-        return;
-    }
+    if(n == ERR_CODE) goto invalid;
 
     ether_addr_copy(&eth_h->s_addr, &eth_addr);
     ether_addr_copy(&eth_h->d_addr, &eth_h->s_addr);
@@ -579,9 +579,14 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
     if (n + total_h_len < 60) n = 60 - total_h_len;
     rte_pktmbuf_append(m, (uint16_t)n);
-    LOG_INFO(USER1, "pkt_len: %d, udp len: %d, port: %d",
-             rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
+    LOG_DEBUG(USER1, "pkt_len: %u, udp len: %zu, port: %d",
+              rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
     send_single_packet(qconf, m, portid);
+    return;
+
+invalid:
+    LOG_DEBUG(USER1, "drop packet.");
+    rte_pktmbuf_free(m);
 }
 
 static void handle_packets(int nb_rx, struct rte_mbuf **pkts_burst,
@@ -743,14 +748,14 @@ parse_ptype_func(struct rte_mbuf *m)
     struct ether_hdr *eth_h;
     uint32_t packet_type = RTE_PTYPE_UNKNOWN;
     uint16_t ether_type;
-    void *l3;
+    char *l3;
     int hdr_len;
     struct ipv4_hdr *ipv4_h;
     struct ipv6_hdr *ipv6_h;
 
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
     ether_type = eth_h->ether_type;
-    l3 = (uint8_t *)eth_h + sizeof(struct ether_hdr);
+    l3 = (char *)eth_h + sizeof(struct ether_hdr);
     l2_len = sizeof(*eth_h);
 
     if (ether_type == rte_cpu_to_be_16(ETHER_TYPE_VLAN)) {
@@ -932,14 +937,14 @@ initDpdkModule() {
         }
 
         /* init port */
-        printf("Initializing port %d ... ", portid );
+        printf("Initializing port %d ... \n", portid );
         fflush(stdout);
 
         nb_rx_queue = get_port_n_rx_queues(portid);
         n_tx_queue = nb_lcores;
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
-        printf("Creating queues: nb_rxq=%d nb_txq=%u... ",
+        printf("Creating queues: nb_rxq=%d nb_txq=%u... \n",
                nb_rx_queue, (unsigned)n_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
                                     (uint16_t)n_tx_queue, &port_conf);

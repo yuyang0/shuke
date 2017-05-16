@@ -4,6 +4,7 @@
 
 #include "shuke.h"
 
+#include <assert.h>
 #include <limits.h>
 #include <sys/resource.h>
 #include <sys/utsname.h>
@@ -55,11 +56,11 @@ typedef struct {
 }adminCommand;
 
 static adminCommand adminCommandTable[] = {
-    {"version", versionCommand},
-    {"debug", debugCommand},
-    {"info", infoCommand},
-    {"zone", zoneCommand},
-    {"config", configCommand}
+    {(char *)"version", versionCommand},
+    {(char *)"debug", debugCommand},
+    {(char *)"info", infoCommand},
+    {(char *)"zone", zoneCommand},
+    {(char *)"config", configCommand}
 };
 
 static inline void adminConnMoveTail(adminConn *c) {
@@ -68,7 +69,7 @@ static inline void adminConnMoveTail(adminConn *c) {
     list_add_tail(&(c->node), &(sk.head));
 }
 
-int initAdminServer() {
+int initAdminServer(void) {
     char *host = sk.admin_host;
     int port = sk.admin_port;
 
@@ -83,25 +84,25 @@ int initAdminServer() {
     INIT_LIST_HEAD(&(sk.head));
 
     if (strchr(host, ':') == NULL) {
-        sk.fd = anetTcpServer(sk.errstr, port, host, sk.tcp_backlog);
+        sk.fd = anetTcpServer(sk.errstr, port, host, sk.tcp_backlog, 0);
     } else {
-        sk.fd = anetTcp6Server(sk.errstr, port, host, sk.tcp_backlog);
+        sk.fd = anetTcp6Server(sk.errstr, port, host, sk.tcp_backlog, 0);
     }
     if (sk.fd == ANET_ERR) {
-        return C_ERR;
+        return ERR_CODE;
     }
     anetNonBlock(NULL,sk.fd);
     if (aeCreateFileEvent(sk.el, sk.fd, AE_READABLE, adminAcceptHandler, NULL) == AE_ERR) {
         LOG_ERROR(USER1, "Can't create file event for listen socket %d", sk.fd);
-        return C_ERR;
+        return ERR_CODE;
     }
     if (aeCreateTimeEvent(sk.el, TIME_INTERVAL, adminCron, NULL, NULL) == AE_ERR) {
-        return C_ERR;
+        return ERR_CODE;
     }
-    return C_OK;
+    return OK_CODE;
 }
 
-void releaseAdminServer() {
+void releaseAdminServer(void) {
     dictRelease(sk.commands);
     struct list_head *pos, *temp;
     list_for_each_safe(pos, temp, &(sk.head)) {
@@ -110,7 +111,7 @@ void releaseAdminServer() {
     }
 }
 
-adminReply *adminReplyCreate(sds data) {
+static adminReply *adminReplyCreate(sds data) {
     size_t dataLen = sdslen(data);
 
     adminReply *rep = zcalloc(sizeof(*rep));
@@ -121,12 +122,12 @@ adminReply *adminReplyCreate(sds data) {
     return rep;
 }
 
-void adminReplyDestroy(adminReply *rep) {
+static void adminReplyDestroy(adminReply *rep) {
     sdsfree(rep->data);
     zfree(rep);
 }
 
-adminConn* adminConnCreate(int fd) {
+static adminConn* adminConnCreate(int fd) {
     adminConn *c = zcalloc(sizeof(*c));
     c->fd = fd;
     c->state = CONN_READ_LEN;
@@ -137,7 +138,7 @@ adminConn* adminConnCreate(int fd) {
     return c;
 }
 
-void adminConnAppendW(adminConn *c, adminReply *rep) {
+static void adminConnAppendW(adminConn *c, adminReply *rep) {
     if (c->replyList == NULL) {
         LOG_DEBUG(USER1, "admin add write event");
         aeCreateFileEvent(c->el, c->fd, AE_WRITABLE, adminWriteHandler, c);
@@ -213,7 +214,7 @@ static void adminReadHandler(struct aeEventLoop *el, int fd, void *privdata, int
     ssize_t n = 0;
     int remainRead;
     adminConn *conn = (adminConn *) (privdata);
-    cdnsAssert(conn->fd == fd);
+    assert(conn->fd == fd);
     // move this connection to tail.
     adminConnMoveTail(conn);
 
@@ -240,7 +241,7 @@ static void adminReadHandler(struct aeEventLoop *el, int fd, void *privdata, int
             conn->nRead += n;
             if (conn->nRead < LEN_BYTES) return;
 
-            cdnsAssert(conn->packetSize == 0);
+            assert(conn->packetSize == 0);
             conn->packetSize = load32be(conn->len);
             conn->nRead = 0;
             conn->state = CONN_READ_N;
@@ -374,7 +375,7 @@ static void versionCommand(int argc, char *argv[], adminConn *c) {
         s = sdsnewprintf("VERSION command needs 0 arguments but gives %d.", argc-1);
         goto end;
     }
-    s = sdsnewprintf("%s", CDNS_VERSION);
+    s = sdsnewprintf("%s", SHUKE_VERSION);
 end:
     rep = adminReplyCreate(s);
     adminConnAppendW(c, rep);
@@ -413,7 +414,7 @@ static sds genInfoString(char *section) {
                          "uptime_in_seconds:%jd\r\n"
                          "uptime_in_days:%jd\r\n"
                          "config_file:%s\r\n",
-                         CDNS_VERSION,
+                         SHUKE_VERSION,
                          name.sysname, name.release, name.machine,
                          sk.arch_bits,
                          aeGetApiName(),
@@ -423,59 +424,62 @@ static sds genInfoString(char *section) {
                          (intmax_t)(uptime/(3600*24)),
                          sk.configfile);
     }
+
     // memory
-    if (allsections || defsections || (strcasecmp(section, "memory") == 0)) {
-        char hmem[64];
-        char peak_hmem[64];
-        size_t zmalloc_used = zmalloc_used_memory();
+    // if (allsections || defsections || (strcasecmp(section, "memory") == 0)) {
+    //     char hmem[64];
+    //     char peak_hmem[64];
+    //     size_t zmalloc_used = zmalloc_used_memory();
 
-        /* Peak memory is updated from time to time by serverCron() so it
-         * may happen that the instantaneous value is slightly bigger than
-         * the peak value. This may confuse users, so we update the peak
-         * if found smaller than the current memory usage. */
-        if (zmalloc_used > sk.peak_memory)
-            sk.peak_memory = zmalloc_used;
+    //     /* Peak memory is updated from time to time by serverCron() so it
+    //      * may happen that the instantaneous value is slightly bigger than
+    //      * the peak value. This may confuse users, so we update the peak
+    //      * if found smaller than the current memory usage. */
+    //     if (zmalloc_used > sk.peak_memory)
+    //         sk.peak_memory = zmalloc_used;
 
-        bytesToHuman(hmem,zmalloc_used);
-        bytesToHuman(peak_hmem,sk.peak_memory);
-        if (sections++) s = sdscat(s, "\r\n");
-        s = sdscatprintf(s,
-                         "# Memory\r\n"
-                         "used_memory:%zu\r\n"
-                         "used_memory_human:%s\r\n"
-                         "used_memory_rss:%zu\r\n"
-                         "used_memory_peak:%zu\r\n"
-                         "used_memory_peak_human:%s\r\n"
-                         "mem_fragmentation_ratio:%.2f\r\n"
-                         "mem_allocator:%s\r\n",
-                         zmalloc_used,
-                         hmem,
-                         sk.resident_set_size,
-                         sk.peak_memory,
-                         peak_hmem,
-                         zmalloc_get_fragmentation_ratio(sk.resident_set_size),
-                         ZMALLOC_LIB);
-    }
+    //     bytesToHuman(hmem,zmalloc_used);
+    //     bytesToHuman(peak_hmem,sk.peak_memory);
+    //     if (sections++) s = sdscat(s, "\r\n");
+    //     s = sdscatprintf(s,
+    //                      "# Memory\r\n"
+    //                      "used_memory:%zu\r\n"
+    //                      "used_memory_human:%s\r\n"
+    //                      "used_memory_rss:%zu\r\n"
+    //                      "used_memory_peak:%zu\r\n"
+    //                      "used_memory_peak_human:%s\r\n"
+    //                      "mem_fragmentation_ratio:%.2f\r\n"
+    //                      "mem_allocator:%s\r\n",
+    //                      zmalloc_used,
+    //                      hmem,
+    //                      sk.resident_set_size,
+    //                      sk.peak_memory,
+    //                      peak_hmem,
+    //                      zmalloc_get_fragmentation_ratio(sk.resident_set_size),
+    //                      ZMALLOC_LIB);
+    // }
+
     // statistics
-    if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
-        if (sections++) s = sdscat(s, "\r\n");
-        s = sdscatprintf(s,
-                         "# Stats\r\n"
-                         "total_requests:%llu\r\n"
-                         "total_net_input_bytes:%llu\r\n"
-                         "total_net_output_bytes:%llu\r\n"
-                         "total_tcp_conn:%llu\r\n"
-                         "num_tcp_conn:%d\r\n"
-                         "rejected_tcp_conn:%d\r\n"
-                         "num_zones:%d\r\n",
-                         ATOM_GET(&(sk.nr_req)),
-                         ATOM_GET(&(sk.nr_input_bytes)),
-                         ATOM_GET(&(sk.nr_output_bytes)),
-                         ATOM_GET(&(sk.total_tcp_conn)),
-                         ATOM_GET(&(sk.num_tcp_conn)),
-                         ATOM_GET(&(sk.rejected_tcp_conn)),
-                         zoneDictGetNumZones(sk.zd));
-    }
+    // if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
+    //     if (sections++) s = sdscat(s, "\r\n");
+    //     s = sdscatprintf(s,
+    //                      "# Stats\r\n"
+    //                      "total_requests:%llu\r\n"
+    //                      "total_net_input_bytes:%llu\r\n"
+    //                      "total_net_output_bytes:%llu\r\n"
+    //                      "total_tcp_conn:%llu\r\n"
+    //                      "num_tcp_conn:%d\r\n"
+    //                      "rejected_tcp_conn:%d\r\n"
+    //                      "num_zones:%lu\r\n",
+    //                      ATOM_GET(&(sk.nr_req)),
+    //                      ATOM_GET(&(sk.nr_input_bytes)),
+    //                      ATOM_GET(&(sk.nr_output_bytes)),
+    //                      ATOM_GET(&(sk.total_tcp_conn)),
+    //                      ATOM_GET(&(sk.num_tcp_conn)),
+    //                      ATOM_GET(&(sk.rejected_tcp_conn)),
+    //                      zoneDictGetNumZones(sk.zd));
+    // }
+
     // cpu usage
     if (allsections || defsections || (strcasecmp(section, "cpu") == 0)) {
         if (sections++) s = sdscat(s, "\r\n");
@@ -576,10 +580,34 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         dot2lenlabel(dotOrigin, origin);
         z = zoneDictFetchVal(sk.zd, origin);
         if (z == NULL) {
-            s = sdsnewprintf("zone %s not found", argv[2]);
+            s = sdsnewprintf("zone %s not found", dotOrigin);
             goto end;
         }
         s = zoneToStr(z);
+        zoneDecRef(z);
+    } else if (strcasecmp(argv[1], "GET_RRSET") == 0) {
+        if (argc != 4) {
+            s = sdsnewprintf("ZONE GET_RRSET needs 2 argument, but gives %d.", argc-2);
+            goto end;
+        }
+        int type = strToDNSType(argv[3]);
+        if (type < 0) {
+            s = sdsnewprintf("unsupport dns type %s.", argv[3]);
+            goto end;
+        }
+        strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
+        if (isAbsDotDomain(dotOrigin) == false) {
+            strcat(dotOrigin, ".");
+        }
+        dot2lenlabel(dotOrigin, origin);
+        z = zoneDictGetZone(sk.zd, origin);
+        if (z == NULL) {
+            s = sdsnewprintf("zone %s not found.", argv[2]);
+            goto end;
+        }
+        RRSet *rs = zoneFetchTypeVal(z, origin, (uint16_t)type);
+        if (rs == NULL) s = sdsnewprintf("RRSet <%s %s> not found.", argv[2], argv[3]);
+        else s = RRSetToStr(rs);
         zoneDecRef(z);
     } else if (strcasecmp(argv[1], "GETALL") == 0) {
         if (argc != 2) {
@@ -644,8 +672,8 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             s = sdsnew("ok");
         }
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
-        int n = zoneDictGetNumZones(sk.zd);
-        s = sdsnewprintf("%d", n);
+        size_t n = zoneDictGetNumZones(sk.zd);
+        s = sdsnewprintf("%lu", n);
     }
 end:
     if (s == NULL) s = sdsnew("OK");

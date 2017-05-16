@@ -5,26 +5,26 @@
 #include "shuke.h"
 
 int initMongo() {
-    return C_OK;
+    return OK_CODE;
 }
 
 int checkMongo() {
-    return C_OK;
+    return OK_CODE;
 }
 
 // synchronous get all zone.
 int mongoGetAllZone() {
-    LOG_INFO("Synchronous get all zones");
+    LOG_INFO(USER1, "Synchronous get all zones");
     return 0;
 }
 
 int mongoAsyncReloadAllZone() {
-    LOG_INFO("Asynchronous get all zones");
-    return C_OK;
+    LOG_INFO(USER1, "Asynchronous get all zones");
+    return OK_CODE;
 }
 
 int mongoAsyncReloadZone(zoneReloadTask *t) {
     ((void) t);
-    LOG_INFO("Asynchronous get all zones");
-    return C_OK;
+    LOG_INFO(USER1, "Asynchronous get all zones");
+    return OK_CODE;
 }

@@ -2,9 +2,10 @@
 // Created by yangyu on 17-2-16.
 //
 
-#ifndef CDNS_DS_H
-#define CDNS_DS_H
+#ifndef __DS_H
+#define __DS_H
 #include <stdint.h>
+#include <netinet/in.h>
 
 #include <rte_spinlock.h>
 #include <rte_atomic.h>
@@ -12,6 +13,8 @@
 #include "sds.h"
 #include "dict.h"
 #include "defines.h"
+#include "str.h"
+#include "protocol.h"
 
 #define DS_OK     0
 #define DS_ERR   -1
@@ -20,6 +23,25 @@
 #define PARSER_OK    0
 #define PARSER_ERR  -1
 
+#define IP_STR_LEN  INET6_ADDRSTRLEN
+
+struct context {
+    char cliaddr[IP_STR_LEN];    // client address of udp peer.
+    socklen_t  clilen;
+
+    // information parsed from dns query packet.
+    dnsHeader_t hdr;
+    // information of question.
+    // name just points to the buffer in tcpConn or fdInfo, so never free this pointer
+    char *name;
+    size_t nameLen;
+    uint16_t qType;
+    uint16_t qClass;
+
+    char *resp;
+    size_t totallen;
+    int cur;
+};
 
 typedef struct {
     int err;
@@ -118,7 +140,7 @@ typedef struct _zone {
     RRSet *ns;
 
     // timestamp of last reload of this zone, need sync
-    long ts;
+    rte_atomic64_t ts;
     // some information of SOA record.
     uint32_t sn;
     int32_t refresh;
@@ -148,15 +170,17 @@ RRSet *RRSetCreate(uint16_t type);
 RRSet *RRSetDup(RRSet *rs);
 RRSet* RRSetCat(RRSet *rs, char *buf, size_t len);
 RRSet *RRSetRemoveFreeSpace(RRSet *rs);
-int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset, compressInfo *cps, size_t *cps_sz,
-                      size_t cps_sz_max, arInfo *ari, size_t *ar_sz, size_t ar_sz_max);
+
+int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
+                      compressInfo *cps, size_t *cps_sz, size_t cps_sz_max,
+                      arInfo *ari, size_t *ar_sz, size_t ar_sz_max);
 sds RRSetToStr(RRSet *rs);
 
 void RRSetDestroy(RRSet *rs);
 
 RRSet *dnsDictValueGet(dnsDictValue *dv, int type);
 void dnsDictValueSet(dnsDictValue *dv, RRSet *rs);
-dnsDictValue *dnsDictValueCreate();
+dnsDictValue *dnsDictValueCreate(void);
 void dnsDictValueDestroy(dnsDictValue *val);
 
 zone *zoneCreate(char *origin);

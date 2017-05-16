@@ -17,8 +17,118 @@
 #include "shuke.h"
 #include <getopt.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 
 struct shuke sk;
+
+/*!
+ * create a zone reload task
+ *
+ * @param dotOrigin : the origin in <label dot> format
+ * @param sn : the serial number of the zone(the sn field in SOA record)
+ * @param ts : the timestamp of last update of this zone,
+ *             -1 means this function needs to check if this zone is in memory cache.
+ * @return obj if everything is ok otherwise return NULL
+ */
+zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, uint32_t sn, long ts) {
+    zoneReloadTask *t = zcalloc(sizeof(*t));
+    t->type = TASK_RELOAD_ZONE;
+    t->dotOrigin = zstrdup(dotOrigin);
+    if (ts < 0) {
+        char origin[MAX_DOMAIN_LEN+2];
+        dot2lenlabel(dotOrigin, origin);
+        zone *z = zoneDictFetchVal(sk.zd, origin);
+        if (z != NULL) {
+            sn = z->sn;
+            ts = rte_atomic64_read(&(z->ts));
+            zoneDecRef(z);
+        }
+    }
+    t->sn = sn;
+    t->ts = ts;
+    t->status = TASK_PENDING;
+    return t;
+}
+
+void *dequeueTask(void) {
+    void *t;
+    if (rte_ring_sc_dequeue(sk.tq, &t) != 0) t = NULL;
+    return t;
+}
+
+/*!
+ * just enqueue the zoneReloadTasl object,
+ * pls note: when call this function, the dotOrigin must already in server.tq_origins,
+ * so this function is mainly used to reput the task to queue when the task encounter an error and need retry.
+ * @param t
+ * @return
+ */
+int enqueueZoneReloadTask(zoneReloadTask *t) {
+    int errcode = OK_CODE;
+    if (rte_ring_mp_enqueue(sk.tq, t) != 0) errcode = ERR_CODE;
+    return errcode;
+}
+
+int enqueueZoneReloadTaskRaw(char *dotOrigin, uint32_t sn, long ts) {
+    int errcode = OK_CODE;
+    TQLock();
+    if (dictFind(sk.tq_origins, dotOrigin) != NULL) goto end;
+    zoneReloadTask *t = zoneReloadTaskCreate(dotOrigin, sn, ts);
+    assert(dictAdd(sk.tq_origins, t->dotOrigin, NULL) == DICT_OK);
+    if (rte_ring_mp_enqueue(sk.tq, t) != 0) {
+        zoneReloadTaskDestroy(t);
+        errcode = ERR_CODE;
+        goto end;
+    }
+end:
+    TQUnlock();
+    return errcode;
+}
+
+void zoneReloadTaskReset(zoneReloadTask *t) {
+    t->status = TASK_PENDING;
+    t->nr_names = 0;
+    if (t->new_zn) zoneDestroy(t->new_zn);
+    t->new_zn = NULL;
+}
+
+void zoneReloadTaskDestroy(zoneReloadTask *t) {
+    TQLock();
+    dictDelete(sk.tq_origins, t->dotOrigin);
+    TQUnlock();
+
+    zfree(t->dotOrigin);
+    if (t->new_zn) zoneDestroy(t->new_zn);
+    if (t->psr) RRParserDestroy(t->psr);
+    zfree(t);
+}
+
+void createPidFile(void) {
+    /* Try to write the pid file in a best-effort way. */
+    FILE *fp = fopen(sk.pidfile,"w");
+    if (fp) {
+        fprintf(fp,"%d\n",(int)getpid());
+        fclose(fp);
+    }
+}
+
+static void daemonize(void) {
+    int fd;
+
+    if (fork() != 0)
+        exit(0); /* parent exits */
+    setsid(); /* create a new session */
+
+    /* Every output goes to /dev/null. If Agent is daemonized but
+     * the 'logfile' is set to 'stdout' in the configuration file
+     * it will not log at all. */
+    if ((fd = open("/dev/null", O_RDWR, 0)) != -1) {
+        dup2(fd, STDIN_FILENO);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        if (fd > STDERR_FILENO) close(fd);
+    }
+}
 
 static void usage() {
     printf("-c /path/to/cdns.conf    configure file.\n"
@@ -103,140 +213,6 @@ void logQuery(struct context *ctx, char *cip, int cport, bool is_tcp) {
     tcpstr = is_tcp? " +tcp": "";
 
     fprintf(sk.query_log_fp, "%s queries: client %s#%d%s: query %s IN %s \n", buf, cip, cport, tcpstr, dotName, ty_str);
-}
-
-/*!
- * this function will dump all the arguments to buf, the format is specified by fmt.
- * it is similar to the struct package in python.
- *
- * @param buf: buffer used to store bytes
- * @param offset: the start position where the new data should stays.
- * @param size: the total size of buffer
- * @param fmt: the format of the arguments, format used to specify the byte order and data size
- *        byte order:
- *             1. =(native endian)
- *             2. >(big endian)
- *             3. <(little endian)
- *        data size:
- *             1. b(byte)      1 byte
- *             2. h(short)     2 bytes
- *             3. i(int)       4 bytes
- *             4. q(long long) 8 bytes
- *             5. s(string)    using strlen(s)+1 to get length
- *             6. m(memory)    an extra argument is needed to provide the length
- *       pls note if byte order is ignored, then it will use the previous byte order.
- * @param ...
- * @return -1 when the buffer size is not enough, otherwise return the size of bytes written to the buffer(the new offset)
- */
-int snpack(char *buf, int offset, size_t size, char const *fmt, ...) {
-    char *ptr = buf + offset;
-    const char *f = fmt;
-    size_t remain = size - offset;
-    int result;
-
-    uint8_t  u8;
-    uint16_t u16;
-    uint32_t u32;
-    uint64_t u64;
-    char *ss;
-    size_t mem_len;
-
-    va_list ap;
-    va_start(ap, fmt);
-
-    bool need_rev = false;
-    while(*f) {
-        switch(*f) {
-            case '=':
-                need_rev = false;
-                f++;
-                break;
-            case '<':  // little endian
-#if (BYTE_ORDER == BIG_ENDIAN)
-                need_rev = true;
-#else
-                need_rev = false;
-#endif
-                f++;
-                break;
-            case '>':  // big endian
-            case '!':
-#if (BYTE_ORDER == LITTLE_ENDIAN)
-                need_rev = true;
-#else
-                need_rev = false;
-#endif
-                f++;
-                break;
-            default:
-                break;
-        }
-        switch(*f) {
-            case 'b':
-            case 'B':
-                if (remain < 1) goto error;
-                u8 = (uint8_t)va_arg(ap, int);
-                *ptr++ = u8;
-                remain--;
-                break;
-            case 'h':  //signed short
-            case 'H':
-                if (remain < 2) goto error;
-                u16 = (uint16_t )va_arg(ap, int);
-                if (need_rev) u16 = rte_bswap16(u16);
-                memcpy(ptr, &u16, 2);
-                ptr += 2;
-                remain -= 2;
-                break;
-            case 'i':
-            case 'I':
-                if (remain < 4) goto error;
-                u32 = (uint32_t )va_arg(ap, int);
-                if (need_rev) u32 = rte_bswap32(u32);
-                memcpy(ptr, &u32, 4);
-                ptr += 4;
-                remain -= 4;
-                break;
-            case 'q':
-            case 'Q':
-                if (remain < 8) goto error;
-                u64 = (uint64_t )va_arg(ap, long long);
-                if (need_rev) u64 = rte_bswap64(u64);
-                memcpy(ptr, &u64, 8);
-                ptr += 8;
-                remain -= 4;
-                break;
-            case 's':
-            case 'S':
-                ss = va_arg(ap, char *);
-                size_t ss_len = strlen(ss) + 1;
-                if (remain < ss_len) goto error;
-                memcpy(ptr, ss, ss_len);
-                ptr += ss_len;
-                remain -= ss_len;
-                break;
-            case 'm':
-            case 'M':
-                ss = va_arg(ap, char *);
-                mem_len = va_arg(ap, size_t);
-                if (remain < mem_len) goto error;
-                if (mem_len == 0) break;
-                memcpy(ptr, ss, mem_len);
-                ptr += mem_len;
-                remain -= mem_len;
-                break;
-            default:
-            LOG_FATAL(USER1, "BUG: unknown format %s", fmt);
-        }
-        f++;
-    }
-    result = (int)(size-remain);
-    goto ok;
-error:
-    result = -1;
-ok:
-    va_end(ap);
-    return result;
 }
 
 int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
@@ -478,6 +454,40 @@ end:
     return ctx->cur;
 }
 
+static void updateCachedTime() {
+    sk.unixtime = time(NULL);
+    sk.mstime = mstime();
+}
+
+static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData) {
+    UNUSED3(el, id, clientData);
+    object *obj;
+
+    updateCachedTime();
+    if (sk.checkAsyncContext() == ERR_CODE) {
+        // we don't care the return value.
+        sk.initAsyncContext();
+    }
+    if (sk.checkAsyncContext() == OK_CODE) {
+        while((obj = dequeueTask()) != NULL) {
+            if (obj->type == TASK_RELOAD_ZONE) {
+                if (sk.asyncReloadZone((zoneReloadTask *) obj) != OK_CODE) {
+                    break;
+                }
+            } else {
+                LOG_ERROR(USER1, "Unknown async task type: %d", obj->type);
+            }
+        }
+        // check if need to do all reload
+        if (sk.unixtime - sk.last_all_reload_ts > sk.all_reload_interval) {
+            sk.asyncReloadAllZone();
+        }
+    }
+    //TODO remove the removed zone in zoneDict.
+    // checkRandomZones();
+    return TIME_INTERVAL;
+}
+
 /*----------------------------------------------
  *     dict type definition
  *---------------------------------------------*/
@@ -578,8 +588,6 @@ dictType tqOriginsDictType = {
         NULL,         /* val destructor */
 };
 
-/* void processDnsQuery(void *udp_data, int udp_data_len, */
-/*                      void *resp_data, int resp_data_len) */
 static int handleZoneFileConf(char *errstr, int argc, char *argv[], void *privdata) {
     int err = CONF_OK;
     dict *d = privdata;
@@ -781,11 +789,19 @@ signal_handler(int signum)
         printf("\n\nSignal %d received, preparing to exit...\n",
                signum);
         sk.force_quit = true;
+        aeStop(sk.el);
     }
 }
 
 static void initShuke() {
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
+    sk.starttime = time(NULL);
+
+    TQInitLock();
+    sk.tq = rte_ring_create("TQ_QUEUE", 1024, rte_socket_id(), RING_F_SC_DEQ);
+    sk.tq_origins = dictCreate(&tqOriginsDictType, NULL);
+
+    sk.el = aeCreateEventLoop(1024, true);
     sk.zd = zoneDictCreate();
     if (isEmptyStr(sk.query_log_file)) {
         sk.query_log_fp = NULL;
@@ -822,6 +838,24 @@ static void initShuke() {
     } else {
         LOG_FATAL(USER1, "invalid data store config %s", sk.data_store);
     }
+
+    long long reload_all_start = mstime();
+    if (sk.syncGetAllZone() == ERR_CODE) {
+        LOG_FATAL(USER1, "can't load all zone data from %s", sk.data_store);
+    }
+    sk.zone_load_time = mstime() - reload_all_start;
+    LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
+
+    sk.last_all_reload_ts = sk.unixtime;
+
+    if (sk.initAsyncContext && sk.initAsyncContext() == ERR_CODE) {
+        LOG_FATAL(USER1, "init %s async context error.", sk.data_store);
+    }
+    // process task queue
+    if (aeCreateTimeEvent(sk.el, TIME_INTERVAL, mainThreadCron, NULL, NULL) == AE_ERR) {
+        LOG_FATAL(USER1, "Can't create time event proc");
+    }
+
     // run admin server
     LOG_INFO(USER1, "starting admin server on %s:%d", sk.admin_host, sk.admin_port);
     if (initAdminServer() == ERR_CODE) {
@@ -830,10 +864,23 @@ static void initShuke() {
 }
 
 int main(int argc, char *argv[]) {
+    struct timeval tv;
+    srand(time(NULL)^getpid());
+    gettimeofday(&tv,NULL);
+    dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
+
+    initConfig(argc, argv);
+
+    if (sk.daemonize) daemonize();
+    if (sk.daemonize) createPidFile();
+
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     sk.force_quit = false;
-    initConfig(argc, argv);
     initDpdkModule();
+    initShuke();
+
+    aeMain(sk.el);
+
     cleanupDpdkModule();
 }
