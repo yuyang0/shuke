@@ -9,6 +9,7 @@ OPTIMIZATION?=-O2
 STD=-std=gnu99 -pedantic
 WARN=-Wall -W
 OPT=$(OPTIMIZATION)
+DEBUG=-g -ggdb
 
 ifeq ($(RTE_SDK),)
 $(error "Please define RTE_SDK environment variable")
@@ -29,6 +30,9 @@ SRCS-y := admin.c ae.c anet.c conf.c dict.c dpdk_module.c ds.c mongo.c \
 
 # CFLAGS += -O3
 # CFLAGS += $(WERROR_FLAGS)
-CFLAGS +=$(STD) $(OPT) $(DEBUG) $(SHUKE_CFLAGS)
+CFLAGS +=$(STD) $(WARN) $(OPT) $(DEBUG) $(SHUKE_CFLAGS)
 
 include $(RTE_SDK)/mk/rte.extapp.mk
+
+dnsbench: bench.c ae.c
+	gcc -o $@ $^ $(STD) $(WARN) $(OPT) $(DEBUG) $(SHUKE_CFLAGS)
