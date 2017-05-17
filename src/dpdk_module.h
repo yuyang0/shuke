@@ -71,7 +71,7 @@
 #include <rte_string_fns.h>
 #include <rte_cpuflags.h>
 
-#define RTE_LOGTYPE_L3FWD RTE_LOGTYPE_USER1
+#define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
 
 #define MAX_PKT_BURST     32
 #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
@@ -87,14 +87,6 @@
 
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
-
-/* Used to mark destination port as 'invalid'. */
-#define	BAD_PORT ((uint16_t)-1)
-
-#define FWDSTEP	4
-
-/* replace first 12B of the ethernet header. */
-#define	MASK_ETH 0x3f
 
 struct mbuf_table {
     uint16_t len;
@@ -124,7 +116,8 @@ extern xmm_t val_eth[RTE_MAX_ETHPORTS];
 extern struct lcore_conf lcore_conf[RTE_MAX_LCORE];
 
 
-int initDpdkModule();
-int cleanupDpdkModule();
+int initDpdkModule(void);
+int startDpdkThreads(void);
+int cleanupDpdkModule(void);
 
 #endif  /* __DPDK_MODULE_H__ */

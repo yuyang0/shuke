@@ -169,6 +169,7 @@ int getAllZoneFromFile() {
         }
     }
     dictReleaseIterator(it);
+    sk.last_all_reload_ts = sk.unixtime;
     return OK_CODE;
 }
 
@@ -472,6 +473,7 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         while((obj = dequeueTask()) != NULL) {
             if (obj->type == TASK_RELOAD_ZONE) {
                 if (sk.asyncReloadZone((zoneReloadTask *) obj) != OK_CODE) {
+                    LOG_INFO(USER1, "reload zone");
                     break;
                 }
             } else {
@@ -480,6 +482,7 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         }
         // check if need to do all reload
         if (sk.unixtime - sk.last_all_reload_ts > sk.all_reload_interval) {
+            LOG_INFO(USER1, "start reloading all zone asynchronously.");
             sk.asyncReloadAllZone();
         }
     }
@@ -796,6 +799,7 @@ signal_handler(int signum)
 static void initShuke() {
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
     sk.starttime = time(NULL);
+    updateCachedTime();
 
     TQInitLock();
     sk.tq = rte_ring_create("TQ_QUEUE", 1024, rte_socket_id(), RING_F_SC_DEQ);
@@ -879,6 +883,7 @@ int main(int argc, char *argv[]) {
     sk.force_quit = false;
     initDpdkModule();
     initShuke();
+    startDpdkThreads();
 
     aeMain(sk.el);
 

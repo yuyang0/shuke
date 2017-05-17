@@ -11,12 +11,12 @@ static inline void dump16be(uint16_t v, char *buf) {
     *tmp16 = rte_cpu_to_be_16(v);
 }
 
-static void dump32be(uint32_t v, char *buf) {
+static inline void dump32be(uint32_t v, char *buf) {
     uint32_t *tmp32 = (uint32_t *)buf;
     *tmp32 = rte_cpu_to_be_32(v);
 }
 
-static void dump64be(uint64_t v, char *buf) {
+static inline void dump64be(uint64_t v, char *buf) {
     uint64_t *tmp64 = (uint64_t *)buf;
     *tmp64 = rte_cpu_to_be_64(v);
 }
