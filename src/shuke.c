@@ -19,6 +19,11 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 
+#define RANDOM_CHECK_ZONES  10
+#define RANDOM_CHECK_US     1000   // microseconds
+//TODO choose a better value
+#define RANDOM_CHECK_INTERVAL 60   // seconds
+
 struct shuke sk;
 
 /*!
@@ -460,6 +465,41 @@ static void updateCachedTime() {
     sk.mstime = mstime();
 }
 
+void checkRandomZones(void) {
+    static long last_run_ts = 0;
+
+    int ncheck = 0;
+    long long start;
+    long now = sk.unixtime;
+    long ts;
+    size_t max_loop = 0;
+    if (now - last_run_ts < RANDOM_CHECK_INTERVAL) return;
+    last_run_ts = now;
+
+    zoneDictRLock(sk.zd);
+
+    start = ustime();
+    max_loop = MIN(zoneDictGetNumZones(sk.zd, 0), RANDOM_CHECK_ZONES);
+    for (size_t i = 0; i < max_loop; ++i) {
+        zone *z = zoneDictGetRandomZone(sk.zd, 0);
+        if (z == NULL) goto end;
+
+        ts = rte_atomic64_read(&(z->ts));
+        if (ts + z->refresh < now) {
+            // put async task to queue to reload zone.
+            LOG_DEBUG(USER1, "enqueue %s.", z->dotOrigin);
+            enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
+        }
+        ncheck++;
+
+        long long elapsed = ustime() - start;
+        if (elapsed > RANDOM_CHECK_US) goto end;
+    }
+end:
+    LOG_DEBUG(USER1, "random check %d zones.", ncheck);
+    zoneDictRUnlock(sk.zd);
+}
+
 static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData) {
     UNUSED3(el, id, clientData);
     object *obj;
@@ -487,7 +527,7 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         }
     }
     //TODO remove the removed zone in zoneDict.
-    // checkRandomZones();
+    checkRandomZones();
     return TIME_INTERVAL;
 }
 
