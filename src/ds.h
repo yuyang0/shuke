@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
-#include <rte_spinlock.h>
+#include <rte_rwlock.h>
 #include <rte_atomic.h>
 
 #include "sds.h"
@@ -155,15 +155,17 @@ if (rte_atomic32_dec_and_test(&(z->refcnt))) zoneDestroy(z); \
 } while(0)
 
 typedef struct _zoneDict {
-    rte_spinlock_t lock;
+    rte_rwlock_t lock;
     // the key is the origin of the zone(len label format)
     // the value is zone instance.
     dict *d;
 } zoneDict;
 
-#define zoneDictLock(zd) rte_spinlock_lock(&((zd)->lock))
-#define zoneDictUnlock(zd) rte_spinlock_unlock(&((zd)->lock))
-#define zoneDictInitLock(zd) rte_spinlock_init(&((zd)->lock))
+#define zoneDictRLock(zd) rte_rwlock_read_lock(&((zd)->lock))
+#define zoneDictRUnlock(zd) rte_rwlock_read_unlock(&((zd)->lock))
+#define zoneDictWLock(zd) rte_rwlock_write_lock(&((zd)->lock))
+#define zoneDictWUnlock(zd) rte_rwlock_write_unlock(&((zd)->lock))
+#define zoneDictInitLock(zd) rte_rwlock_init(&((zd)->lock))
 #define zoneDictDestroyLock(zd)
 
 RRSet *RRSetCreate(uint16_t type);
@@ -200,7 +202,7 @@ int zoneDictReplace(zoneDict *zd, zone *z);
 int zoneDictAdd(zoneDict *zd, zone *z);
 int zoneDictDelete(zoneDict *zd, char *origin);
 int zoneDictEmpty(zoneDict *zd);
-size_t zoneDictGetNumZones(zoneDict *zd);
+size_t zoneDictGetNumZones(zoneDict *zd, int lock);
 zone *zoneDictGetRandomZone(zoneDict *zd, int lock);
 sds zoneDictToStr(zoneDict *zd);
 

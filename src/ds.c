@@ -663,10 +663,10 @@ void zoneDictDestroy(zoneDict *zd) {
  *   a reference count decrement is needed.
  */
 zone *zoneDictFetchVal(zoneDict *zd, char *key) {
-    zoneDictLock(zd);
+    zoneDictRLock(zd);
     zone *z = dictFetchValue(zd->d, key);
     if (z != NULL) zoneIncRef(z);
-    zoneDictUnlock(zd);
+    zoneDictRUnlock(zd);
     return z;
 }
 
@@ -685,14 +685,14 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
 
     nLabel = getNumLabels(start);
     if (nLabel < 2) return NULL;
-    zoneDictLock(zd);
+    zoneDictRLock(zd);
     for (int i = nLabel; i >= 2; --i) {
         z = dictFetchValue(zd->d, start);
         if (z != NULL) break;
         start += (*start + 1);
     }
     if (z != NULL) zoneIncRef(z);
-    zoneDictUnlock(zd);
+    zoneDictRUnlock(zd);
     return z;
 }
 
@@ -704,53 +704,53 @@ int zoneDictReplace(zoneDict *zd, zone *z) {
     rte_atomic64_set(&(z->ts), (int64_t)time(NULL));
     zoneUpdateRRSetOffsets(z);
 
-    zoneDictLock(zd);
+    zoneDictWLock(zd);
     int err = dictReplace(zd->d, z->origin, z);
-    zoneDictUnlock(zd);
+    zoneDictWUnlock(zd);
     return err;
 }
 
 int zoneDictAdd(zoneDict *zd, zone *z) {
     int err;
 
-    zoneDictLock(zd);
+    zoneDictWLock(zd);
     err = dictAdd(zd->d, z->origin, z);
-    zoneDictUnlock(zd);
+    zoneDictWUnlock(zd);
     return err;
 }
 
 int zoneDictDelete(zoneDict *zd, char *origin) {
     int err;
 
-    zoneDictLock(zd);
+    zoneDictWLock(zd);
     err = dictDelete(zd->d, origin);
-    zoneDictUnlock(zd);
+    zoneDictWUnlock(zd);
     return err;
 }
 
 int zoneDictEmpty(zoneDict *zd) {
-    zoneDictLock(zd);
+    zoneDictRLock(zd);
     dictEmpty(zd->d, NULL);
-    zoneDictUnlock(zd);
+    zoneDictRUnlock(zd);
     return DS_OK;
 }
 
-size_t zoneDictGetNumZones(zoneDict *zd) {
+size_t zoneDictGetNumZones(zoneDict *zd, int lock) {
     size_t n;
-    zoneDictLock(zd);
+    if (lock) zoneDictRLock(zd);
     n = dictSize(zd->d);
-    zoneDictUnlock(zd);
+    if (lock) zoneDictRUnlock(zd);
     return n;
 }
 
 zone *zoneDictGetRandomZone(zoneDict *zd, int lock) {
     zone *z = NULL;
     dictEntry *de;
-    if (lock) zoneDictLock(zd);
+    if (lock) zoneDictRLock(zd);
     if ((de = dictGetRandomKey(zd->d)) == NULL) goto end;
     z = dictGetVal(de);
 end:
-    if (lock) zoneDictUnlock(zd);
+    if (lock) zoneDictRUnlock(zd);
     return z;
 }
 
@@ -760,7 +760,7 @@ sds zoneDictToStr(zoneDict *zd) {
     sds zone_s;
     sds s = sdsempty();
 
-    zoneDictLock(zd);
+    zoneDictRLock(zd);
     dictIterator *it = dictGetIterator(zd->d);
     dictEntry *de;
     while((de = dictNext(it)) != NULL) {
@@ -770,7 +770,7 @@ sds zoneDictToStr(zoneDict *zd) {
         sdsfree(zone_s);
     }
     dictReleaseIterator(it);
-    zoneDictUnlock(zd);
+    zoneDictRUnlock(zd);
     return s;
 }
 
