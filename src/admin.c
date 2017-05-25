@@ -3,6 +3,7 @@
 //
 
 #include "shuke.h"
+#include <rte_ethdev.h>
 
 #include <assert.h>
 #include <limits.h>
@@ -460,25 +461,50 @@ static sds genInfoString(char *section) {
     // }
 
     // statistics
-    // if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
-    //     if (sections++) s = sdscat(s, "\r\n");
-    //     s = sdscatprintf(s,
-    //                      "# Stats\r\n"
-    //                      "total_requests:%llu\r\n"
-    //                      "total_net_input_bytes:%llu\r\n"
-    //                      "total_net_output_bytes:%llu\r\n"
-    //                      "total_tcp_conn:%llu\r\n"
-    //                      "num_tcp_conn:%d\r\n"
-    //                      "rejected_tcp_conn:%d\r\n"
-    //                      "num_zones:%lu\r\n",
-    //                      ATOM_GET(&(sk.nr_req)),
-    //                      ATOM_GET(&(sk.nr_input_bytes)),
-    //                      ATOM_GET(&(sk.nr_output_bytes)),
-    //                      ATOM_GET(&(sk.total_tcp_conn)),
-    //                      ATOM_GET(&(sk.num_tcp_conn)),
-    //                      ATOM_GET(&(sk.rejected_tcp_conn)),
-    //                      zoneDictGetNumZones(sk.zd));
-    // }
+    if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
+        if (sections++) s = sdscat(s, "\r\n");
+         // s = sdscatprintf(s,
+         //                  "# Stats\r\n"
+         //                  "total_requests:%llu\r\n"
+         //                  "qps:%llu\r\n",
+         //                  "num_zones:%lu\r\n",
+         //                  ATOM_GET(&(sk.nr_req)),
+         //                  zoneDictGetNumZones(sk.zd, 1));
+
+        struct rte_eth_stats eth_stats;
+        for (int i = 0; i < rte_eth_dev_count(); i++) {
+            if (rte_eth_stats_get(i, &eth_stats) != 0) {
+                LOG_WARN(USER1, "can't get stats of port %d.", i);
+                continue;
+            }
+            s = sdscat(s, "\r\n");
+            s = sdscatprintf(s,
+                             "# Port %d stats\r\n"
+                             "input_packets:%llu\r\n"
+                             "input_packets_per_sec:%llu\r\n"
+                             "output_packets:%llu\r\n"
+                             "output_packets_per_sec:%llu\r\n"
+                             "input_bytes:%llu\r\n"
+                             "input_bytes_per_sec:%llu\r\n"
+                             "output_bytes:%llu\r\n"
+                             "output_bytes_per_sec:%llu\r\n"
+                             "input_missed:%llu\r\n"
+                             "input_errors:%llu\r\n"
+                             "output_errors:%llu\r\n",
+                             i,
+                             (long long unsigned) eth_stats.ipackets,
+                             (long long unsigned) eth_stats.ipackets/uptime,
+                             (long long unsigned) eth_stats.opackets,
+                             (long long unsigned) eth_stats.opackets/uptime,
+                             (long long unsigned) eth_stats.ibytes,
+                             (long long unsigned) eth_stats.ibytes/uptime,
+                             (long long unsigned) eth_stats.obytes,
+                             (long long unsigned) eth_stats.obytes/uptime,
+                             (long long unsigned) eth_stats.imissed,
+                             (long long unsigned) eth_stats.ierrors,
+                             (long long unsigned) eth_stats.oerrors);
+        }
+    }
 
     // cpu usage
     if (allsections || defsections || (strcasecmp(section, "cpu") == 0)) {
@@ -672,7 +698,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             s = sdsnew("ok");
         }
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
-        size_t n = zoneDictGetNumZones(sk.zd);
+        size_t n = zoneDictGetNumZones(sk.zd, 1);
         s = sdsnewprintf("%lu", n);
     }
 end:
