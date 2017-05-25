@@ -673,7 +673,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
             if (nb_rx == 0)
                 continue;
-
+            // LOG_INFO(USER1, "lcore %d receive %d packets", lcore_id, nb_rx);
             handle_packets(nb_rx, pkts_burst, portid, qconf);
         }
     }
@@ -871,44 +871,23 @@ static int last_lcore_id(void) {
     return id;
 }
 
-int
-initDpdkModule() {
-
-    /* setting the rss key */
-    static const uint8_t key[] = {
-        0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 10 */
-        0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 20 */
-        0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 30 */
-        0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 40 */
-        0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 50 */
-        0x05, 0x05  /* 60 - 8 */
-    };
-
-    port_conf.rx_adv_conf.rss_conf.rss_key = (uint8_t *)&key;
-    port_conf.rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
-
-    struct lcore_conf *qconf;
-    struct rte_eth_dev_info dev_info;
+void
+initDpdkEal() {
     int ret;
-    unsigned nb_ports;
-    uint16_t queueid;
-    unsigned lcore_id;
-    uint32_t n_tx_queue, nb_lcores;
-    uint8_t portid, nb_rx_queue, queue, socketid;
     char buf[MAXLINE];
     snprintf(buf, MAXLINE, "--master-lcore=%d", last_lcore_id());
     /* initialize the rte env first*/
-		char *argv[] = {
-        "",
-        "-c",
-        sk.coremask,
-        "-n",
-        sk.mem_channels,
-        buf,
-        "--proc-type=auto",
-        ""
-		};
-		const int argc = 6;
+    char *argv[] = {
+            "",
+            "-c",
+            sk.coremask,
+            "-n",
+            sk.mem_channels,
+            buf,
+            "--proc-type=auto",
+            ""
+    };
+    const int argc = 6;
     /*
      * reset optind, because rte_eal_init uses getopt.
      */
@@ -917,7 +896,34 @@ initDpdkModule() {
     ret = rte_eal_init(argc, argv);
     if (ret < 0)
         rte_exit(EXIT_FAILURE, "Invalid EAL parameters\n");
+}
 
+int
+initDpdkModule() {
+
+    /* setting the rss key */
+    // static const uint8_t key[] = {
+    //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 10 */
+    //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 20 */
+    //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 30 */
+    //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 40 */
+    //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 50 */
+    //     0x05, 0x05  /* 60 - 8 */
+    // };
+
+    // port_conf.rx_adv_conf.rss_conf.rss_key = (uint8_t *)&key;
+    // port_conf.rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
+    initDpdkEal();
+
+    struct lcore_conf *qconf;
+    struct rte_eth_dev_info dev_info;
+    struct rte_eth_txconf *txconf;
+    int ret;
+    unsigned nb_ports;
+    uint16_t queueid;
+    unsigned lcore_id;
+    uint32_t n_tx_queue, nb_lcores;
+    uint8_t portid, nb_rx_queue, queue, socketid;
     /*
      * since rte_eal_init rewrite the log configuration,
      * so config_log should stay after rte_eal_init.
@@ -932,7 +938,7 @@ initDpdkModule() {
             printf("Invalid packet length\n");
             return -1;
         }
-        port_conf.rxmode.max_rx_pkt_len = sk.max_pkt_len;
+        port_conf.rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
     }
 
     parse_config(sk.rx_queue_config);
@@ -950,7 +956,7 @@ initDpdkModule() {
         rte_exit(EXIT_FAILURE, "check_port_config failed\n");
 
     nb_lcores = rte_lcore_count();
-    LOG_INFO(USER1, "found %d cores, master cores: %d", nb_lcores, rte_get_master_lcore());
+    LOG_INFO(USER1, "found %d cores, master cores: %d, %d", nb_lcores, rte_get_master_lcore(), rte_lcore_id());
 
 
     /* initialize all ports */
@@ -1009,10 +1015,11 @@ initDpdkModule() {
             LOG_INFO(USER1, "txq=%u,%d,%d ", lcore_id, queueid, socketid);
 
             rte_eth_dev_info_get(portid, &dev_info);
-            // if (port_conf.rxmode.jumbo_frame)
-            //     tx_conf.txq_flags = 0;
+            txconf = &dev_info.default_txconf;
+            if (port_conf.rxmode.jumbo_frame)
+                txconf->txq_flags = 0;
             ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
-                                         socketid, &tx_conf);
+                                         socketid, txconf);
             if (ret < 0)
                 rte_exit(EXIT_FAILURE,
                          "rte_eth_tx_queue_setup: err=%d, "
@@ -1029,7 +1036,7 @@ initDpdkModule() {
     }
 
     for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-        if (rte_lcore_is_enabled(lcore_id) == 0)
+        if (lcore_id == rte_get_master_lcore() || rte_lcore_is_enabled(lcore_id) == 0)
             continue;
         qconf = &lcore_conf[lcore_id];
         printf("\nInitializing rx queues on lcore %u ... ", lcore_id );
