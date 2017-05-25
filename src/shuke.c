@@ -652,23 +652,54 @@ static int handleZoneFileConf(char *errstr, int argc, char *argv[], void *privda
         goto error;
     }
     goto ok;
-    error:
+error:
     err = CONF_ERR;
-    ok:
-    zfree(v);
+ok:
+    // don't use zfree.
+    free(v);
     return err;
 }
 
-static void initConfig(int argc, char **argv) {
+static char *getConfigBuf(int argc, char **argv) {
     int c;
     char *conffile = NULL;
     char *cbuf;
     char cwd[MAXLINE];
-    int conf_err;
     if (getcwd(cwd, MAXLINE) == NULL) {
         fprintf(stderr, "getcwd: %s.\n", strerror(errno));
         exit(1);
     }
+    while ((c = getopt(argc, argv, "c:hv")) != -1) {
+        switch (c) {
+            case 'c':
+                conffile = optarg;
+                break;
+            case 'h':
+                usage();
+                exit(0);
+            case 'v':
+                version();
+                exit(0);
+            default:
+                abort();
+        }
+    }
+
+    if (conffile == NULL) {
+        fprintf(stderr, "you must specify config file\n");
+        exit(1);
+    }
+    cbuf = readFile(conffile);
+    if (cbuf == NULL) {
+        fprintf(stderr, "Can't open configure file(%s)\n", conffile);
+        exit(1);
+    }
+    sk.configfile = toAbsPath(conffile, cwd);
+    return cbuf;
+}
+
+static void initConfig(char *cbuf) {
+    int conf_err;
 
     // set default values
     sk.promiscuous_on = false;
@@ -692,32 +723,6 @@ static void initConfig(int argc, char **argv) {
     sk.all_reload_interval = 36000;
     sk.minimize_resp = true;
 
-    while ((c = getopt(argc, argv, "c:hv")) != -1) {
-        switch (c) {
-        case 'c':
-            conffile = optarg;
-            break;
-        case 'h':
-            usage();
-            exit(0);
-        case 'v':
-            version();
-            exit(0);
-        default:
-            abort();
-        }
-    }
-
-    if (conffile == NULL) {
-        fprintf(stderr, "you must specify config file\n");
-        exit(1);
-    }
-    cbuf = readFile(conffile);
-    if (cbuf == NULL) {
-        fprintf(stderr, "Can't open configure file(%s)\n", conffile);
-        exit(1);
-    }
-    sk.configfile = toAbsPath(conffile, cwd);
 
     sk.coremask = getStrVal(cbuf, "coremask", NULL);
     CHECK_CONFIG("coremask", sk.coremask != NULL,
@@ -755,6 +760,43 @@ static void initConfig(int argc, char **argv) {
     CHECK_CONFIG("data_store", sk.data_store != NULL,
                  "Config Error: data_store can't be empty");
 
+    conf_err = getIntVal(sk.errstr, cbuf, "tcp_backlog", &sk.tcp_backlog);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+    conf_err = getIntVal(sk.errstr, cbuf, "tcp_keepalive", &sk.tcp_keepalive);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+    conf_err = getIntVal(sk.errstr, cbuf, "tcp_idle_timeout", &sk.tcp_idle_timeout);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+    conf_err = getIntVal(sk.errstr, cbuf, "max_tcp_connections", &sk.max_tcp_connections);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+
+    sk.pidfile = getStrVal(cbuf, "pidfile", "/var/run/cdns.pid");
+    sk.query_log_file = getStrVal(cbuf, "query_log_file", NULL);
+    sk.logfile = getStrVal(cbuf, "logfile", "");
+
+    conf_err = getBoolVal(sk.errstr, cbuf, "log_verbose", &sk.logVerbose);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+    conf_err = getBoolVal(sk.errstr, cbuf, "daemonize", &sk.daemonize);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+
+    sk.logLevelStr = getStrVal(cbuf, "loglevel", "info");
+
+    sk.admin_host = getStrVal(cbuf, "admin_host", NULL);
+    conf_err = getIntVal(sk.errstr, cbuf, "admin_port", &sk.admin_port);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+
+    conf_err = getIntVal(sk.errstr, cbuf, "all_reload_interval", &sk.all_reload_interval);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+    conf_err = getBoolVal(sk.errstr, cbuf, "minimize_resp", &sk.minimize_resp);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+}
+
+static void initDataStoreConfig(char *cbuf) {
+    char cwd[MAXLINE];
+    int conf_err;
+    if (getcwd(cwd, MAXLINE) == NULL) {
+        fprintf(stderr, "getcwd: %s.\n", strerror(errno));
+        exit(1);
+    }
     if (strcasecmp(sk.data_store, "file") == 0) {
         sk.zone_files_root = getStrVal(cbuf, "zone_files_root", cwd);
         if (*(sk.zone_files_root) != '/') {
@@ -793,36 +835,6 @@ static void initConfig(int argc, char **argv) {
         exit(1);
     }
 
-    conf_err = getIntVal(sk.errstr, cbuf, "tcp_backlog", &sk.tcp_backlog);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "tcp_keepalive", &sk.tcp_keepalive);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "tcp_idle_timeout", &sk.tcp_idle_timeout);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "max_tcp_connections", &sk.max_tcp_connections);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    sk.pidfile = getStrVal(cbuf, "pidfile", "/var/run/cdns.pid");
-    sk.query_log_file = getStrVal(cbuf, "query_log_file", NULL);
-    sk.logfile = getStrVal(cbuf, "logfile", "");
-
-    conf_err = getBoolVal(sk.errstr, cbuf, "log_verbose", &sk.logVerbose);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "daemonize", &sk.daemonize);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    sk.logLevelStr = getStrVal(cbuf, "loglevel", "info");
-
-    sk.admin_host = getStrVal(cbuf, "admin_host", NULL);
-    conf_err = getIntVal(sk.errstr, cbuf, "admin_port", &sk.admin_port);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    conf_err = getIntVal(sk.errstr, cbuf, "all_reload_interval", &sk.all_reload_interval);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "minimize_resp", &sk.minimize_resp);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    free(cbuf);
 }
 
 static void
@@ -909,11 +921,13 @@ static void initShuke() {
 
 int main(int argc, char *argv[]) {
     struct timeval tv;
+    char *cbuf;
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
 
-    initConfig(argc, argv);
+    cbuf = getConfigBuf(argc, argv);
+    initConfig(cbuf);
 
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
@@ -922,7 +936,11 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     sk.force_quit = false;
     initDpdkModule();
+
+    initDataStoreConfig(cbuf);
+    free(cbuf);
     initShuke();
+
     startDpdkThreads();
 
     aeMain(sk.el);

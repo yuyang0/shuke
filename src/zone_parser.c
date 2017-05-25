@@ -714,7 +714,7 @@ int loadZoneFromFile(const char *fname, zone **zpp) {
     int err;
     char errstr[ERR_STR_LEN];
 
-    zbuf = readFile(fname);
+    zbuf = zreadFile(fname);
     if (zbuf == NULL) {
         LOG_ERROR(USER1, "Can't read zone file %s.", fname);
         return DS_ERR;

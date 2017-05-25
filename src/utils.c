@@ -17,6 +17,7 @@
 
 #include "log.h"
 #include "utils.h"
+#include "zmalloc.h"
 
 /* Return the UNIX time in microseconds */
 long long ustime(void) {
@@ -64,40 +65,50 @@ void bytesToHuman(char *s, unsigned long long n) {
     }
 }
 
+static long getFileSize(FILE *fp) {
+    long size;
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    rewind(fp);
+    return size;
+}
+
 char* readFile(const char *filename) {
-    char *buffer = NULL;
-    int string_size, read_size;
-    FILE *handler = fopen(filename, "r");
+    char *buf = NULL;
+    long totallen, read_size;
+    FILE *fp = fopen(filename, "r");
 
-    if (handler) {
-        // Seek the last byte of the file
-        fseek(handler, 0, SEEK_END);
-        // Offset from the first to the last byte, or in other words, filesize
-        string_size = ftell(handler);
-        // go back to the start of the file
-        rewind(handler);
-
-        // Allocate a string that can hold it all
-        buffer = (char *) malloc(sizeof(char) * (string_size + 1));
-
-        // Read it all in one operation
-        read_size = fread(buffer, sizeof(char), string_size, handler);
-
-        // fread doesn't set it so put a \0 in the last position
-        // and buffer is now officially a string
-        buffer[string_size] = '\0';
-
-        if (string_size != read_size) {
-            // Something went wrong, throw away the memory and set
-            // the buffer to NULL
-            free(buffer);
-            buffer = NULL;
+    if (fp) {
+        totallen = getFileSize(fp);
+        buf = (char *) malloc(sizeof(char) * (totallen + 1));
+        read_size = fread(buf, sizeof(char), totallen, fp);
+        buf[totallen] = '\0';
+        if (totallen != read_size) {
+            free(buf);
+            buf = NULL;
         }
-
-        // Always remember to close the file.
-        fclose(handler);
+        fclose(fp);
     }
-    return buffer;
+    return buf;
+}
+
+char *zreadFile(const char *filename) {
+    char *buf = NULL;
+    long totallen, read_size;
+    FILE *fp = fopen(filename, "r");
+
+    if (fp) {
+        totallen = getFileSize(fp);
+        buf = (char *) zmalloc(sizeof(char) * (totallen + 1));
+        read_size = fread(buf, sizeof(char), totallen, fp);
+        buf[totallen] = '\0';
+        if (totallen != read_size) {
+            zfree(buf);
+            buf = NULL;
+        }
+        fclose(fp);
+    }
+    return buf;
 }
 
 char* getHomePath(void)

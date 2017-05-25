@@ -20,7 +20,6 @@
 
 #include "defines.h"
 #include "str.h"
-#include "zmalloc.h"
 #include "conf.h"
 
 #define SEP ' '
@@ -66,10 +65,10 @@ char *getStrVal(char *buf, char *entry, char *defaultVal) {
     char *val = getKeyVal(buf, entry);
     if (val) {
         val = strip(val, "\"");
-        return zstrdup(val);
+        return strdup(val);
     } else {
         if (!defaultVal) return NULL;
-        else return zstrdup(defaultVal );
+        else return strdup(defaultVal );
     }
 }
 
@@ -158,7 +157,7 @@ int getStrArrayVal(char *errstr, char *buf, char *entry, char **ret, int *n) {
 ok:
     tokenize(vdata, ret, n);
     for (int i = 0; i < *n; i++) {
-        ret[i] = zstrdup(ret[i]);
+        ret[i] = strdup(ret[i]);
     }
     return CONF_OK;
 }

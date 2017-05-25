@@ -12,6 +12,7 @@ long long mstime(void);
 void bytesToHuman(char *s, unsigned long long n);
 
 char* readFile(const char *fname);
+char *zreadFile(const char *filename);
 char *toAbsPath(char *p, char *rootp);
 char *getHomePath(void);
 
