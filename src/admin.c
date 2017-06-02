@@ -463,13 +463,17 @@ static sds genInfoString(char *section) {
     // statistics
     if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
         if (sections++) s = sdscat(s, "\r\n");
-         // s = sdscatprintf(s,
-         //                  "# Stats\r\n"
-         //                  "total_requests:%llu\r\n"
-         //                  "qps:%llu\r\n",
-         //                  "num_zones:%lu\r\n",
-         //                  ATOM_GET(&(sk.nr_req)),
-         //                  zoneDictGetNumZones(sk.zd, 1));
+        int64_t nr_req = rte_atomic64_read(&(sk.nr_req));
+         s = sdscatprintf(s,
+                          "# Stats\r\n"
+                          "total_requests:%lld\r\n"
+                          "dropped_requests:%lld\r\n"
+                          "qps:%llu\r\n"
+                          "num_zones:%lu\r\n",
+                          (long long)nr_req,
+                          (long long)rte_atomic64_read(&(sk.nr_dropped)),
+                          (long long unsigned)(nr_req/uptime),
+                          zoneDictGetNumZones(sk.zd, 1));
 
         struct rte_eth_stats eth_stats;
         for (int i = 0; i < rte_eth_dev_count(); i++) {

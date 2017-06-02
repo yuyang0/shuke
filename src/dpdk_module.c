@@ -4,7 +4,9 @@
 
 #include "dpdk_module.h"
 #include "shuke.h"
+#include "utils.h"
 
+#define STAT_ATOMIC_WRITE_BATCH   100
 /*
  * Configurable number of RX/TX ring descriptors
  */
@@ -62,8 +64,6 @@ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
 
 xmm_t val_eth[RTE_MAX_ETHPORTS];
-
-struct lcore_conf lcore_conf[RTE_MAX_LCORE];
 
 struct lcore_params {
     uint8_t port_id;
@@ -135,6 +135,17 @@ static const struct rte_eth_txconf tx_conf = {
 };
 
 static struct rte_mempool * pktmbuf_pool[NB_SOCKETS];
+
+static void
+init_per_lcore() {
+    lcore_conf_t *qconf;
+    unsigned lcore_id = rte_lcore_id();
+    qconf = &sk.lcore_conf[lcore_id];
+    qconf->tsc_hz = rte_get_tsc_hz();
+    qconf->start_us = (uint64_t )ustime();
+    qconf->start_tsc = rte_rdtsc();
+    CUR_NODE = &sk.nodes[get_numa_id()];
+}
 
 static int
 check_lcore_params(void)
@@ -210,17 +221,17 @@ init_lcore_rx_queues(void)
 
     for (i = 0; i < nb_lcore_params; ++i) {
         lcore = lcore_params[i].lcore_id;
-        nb_rx_queue = lcore_conf[lcore].n_rx_queue;
+        nb_rx_queue = sk.lcore_conf[lcore].n_rx_queue;
         if (nb_rx_queue >= MAX_RX_QUEUE_PER_LCORE) {
             LOG_ERR(USER1, "too many queues (%u) for lcore: %u.",
                    (unsigned)nb_rx_queue + 1, (unsigned)lcore);
             return -1;
         } else {
-            lcore_conf[lcore].rx_queue_list[nb_rx_queue].port_id =
+            sk.lcore_conf[lcore].rx_queue_list[nb_rx_queue].port_id =
                 lcore_params[i].port_id;
-            lcore_conf[lcore].rx_queue_list[nb_rx_queue].queue_id =
+            sk.lcore_conf[lcore].rx_queue_list[nb_rx_queue].queue_id =
                 lcore_params[i].queue_id;
-            lcore_conf[lcore].n_rx_queue++;
+            sk.lcore_conf[lcore].n_rx_queue++;
         }
     }
     return 0;
@@ -389,7 +400,7 @@ check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
 
 /* Send burst of packets on an output interface */
 static inline int
-send_burst(struct lcore_conf *qconf, uint16_t n, uint8_t port)
+send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
 {
     struct rte_mbuf **m_table;
     int ret;
@@ -410,7 +421,7 @@ send_burst(struct lcore_conf *qconf, uint16_t n, uint8_t port)
 
 /* Enqueue a single packet, and send burst if queue is filled */
 static inline int
-send_single_packet(struct lcore_conf *qconf,
+send_single_packet(lcore_conf_t *qconf,
                    struct rte_mbuf *m, uint8_t port)
 {
     uint16_t len;
@@ -471,7 +482,7 @@ verify_cksum(struct rte_mbuf *m) {
 
 static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
-                 struct lcore_conf *qconf)
+                 lcore_conf_t *qconf)
 {
     uint32_t ipv4_addr;
     uint16_t udp_port;
@@ -542,6 +553,10 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                            src_addr, udp_h->src_port, is_ipv4);
     if(n == ERR_CODE) goto invalid;
 
+    if (++qconf->nr_req >= STAT_ATOMIC_WRITE_BATCH) {
+        rte_atomic64_add(&(sk.nr_req), qconf->nr_req);
+        qconf->nr_req = 0;
+    }
     ether_addr_copy(&eth_h->s_addr, &eth_addr);
     ether_addr_copy(&eth_h->d_addr, &eth_h->s_addr);
     ether_addr_copy(&eth_addr, &eth_h->d_addr);
@@ -581,11 +596,15 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
 invalid:
     // LOG_DEBUG(USER1, "drop packet.");
+    if (++qconf->nr_dropped >= STAT_ATOMIC_WRITE_BATCH) {
+        rte_atomic64_add(&(sk.nr_dropped), qconf->nr_dropped);
+        qconf->nr_dropped = 0;
+    }
     rte_pktmbuf_free(m);
 }
 
 static void handle_packets(int nb_rx, struct rte_mbuf **pkts_burst,
-                           uint8_t portid, struct lcore_conf *qconf)
+                           uint8_t portid, lcore_conf_t *qconf)
 {
     int32_t j;
 
@@ -612,18 +631,16 @@ int
 launch_one_lcore(__attribute__((unused)) void *dummy)
 {
     struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
-    unsigned lcore_id;
+    unsigned lcore_id = rte_lcore_id();
     uint64_t prev_tsc, diff_tsc, cur_tsc;
     int i, nb_rx;
     uint8_t portid, queueid;
-    struct lcore_conf *qconf;
+    lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
         US_PER_S * BURST_TX_DRAIN_US;
-
     prev_tsc = 0;
 
-    lcore_id = rte_lcore_id();
-    qconf = &lcore_conf[lcore_id];
+    init_per_lcore();
 
     if (qconf->n_rx_queue == 0) {
         LOG_INFO(USER1, "lcore %u has nothing to do.", lcore_id);
@@ -915,7 +932,7 @@ initDpdkModule() {
     // port_conf.rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
     initDpdkEal();
 
-    struct lcore_conf *qconf;
+    lcore_conf_t *qconf;
     struct rte_eth_dev_info dev_info;
     struct rte_eth_txconf *txconf;
     int ret;
@@ -1025,7 +1042,7 @@ initDpdkModule() {
                          "rte_eth_tx_queue_setup: err=%d, "
                          "port=%d\n", ret, portid);
 
-            qconf = &lcore_conf[lcore_id];
+            qconf = &sk.lcore_conf[lcore_id];
             qconf->tx_queue_id[portid] = queueid;
             queueid++;
 
@@ -1038,7 +1055,7 @@ initDpdkModule() {
     for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
         if (lcore_id == rte_get_master_lcore() || rte_lcore_is_enabled(lcore_id) == 0)
             continue;
-        qconf = &lcore_conf[lcore_id];
+        qconf = &sk.lcore_conf[lcore_id];
         printf("\nInitializing rx queues on lcore %u ... ", lcore_id );
         fflush(stdout);
         /* init RX queues */
@@ -1095,7 +1112,7 @@ initDpdkModule() {
     for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
         if (rte_lcore_is_enabled(lcore_id) == 0)
             continue;
-        qconf = &lcore_conf[lcore_id];
+        qconf = &sk.lcore_conf[lcore_id];
         for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
             portid = qconf->rx_queue_list[queue].port_id;
             queueid = qconf->rx_queue_list[queue].queue_id;
@@ -1118,6 +1135,7 @@ int startDpdkThreads(void) {
         if (ret != 0)
             rte_exit(EXIT_FAILURE, "Failed to start lcore %d, return %d", i, ret);
     }
+    init_per_lcore();
     return 0;
 }
 
@@ -1139,4 +1157,23 @@ int cleanupDpdkModule(void) {
         printf(" Done\n");
     }
     return 0;
+}
+
+/*
+ * high performance time functions using tsc register.
+ * pls note: these function may not accurate in some environments.
+ */
+uint64_t rte_tsc_ustime() {
+    unsigned lcore_id = rte_lcore_id();
+    lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
+    const uint64_t cur_tsc = rte_rdtsc();
+    return qconf->start_us + (cur_tsc - qconf->start_tsc)*US_PER_S/qconf->tsc_hz;
+}
+
+uint64_t rte_tsc_mstime() {
+    return rte_tsc_ustime()/1000;
+}
+
+uint64_t rte_tsc_time() {
+    return rte_tsc_ustime()/US_PER_S;
 }

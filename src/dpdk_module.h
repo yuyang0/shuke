@@ -98,26 +98,36 @@ struct lcore_rx_queue {
     uint8_t queue_id;
 } __rte_cache_aligned;
 
-struct lcore_conf {
+typedef struct lcore_conf {
     uint16_t n_rx_queue;
     struct lcore_rx_queue rx_queue_list[MAX_RX_QUEUE_PER_LCORE];
     uint16_t n_tx_port;
     uint16_t tx_port_id[RTE_MAX_ETHPORTS];
     uint16_t tx_queue_id[RTE_MAX_ETHPORTS];
     struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
-} __rte_cache_aligned;
+
+    int numa_id;
+    // used to implement time function
+    uint64_t tsc_hz;
+    uint64_t start_tsc;
+    uint64_t start_us;
+
+    // statistics
+    int64_t nr_req;                   // number of processed requests
+    int64_t nr_dropped;
+} __rte_cache_aligned lcore_conf_t;
 
 /* ethernet addresses of ports */
-extern uint64_t dest_eth_addr[RTE_MAX_ETHPORTS];
 extern struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
 
 extern xmm_t val_eth[RTE_MAX_ETHPORTS];
 
-extern struct lcore_conf lcore_conf[RTE_MAX_LCORE];
-
-
 int initDpdkModule(void);
 int startDpdkThreads(void);
 int cleanupDpdkModule(void);
+
+uint64_t rte_tsc_ustime();
+uint64_t rte_tsc_mstime();
+uint64_t rte_tsc_time();
 
 #endif  /* __DPDK_MODULE_H__ */

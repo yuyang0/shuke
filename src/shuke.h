@@ -23,6 +23,9 @@
 #include "list.h"
 #include "log.h"
 #include "ds.h"
+#include "numa_node.h"
+
+#include "dpdk_module.h"
 
 #define TIME_INTERVAL 1000
 
@@ -37,6 +40,9 @@
 #define CONN_CLOSING    5     /**< closing this connection */
 #define CONN_CLOSED     6     /**< connection is closed */
 #define CONN_MAX_STATE  7     /**< Max state value (used for assertion) */
+
+RTE_DECLARE_PER_LCORE(numaNode_t*, __node);
+#define CUR_NODE RTE_PER_LCORE(__node)
 
 #define TQLock() rte_spinlock_lock(&(sk.tq_lock))
 #define TQUnlock() rte_spinlock_unlock(&(sk.tq_lock))
@@ -67,13 +73,6 @@ typedef struct {
     size_t nr_names;  // number of pending names.
     zone *new_zn;
 }zoneReloadTask;
-
-struct sk_stat {
-    unsigned long long nr_req;                   // number of processed requests
-    unsigned long long nr_input_bytes;
-    unsigned long long nr_output_bytes;
-    unsigned long long total_tcp_conn;           // total number of tcp connection received
-};
 
 struct shuke {
     char errstr[ERR_STR_LEN];
@@ -124,8 +123,6 @@ struct shuke {
     bool minimize_resp;
     // end config
 
-    struct sk_stat stat;
-
     volatile bool force_quit;
     zoneDict *zd;
     FILE *query_log_fp;
@@ -173,7 +170,14 @@ struct shuke {
     time_t    starttime;     // server start time
     long long zone_load_time;
 
+    lcore_conf_t lcore_conf[RTE_MAX_LCORE];
+    numaNode_t nodes[MAX_NUMA_NODES];
+
+    // statistics
+    rte_atomic64_t nr_req;                   // number of processed requests
+    rte_atomic64_t nr_dropped;
 };
+
 /*----------------------------------------------
  *     Extern declarations
  *---------------------------------------------*/

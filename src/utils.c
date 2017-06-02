@@ -11,9 +11,12 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <sched.h>
+#include <numa.h>
 
 #include <rte_byteorder.h>
 #include <sys/time.h>
+#include <rte_cycles.h>
 
 #include "log.h"
 #include "utils.h"
@@ -35,6 +38,10 @@ long long mstime(void) {
     return ustime()/1000;
 }
 
+int get_numa_id() {
+    int cpu = sched_getcpu();
+    return numa_node_of_cpu(cpu);
+}
 /* Convert an amount of bytes into a human readable string in the form
  * of 100B, 2G, 100M, 4K, and so forth. */
 void bytesToHuman(char *s, unsigned long long n) {

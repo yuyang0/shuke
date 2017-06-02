@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 
+int get_numa_id();
 long long ustime(void);
 long long mstime(void);
 void bytesToHuman(char *s, unsigned long long n);

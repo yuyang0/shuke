@@ -31,6 +31,7 @@ SRCS-y := admin.c ae.c anet.c conf.c dict.c dpdk_module.c ds.c mongo.c \
 # CFLAGS += -O3
 # CFLAGS += $(WERROR_FLAGS)
 CFLAGS +=$(STD) $(WARN) $(OPT) $(DEBUG) $(SHUKE_CFLAGS)
+LDLIBS += -lnuma
 
 include $(RTE_SDK)/mk/rte.extapp.mk
 

@@ -9,10 +9,7 @@
 #include "utils.h"
 #include "version.h"
 #include "ds.h"
-#include "protocol.h"
-#include "str.h"
 #include "zmalloc.h"
-#include "endianconv.h"
 
 #include "shuke.h"
 #include <getopt.h>
@@ -23,6 +20,8 @@
 #define RANDOM_CHECK_US     1000   // microseconds
 //TODO choose a better value
 #define RANDOM_CHECK_INTERVAL 60   // seconds
+
+RTE_DEFINE_PER_LCORE(numaNode_t*, __node);
 
 struct shuke sk;
 
@@ -62,7 +61,7 @@ void *dequeueTask(void) {
 }
 
 /*!
- * just enqueue the zoneReloadTasl object,
+ * just enqueue the zoneReloadTask object,
  * pls note: when call this function, the dotOrigin must already in server.tq_origins,
  * so this function is mainly used to reput the task to queue when the task encounter an error and need retry.
  * @param t
@@ -210,11 +209,17 @@ void logQuery(struct context *ctx, char *cip, int cport, bool is_tcp) {
     char *ty_str = DNSTypeToStr(ctx->qType);
     char buf[64];
     size_t off;
-    struct timeval tv;
+    uint64_t msec = rte_tsc_mstime();
+    time_t sec = msec/1000;
+    // printf("ts %lld, ms %llu\n", sec, msec);
+    // struct timeval tv;
 
-    gettimeofday(&tv,NULL);
-    off = strftime(buf,sizeof(buf),"%Y/%m/%d %H:%M:%S.",localtime(&tv.tv_sec));
-    snprintf(buf+off,sizeof(buf)-off,"%03d",(int)tv.tv_usec/1000);
+    // gettimeofday(&tv,NULL);
+    // off = strftime(buf,sizeof(buf),"%Y/%m/%d %H:%M:%S.",localtime(&tv.tv_sec));
+    // snprintf(buf+off,sizeof(buf)-off,"%03d",(int)tv.tv_usec/1000);
+
+    off = strftime(buf,sizeof(buf),"%Y/%m/%d %H:%M:%S.",localtime((const time_t *)&sec));
+    snprintf(buf+off,sizeof(buf)-off,"%03d",(int)(msec%1000));
     len2dotlabel(ctx->name, dotName);
     tcpstr = is_tcp? " +tcp": "";
 
@@ -366,7 +371,7 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
     struct context *ctx = &tmp_ctx;
     zone *z = NULL;
     dnsDictValue *dv = NULL;
-    long ts;
+    int64_t ts, now;
     char *name;
     int ret;
 
@@ -435,17 +440,17 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
         return ctx->cur;
     }
 
-    // time_t now = sock->srv->unixtime;
-    // // check if zone need reload.
-    // ts = ATOM_GET(&(z->ts));
-    // if (ts + z->refresh < now) {
-    //     // put async task to queue to reload zone.
-    //     enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
-    // }
-    // if (ts + z->expiry < now) {
-    //     dumpDnsNameErr(ctx);
-    //     goto end;
-    // }
+    now = (int64_t )rte_tsc_time();
+    // check if zone need reload.
+    ts = rte_atomic64_read(&(z->ts));
+    if (ts + z->refresh < now) {
+        // put async task to queue to reload zone.
+        enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
+    }
+    if (ts + z->expiry < now) {
+        dumpDnsNameErr(ctx);
+        goto end;
+    }
 
     dv = zoneFetchValue(z, ctx->name);
     if (dv == NULL) {
@@ -925,6 +930,9 @@ int main(int argc, char *argv[]) {
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
+
+    rte_atomic64_init(&(sk.nr_req));
+    rte_atomic64_init(&(sk.nr_dropped));
 
     cbuf = getConfigBuf(argc, argv);
     initConfig(cbuf);
