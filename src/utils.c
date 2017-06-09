@@ -22,6 +22,14 @@
 #include "utils.h"
 #include "zmalloc.h"
 
+void freev(void **pp) {
+    if (!pp) return;
+    for (int i = 0; pp[i] != NULL; ++i) {
+        free(pp[i]);
+    }
+    free(pp);
+}
+
 /* Return the UNIX time in microseconds */
 long long ustime(void) {
     struct timeval tv;

@@ -91,7 +91,6 @@ end:
 
 void zoneReloadTaskReset(zoneReloadTask *t) {
     t->status = TASK_PENDING;
-    t->nr_names = 0;
     if (t->new_zn) zoneDestroy(t->new_zn);
     t->new_zn = NULL;
 }
@@ -831,10 +830,12 @@ static void initDataStoreConfig(char *cbuf) {
 
     } else if (strcasecmp(sk.data_store, "mongo") == 0) {
         sk.mongo_host = getStrVal(cbuf, "mongo_host", NULL);
+        sk.mongo_dbname = getStrVal(cbuf, "mongo_dbname", NULL);
         conf_err = getIntVal(sk.errstr, cbuf, "mongo_port", &sk.mongo_port);
         CHECK_CONF_ERR(conf_err, sk.errstr);
 
         CHECK_CONFIG("mongo_host", sk.mongo_host != NULL, NULL);
+        CHECK_CONFIG("mongo_dbname", sk.mongo_dbname != NULL, NULL);
     } else {
         fprintf(stderr, "invalid data_store config.\n");
         exit(1);
@@ -931,12 +932,20 @@ int main(int argc, char *argv[]) {
     gettimeofday(&tv,NULL);
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
 
+#ifdef SK_TEST
+    if (argc >= 3 && !strcasecmp(argv[1], "test")) {
+        if (!strcasecmp(argv[2], "mongo")) {
+            return mongoTest(argc, argv);
+        }
+        return -1;  /* test not found */
+    }
+#endif
+
     rte_atomic64_init(&(sk.nr_req));
     rte_atomic64_init(&(sk.nr_dropped));
 
     cbuf = getConfigBuf(argc, argv);
     initConfig(cbuf);
-
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
 

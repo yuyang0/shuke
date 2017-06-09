@@ -211,6 +211,7 @@ RRParser *RRParserCreate(char *name, uint32_t ttl, char *dotOrigin);
 void RRParserDestroy(RRParser *psr);
 int RRParserSetDotOrigin(RRParser *psr, char *dotOrigin);
 int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z);
+int RRParserFeedRdata(RRParser *psr, char *rdata, char *name, uint32_t ttl, char *type, zone *z);
 
 int parseSOASn(char *errstr, char *soa, unsigned long *sn);
 int abs2lenRelative(char domain[], char *dotOrigin);

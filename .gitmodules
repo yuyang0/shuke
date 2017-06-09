@@ -1,0 +1,3 @@
+[submodule "3rd/himongo"]
+	path = 3rd/himongo
+	url = https://github.com/yuyang0/himongo.git

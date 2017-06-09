@@ -27,6 +27,8 @@
 
 #include "dpdk_module.h"
 
+#include "himongo/async.h"
+
 #define TIME_INTERVAL 1000
 
 #define TASK_RELOAD_ZONE     1
@@ -115,6 +117,8 @@ struct shuke {
 
     char *mongo_host;
     int mongo_port;
+    char *mongo_dbname;
+
     char *admin_host;
     int admin_port;
 
@@ -139,6 +143,10 @@ struct shuke {
      */
     int (*asyncReloadAllZone)(void);
     int (*asyncReloadZone)(zoneReloadTask *t);
+
+    mongoAsyncContext *mongo_ctx;
+    long last_retry_ts;
+    long retry_interval;
 
     // admin server
     int fd;
@@ -213,4 +221,9 @@ int mongoAsyncReloadAllZone(void);
 
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
                        char *src_addr, uint16_t src_port, bool is_ipv4);
+
+#ifdef SK_TEST
+int mongoTest(int argc, char *argv[]);
+#endif
+
 #endif /* _SHUKE_H_ */

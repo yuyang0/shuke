@@ -407,6 +407,41 @@ ok:
     return err;
 }
 
+int RRParserFeedRdata(RRParser *psr, char *rdata, char *name, uint32_t ttl, char *type, zone *z) {
+    bool check_soa_top = false;
+    int err = DS_OK;
+    RRParserReset(psr);
+    tokenize(rdata, psr->tokens, &(psr->ntokens));
+
+    strncpy(psr->name, name, MAX_DOMAIN_LEN);
+    if (abs2lenRelative(psr->name, psr->dotOrigin) == DS_ERR) {
+        snprintf(psr->errstr, ERR_STR_LEN, "syntax error: invalid domain name(%s), dotOrigin(%s)", name, psr->dotOrigin);
+        goto error;
+    }
+    psr->ttl = ttl;
+    int ret = strToDNSType(type);
+    if (ret == DS_ERR) {
+        snprintf(psr->errstr, ERR_STR_LEN, "%s is not a type", type);
+        goto error;
+    }
+    psr->type = (uint16_t)ret;
+
+    if (RRParserDoParse(psr, z, check_soa_top) == DS_ERR) goto error;
+    goto ok;
+error:
+    psr->err = PARSER_ERR;
+    err = DS_ERR;
+ok:
+    return err;
+}
+
+/*!
+ * extract sn field from string.
+ * @param errstr : used to store error message
+ * @param soa : the string contains SOA record(full record or just rdata)
+ * @param sn : used to store the result sn
+ * @return
+ */
 int parseSOASn(char *errstr, char *soa, unsigned long *sn) {
     char data[BUFSIZE];
     char *tokens[10];
@@ -416,10 +451,12 @@ int parseSOASn(char *errstr, char *soa, unsigned long *sn) {
     snprintf(data, BUFSIZE, "%s", soa);
     char *ptr = strcasestr(data, " SOA ");
     if (ptr == NULL) {
-        snprintf(errstr, ERR_STR_LEN, "not a SOA record. %s.", soa);
-        return PARSER_ERR;
+        ptr = data;
+        // snprintf(errstr, ERR_STR_LEN, "not a SOA record. %s.", soa);
+        // return PARSER_ERR;
+    } else {
+        ptr += strlen(" SOA ");
     }
-    ptr += strlen(" SOA ");
     tokenize(ptr, tokens, &ntokens);
     if (ntokens != 7) {
         snprintf(errstr, ERR_STR_LEN, "too many tokens in SOA record %s.", soa);
