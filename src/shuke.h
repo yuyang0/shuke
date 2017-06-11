@@ -23,7 +23,7 @@
 #include "list.h"
 #include "log.h"
 #include "ds.h"
-#include "numa_node.h"
+#include "replicate.h"
 
 #include "dpdk_module.h"
 
@@ -43,7 +43,13 @@
 #define CONN_CLOSED     6     /**< connection is closed */
 #define CONN_MAX_STATE  7     /**< Max state value (used for assertion) */
 
-RTE_DECLARE_PER_LCORE(numaNode_t*, __node);
+#define MAX_NUMA_NODES  32
+#define INVALID_NUMA_ID -110
+#define INVALID_LCORE_ID -120
+
+struct numaNode_s;
+
+RTE_DECLARE_PER_LCORE(struct numaNode_s*, __node);
 #define CUR_NODE RTE_PER_LCORE(__node)
 
 #define TQLock() rte_spinlock_lock(&(sk.tq_lock))
@@ -56,6 +62,14 @@ enum taskStates {
     TASK_ERROR = 2,
     TASK_FINISHED = 3,
 };
+
+typedef struct numaNode_s {
+    int numa_id;
+    int main_lcore_id;
+    zoneDict *zd;
+    struct rte_ring *tq;            // task queue, used for async tasks
+    struct rte_timer *timer;
+} numaNode_t;
 
 typedef struct {
     int type;
@@ -128,7 +142,6 @@ struct shuke {
     // end config
 
     volatile bool force_quit;
-    zoneDict *zd;
     FILE *query_log_fp;
 
     int (*syncGetAllZone)(void);
@@ -180,6 +193,11 @@ struct shuke {
 
     lcore_conf_t lcore_conf[RTE_MAX_LCORE];
     numaNode_t nodes[MAX_NUMA_NODES];
+    int numa_ids[MAX_NUMA_NODES];
+    int master_numa_id;
+    int master_lcore_id;
+
+    uint64_t hz;		/**< Number of events per seconds */
 
     // statistics
     rte_atomic64_t nr_req;                   // number of processed requests

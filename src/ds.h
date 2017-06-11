@@ -186,6 +186,7 @@ dnsDictValue *dnsDictValueCreate(void);
 void dnsDictValueDestroy(dnsDictValue *val);
 
 zone *zoneCreate(char *origin);
+zone *zoneCopy(zone *z);
 void zoneDestroy(zone *zn);
 void zoneUpdateRRSetOffsets(zone *z);
 dnsDictValue *zoneFetchValue(zone *z, void *key);
@@ -195,6 +196,7 @@ int zoneReplaceTypeVal(zone *z, char *key, RRSet *rs);
 sds zoneToStr(zone *z);
 
 zoneDict *zoneDictCreate();
+zoneDict *zoneDictCopy(zoneDict *zd);
 void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
 zone *zoneDictGetZone(zoneDict *zd, char *name);

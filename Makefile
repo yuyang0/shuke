@@ -25,10 +25,9 @@ LIB_DIR_LIST=/usr/local/lib \
 INC_DIR_LIST=$(SHUKE_SRC_DIR) \
 			       3rd/himongo \
 				     3rd \
-				     3rd/himongo/libbson/src/bson \
 				     $(RTE_SDK)/$(RTE_TARGET)/include
 SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c ds.c mongo.c \
-            protocol.c sds.c shuke.c str.c utils.c zone_parser.c
+            protocol.c sds.c shuke.c str.c utils.c zone_parser.c replicate.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
@@ -72,7 +71,7 @@ dep:
 	$(MAKE) Makefile.dep
 .PHONY: dep
 
-$(SHUKE_BUILD_DIR)/shuke-server: $(SHUKE_OBJ) $(HIMONGO_STATICLIB)
+$(SHUKE_BUILD_DIR)/shuke-server: $(HIMONGO_STATICLIB) $(SHUKE_OBJ)
 	$(SHUKE_LD) -o $@ $(SHUKE_OBJ) $(DPDKLIBS) $(FINAL_LIBS)
 
 $(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c

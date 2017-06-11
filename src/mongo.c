@@ -114,7 +114,7 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin);
     zone *z = t->new_zn;
 
-    struct replyMsg *reply = r;
+    mongoReply *reply = r;
     if (reply == NULL) {
         goto error;
     }
@@ -148,7 +148,7 @@ ok:
             enqueueZoneReloadTask(t);
         } else {
             LOG_INFO(USER1, "reload zone %s successfully. ", t->dotOrigin);
-            zoneDictReplace(sk.zd, t->new_zn);
+            zoneDictReplace(CUR_NODE->zd, t->new_zn);
             t->new_zn = NULL;
             zoneReloadTaskDestroy(t);
         }
@@ -162,7 +162,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     unsigned long sn;
     char origin[MAX_DOMAIN_LEN+2];
     time_t now = sk.unixtime;
-    struct replyMsg *reply = r;
+    mongoReply *reply = r;
     char *type, *rdata;
 
     zoneReloadTask *t = privdata;
@@ -171,7 +171,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (reply->numberReturned == 0) {
         // remove the zone
         dot2lenlabel(t->dotOrigin, origin);
-        zoneDictDelete(sk.zd, origin);
+        zoneDictDelete(CUR_NODE->zd, origin);
         zfree(t->dotOrigin);
         zfree(t);
         goto ok;
@@ -194,7 +194,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         // update zone's ts field
         dot2lenlabel(t->dotOrigin, origin);
 
-        zone *z = zoneDictFetchVal(sk.zd, origin);
+        zone *z = zoneDictFetchVal(CUR_NODE->zd, origin);
         rte_atomic64_set(&(z->ts), (int64_t)now);
         zoneDecRef(z);
 
@@ -225,7 +225,7 @@ ok:
 static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
     ((void) c); ((void) privdata);
     char dotOrigin[MAX_DOMAIN_LEN];
-    struct replyMsg *reply = r;
+    mongoReply *reply = r;
     char **namev;
     char **p;
 
@@ -288,8 +288,8 @@ int initMongo() {
 }
 
 static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, char *dotOrigin) {
-    struct replyMsg **replies;
-    struct replyMsg *reply;
+    mongoReply **replies;
+    mongoReply *reply;
     uint32_t ttl;
     char *type, *rdata, *name;
 
@@ -318,7 +318,7 @@ error:
     zoneDestroy(z);
     z = NULL;
 ok:
-    for (int i = 0; replies[i] != NULL; ++i) replyMsgFree(replies[i]);
+    for (int i = 0; replies[i] != NULL; ++i) mongoReplyFree(replies[i]);
     free(replies);
     return z;
 }
@@ -371,7 +371,7 @@ ok:
 
 int mongoGetAllZone() {
     LOG_INFO(USER1, "Synchronous get all zones from mongodb.");
-    return _mongoGetAllZone(sk.zd, sk.mongo_host, sk.mongo_port, sk.mongo_dbname);
+    return _mongoGetAllZone(CUR_NODE->zd, sk.mongo_host, sk.mongo_port, sk.mongo_dbname);
 }
 
 int mongoAsyncReloadZone(zoneReloadTask *t) {
@@ -413,7 +413,7 @@ int mongoAsyncReloadAllZone() {
 #if defined(SK_TEST)
 int mongoTest(int argc, char *argv[]) {
     ((void) argc); ((void) argv);
-    sk.zd = zoneDictCreate();
+    CUR_NODE->zd = zoneDictCreate();
     sk.unixtime = time(NULL);
     sk.mongo_host = zstrdup("127.0.0.1");
     sk.mongo_port = 27017;
@@ -421,11 +421,10 @@ int mongoTest(int argc, char *argv[]) {
 
     mongoGetAllZone();
 
-    sds s = zoneDictToStr(sk.zd);
+    sds s = zoneDictToStr(CUR_NODE->zd);
     printf("%s\n", s);
     sdsfree(s);
 
     return 0;
 }
 #endif
-

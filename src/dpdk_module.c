@@ -627,6 +627,11 @@ static void handle_packets(int nb_rx, struct rte_mbuf **pkts_burst,
         __handle_packet(pkts_burst[j], portid, qconf);
 }
 
+static void
+numa_timer_cb(struct rte_timer *tim __rte_unused, void *arg __rte_unused) {
+    processReplicateLog();
+}
+
 int
 launch_one_lcore(__attribute__((unused)) void *dummy)
 {
@@ -645,6 +650,17 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     if (qconf->n_rx_queue == 0) {
         LOG_INFO(USER1, "lcore %u has nothing to do.", lcore_id);
         return 0;
+    }
+    if (CUR_NODE->numa_id != sk.master_numa_id && lcore_id == CUR_NODE->main_lcore_id) {
+        rte_timer_init(CUR_NODE->timer);
+
+        /* load timer0, every 1/2 seconds, on Display lcore, reloaded automatically */
+        rte_timer_reset(CUR_NODE->timer,
+                        NUMA_TIMER_TICK_RATE,
+                        PERIODICAL,
+                        lcore_id,
+                        numa_timer_cb,
+                        NULL);
     }
 
     LOG_INFO(USER1, "entering main loop on lcore %u.", lcore_id);
@@ -869,30 +885,11 @@ config_log() {
     }
 }
 
-static int last_lcore_id(void) {
-    int id = 0;
-    char *p = sk.coremask;
-    // skip '0' and 'x'
-    p += 2;
-    while(*p == '0') p++;
-    id = (int)(4 * (strlen(p) - 1)) - 1;
-    if ((*p >= '8' && *p <= '9') || toupper(*p) >= 'A') {
-        id += 4;
-    } else if (*p >= '4') {
-        id += 3;
-    } else if (*p >= '2') {
-        id += 2;
-    } else {
-        id += 1;
-    }
-    return id;
-}
-
 void
 initDpdkEal() {
     int ret;
     char buf[MAXLINE];
-    snprintf(buf, MAXLINE, "--master-lcore=%d", last_lcore_id());
+    snprintf(buf, MAXLINE, "--master-lcore=%d", sk.master_lcore_id);
     /* initialize the rte env first*/
     char *argv[] = {
             "",
@@ -1122,6 +1119,9 @@ initDpdkModule() {
     }
 
     check_all_ports_link_status((uint8_t)nb_ports, sk.portmask);
+
+    rte_timer_subsystem_init();
+    sk.hz = rte_get_timer_hz();
 
     return 0;
 }

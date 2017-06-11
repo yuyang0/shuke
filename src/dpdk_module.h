@@ -70,6 +70,9 @@
 #include <rte_udp.h>
 #include <rte_string_fns.h>
 #include <rte_cpuflags.h>
+#include <rte_timer.h>
+
+#define NUMA_TIMER_TICK_RATE sk.hz  // one second.
 
 #define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
 

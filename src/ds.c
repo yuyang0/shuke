@@ -512,6 +512,10 @@ zone *zoneCreate(char *ss) {
     return zn;
 }
 
+zone *zoneCopy(zone *z) {
+    return NULL;
+}
+
 void zoneDestroy(zone *zn) {
     if (zn == NULL) return;
     LOG_DEBUG(USER1, "zone %s is destroyed", zn->dotOrigin);
@@ -646,6 +650,10 @@ zoneDict *zoneDictCreate() {
     zoneDictInitLock(zd);
     zd->d = dictCreate(&zoneDictType, NULL);
     return zd;
+}
+
+zoneDict *zoneDictCopy(zoneDict *zd) {
+    return NULL;
 }
 
 void zoneDictDestroy(zoneDict *zd) {

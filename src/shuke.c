@@ -41,7 +41,7 @@ zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, uint32_t sn, long ts) {
     if (ts < 0) {
         char origin[MAX_DOMAIN_LEN+2];
         dot2lenlabel(dotOrigin, origin);
-        zone *z = zoneDictFetchVal(sk.zd, origin);
+        zone *z = zoneDictFetchVal(CUR_NODE->zd, origin);
         if (z != NULL) {
             sn = z->sn;
             ts = rte_atomic64_read(&(z->ts));
@@ -168,7 +168,7 @@ int getAllZoneFromFile() {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            zoneDictReplace(sk.zd, z);
+            zoneDictReplace(CUR_NODE->zd, z);
         }
     }
     dictReleaseIterator(it);
@@ -182,7 +182,7 @@ int reloadZoneFromFile(zoneReloadTask *t) {
     char *fname = dictFetchValue(sk.zone_files_dict, t->dotOrigin);
     if (fname == NULL) {
         dot2lenlabel(t->dotOrigin, origin);
-        zoneDictDelete(sk.zd, origin);
+        zoneDictDelete(CUR_NODE->zd, origin);
     } else {
         if (loadZoneFromFile(fname, &z) == DS_ERR) {
             return ERR_CODE;
@@ -192,7 +192,7 @@ int reloadZoneFromFile(zoneReloadTask *t) {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            zoneDictReplace(sk.zd, z);
+            zoneDictReplace(CUR_NODE->zd, z);
         }
     }
     return OK_CODE;
@@ -259,7 +259,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             char *name = ari[0].name;
             size_t offset = ari[0].offset;
             LOG_DEBUG(USER1, "name: %s, offset: %d", name, offset);
-            zone *ns_z = zoneDictGetZone(sk.zd, name);
+            zone *ns_z = zoneDictGetZone(CUR_NODE->zd, name);
             if (ns_z) {
                 if (ns_z->ns) {
                     hdr.nNsRR += ns_z->ns->num;
@@ -303,7 +303,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         size_t offset = ari[i].offset;
 
         // TODO avoid fetch when the name belongs to z
-        ar_z = zoneDictGetZone(sk.zd, name);
+        ar_z = zoneDictGetZone(CUR_NODE->zd, name);
         if (ar_z == NULL) continue;
         RRSet *ar_a = zoneFetchTypeVal(ar_z, name, DNS_TYPE_A);
         if (ar_a) {
@@ -430,7 +430,7 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
         // ignore SRV proto
         name += (*name +1);
     }
-    z = zoneDictGetZone(sk.zd, name);
+    z = zoneDictGetZone(CUR_NODE->zd, name);
 
     if (z == NULL) {
         // zone is not managed by this server
@@ -442,9 +442,12 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
     now = (int64_t )rte_tsc_time();
     // check if zone need reload.
     ts = rte_atomic64_read(&(z->ts));
-    if (ts + z->refresh < now) {
-        // put async task to queue to reload zone.
-        enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
+    // only master numa node needs reload the zone data.
+    if (CUR_NODE->numa_id == sk.master_numa_id) {
+        if (ts + z->refresh < now) {
+            // put async task to queue to reload zone.
+            enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
+        }
     }
     if (ts + z->expiry < now) {
         dumpDnsNameErr(ctx);
@@ -480,12 +483,12 @@ void checkRandomZones(void) {
     if (now - last_run_ts < RANDOM_CHECK_INTERVAL) return;
     last_run_ts = now;
 
-    zoneDictRLock(sk.zd);
+    zoneDictRLock(CUR_NODE->zd);
 
     start = ustime();
-    max_loop = MIN(zoneDictGetNumZones(sk.zd, 0), RANDOM_CHECK_ZONES);
+    max_loop = MIN(zoneDictGetNumZones(CUR_NODE->zd, 0), RANDOM_CHECK_ZONES);
     for (size_t i = 0; i < max_loop; ++i) {
-        zone *z = zoneDictGetRandomZone(sk.zd, 0);
+        zone *z = zoneDictGetRandomZone(CUR_NODE->zd, 0);
         if (z == NULL) goto end;
 
         ts = rte_atomic64_read(&(z->ts));
@@ -501,7 +504,7 @@ void checkRandomZones(void) {
     }
 end:
     LOG_DEBUG(USER1, "random check %d zones.", ncheck);
-    zoneDictRUnlock(sk.zd);
+    zoneDictRUnlock(CUR_NODE->zd);
 }
 
 static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData) {
@@ -840,7 +843,6 @@ static void initDataStoreConfig(char *cbuf) {
         fprintf(stderr, "invalid data_store config.\n");
         exit(1);
     }
-
 }
 
 static void
@@ -855,6 +857,7 @@ signal_handler(int signum)
 }
 
 static void initShuke() {
+    char ring_name[MAXLINE];
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
     sk.starttime = time(NULL);
     updateCachedTime();
@@ -864,7 +867,7 @@ static void initShuke() {
     sk.tq_origins = dictCreate(&tqOriginsDictType, NULL);
 
     sk.el = aeCreateEventLoop(1024, true);
-    sk.zd = zoneDictCreate();
+
     if (isEmptyStr(sk.query_log_file)) {
         sk.query_log_fp = NULL;
     } else {
@@ -907,6 +910,14 @@ static void initShuke() {
     }
     sk.zone_load_time = mstime() - reload_all_start;
     LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
+    // replicate zone data to other numa node
+    for (int i = 0; i < MAX_NUMA_NODES; ++i) {
+        if (sk.nodes[i].numa_id == INVALID_NUMA_ID) continue;
+
+        sk.nodes[i].zd = zoneDictCopy(CUR_NODE->zd);
+        snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
+        sk.nodes[i].tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
+    }
 
     sk.last_all_reload_ts = sk.unixtime;
 
@@ -923,6 +934,83 @@ static void initShuke() {
     if (initAdminServer() == ERR_CODE) {
         LOG_FATAL(USER1, "can't init admin server.");
     }
+}
+
+static int last_lcore_id(void) {
+    int id = 0;
+    char *p = sk.coremask;
+    // skip '0' and 'x'
+    p += 2;
+    while(*p == '0') p++;
+    id = (int)(4 * (strlen(p) - 1)) - 1;
+    if ((*p >= '8' && *p <= '9') || toupper(*p) >= 'A') {
+        id += 4;
+    } else if (*p >= '4') {
+        id += 3;
+    } else if (*p >= '2') {
+        id += 2;
+    } else {
+        id += 1;
+    }
+    return id;
+}
+
+static int hexchar_to_int(char c) {
+    char buf[2] = {c, 0};
+    return (int)strtol(buf, NULL, 16);
+}
+
+static int get_lcore_ids(int buf[], int *n) {
+    int max = *n;
+    int nr_id = 0;
+    // skip '0' and 'x'
+    char *start = sk.coremask + 2;
+    char *end = sk.coremask + strlen(sk.coremask) - 1;
+    char *p = end;
+    for (; p <= start; --p) {
+        int char_int = hexchar_to_int(*p);
+        for (int i = 0; i < 4; ++i) {
+            if ((1 << i) & char_int) {
+                int lcore_id = (int)(4 * (end - p) + i);
+                if (nr_id >= max) return ERR_CODE;
+                buf[nr_id++] = lcore_id;
+            }
+        }
+    }
+    *n = nr_id;
+    return OK_CODE;
+}
+
+int initNuma() {
+    int n = 0;
+    int ids[1024];
+    int nr_id = 1024;
+    int last_id = last_lcore_id();
+    sk.master_lcore_id = last_id;
+    sk.master_numa_id = numa_node_of_cpu(last_id);
+    for (int i = 0; i < MAX_NUMA_NODES; ++i) {
+        sk.nodes[i].numa_id = INVALID_NUMA_ID;
+        sk.nodes[i].main_lcore_id = INVALID_LCORE_ID;
+    }
+    if (get_lcore_ids(ids, &nr_id) == ERR_CODE) {
+        printf("error: the number of locre is bigger than %d.\n", nr_id);
+        abort();
+    }
+    for (int i = 0; i < nr_id; ++i) {
+        int lcore_id = ids[i];
+        int numa_id = numa_node_of_cpu(lcore_id);
+        sk.nodes[numa_id].numa_id = numa_id;
+        if (sk.nodes[numa_id].main_lcore_id != INVALID_LCORE_ID) {
+            sk.nodes[numa_id].main_lcore_id = lcore_id;
+        }
+    }
+    for (int i = 0; i < MAX_NUMA_NODES; ++i) {
+        if (sk.nodes[i].numa_id != INVALID_NUMA_ID) {
+            sk.numa_ids[n++] = sk.nodes[i].numa_id;
+        }
+    }
+    sk.numa_ids[n] = INVALID_NUMA_ID;
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -946,6 +1034,8 @@ int main(int argc, char *argv[]) {
 
     cbuf = getConfigBuf(argc, argv);
     initConfig(cbuf);
+    initNuma();
+
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
 
