@@ -22,6 +22,16 @@ dnsDictValue *dnsDictValueCreate(void) {
     return dv;
 }
 
+dnsDictValue *dnsDictValueDup(dnsDictValue *dv) {
+    dnsDictValue *new_dv = zmemdup(dv, sizeof(*dv));
+    for (int i = 0; i < SUPPORT_TYPE_NUM; ++i) {
+        if (dv->v.rsArr[i]) {
+            new_dv->v.rsArr[i] = RRSetDup(dv->v.rsArr[i]);
+        }
+    }
+    return new_dv;
+}
+
 void dnsDictValueDestroy(dnsDictValue *dv) {
     if (dv == NULL) return;
     for (int i = 0; i < SUPPORT_TYPE_NUM; ++i) {
@@ -513,7 +523,19 @@ zone *zoneCreate(char *ss) {
 }
 
 zone *zoneCopy(zone *z) {
-    return NULL;
+    zone *new_z = zoneCreate(z->dotOrigin);
+    assert(new_z != NULL);
+
+    dictIterator *it = dictGetIterator(z->d);
+    dictEntry *de;
+    while((de = dictNext(it)) != NULL) {
+        char *name = dictGetKey(de);
+        dnsDictValue *dv = dictGetVal(de);
+        dnsDictValue *new_dv = dnsDictValueDup(dv);
+        dictReplace(new_z->d, name, new_dv);
+    }
+    dictReleaseIterator(it);
+    return new_z;
 }
 
 void zoneDestroy(zone *zn) {
@@ -653,7 +675,20 @@ zoneDict *zoneDictCreate() {
 }
 
 zoneDict *zoneDictCopy(zoneDict *zd) {
-    return NULL;
+    zoneDict *new_zd = zoneDictCreate();
+
+    zoneDictRLock(zd);
+    dictIterator *it = dictGetIterator(zd->d);
+    dictEntry *de;
+    while((de = dictNext(it)) != NULL) {
+        char *origin = dictGetKey(de);
+        zone *z = dictGetVal(de);
+        zone *new_z = zoneCopy(z);
+        dictReplace(new_zd->d, origin, new_z);
+    }
+    dictReleaseIterator(it);
+    zoneDictRUnlock(zd);
+    return new_zd;
 }
 
 void zoneDictDestroy(zoneDict *zd) {
@@ -782,7 +817,7 @@ sds zoneDictToStr(zoneDict *zd) {
     return s;
 }
 
-#if defined(CDNS_TEST)
+#if defined(SK_TEST)
 #include "testhelp.h"
 int dsTest(int argc, char *argv[]) {
     ((void)argc); ((void) argv);

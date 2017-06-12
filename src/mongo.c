@@ -305,7 +305,7 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
             ttl = (uint32_t)bson_extract_int32(b, "ttl");
             type = bson_extract_string(b, "type");
             rdata = bson_extract_string(b, "rdata");
-            printf("RR: %s, %d, %s, %s\n", name, ttl, type, rdata);
+            LOG_DEBUG(USER1, "RR%d: %s, %d, %s, %s", j, name, ttl, type, rdata);
             if (RRParserFeedRdata(psr, rdata, name, ttl, type, z) == DS_ERR) {
                 goto error;
             }
@@ -413,18 +413,20 @@ int mongoAsyncReloadAllZone() {
 #if defined(SK_TEST)
 int mongoTest(int argc, char *argv[]) {
     ((void) argc); ((void) argv);
-    CUR_NODE->zd = zoneDictCreate();
-    sk.unixtime = time(NULL);
-    sk.mongo_host = zstrdup("127.0.0.1");
-    sk.mongo_port = 27017;
-    sk.mongo_dbname = zstrdup("zone");
+    zoneDict *zd = zoneDictCreate();
 
-    mongoGetAllZone();
+    _mongoGetAllZone(zd, "127.0.0.1", 27017, "zone");
 
-    sds s = zoneDictToStr(CUR_NODE->zd);
+    sds s = zoneDictToStr(zd);
     printf("%s\n", s);
     sdsfree(s);
 
+    zoneDict *copy_zd = zoneDictCopy(zd);
+    zoneDictDestroy(zd);
+    s = zoneDictToStr(copy_zd);
+
+    printf("\n\nCOPY ZD:\n%s\n", s);
+    sdsfree(s);
     return 0;
 }
 #endif

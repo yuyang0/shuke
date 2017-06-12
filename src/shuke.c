@@ -15,13 +15,14 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <numa.h>
 
 #define RANDOM_CHECK_ZONES  10
 #define RANDOM_CHECK_US     1000   // microseconds
 //TODO choose a better value
 #define RANDOM_CHECK_INTERVAL 60   // seconds
 
-RTE_DEFINE_PER_LCORE(numaNode_t*, __node);
+RTE_DEFINE_PER_LCORE(struct numaNode_s*, __node);
 
 struct shuke sk;
 
@@ -1024,6 +1025,10 @@ int main(int argc, char *argv[]) {
     if (argc >= 3 && !strcasecmp(argv[1], "test")) {
         if (!strcasecmp(argv[2], "mongo")) {
             return mongoTest(argc, argv);
+        } else if (!strcasecmp(argv[2], "ds")) {
+            return dsTest(argc, argv);
+        } else if (!strcasecmp(argv[2], "zone_parser")) {
+            return zoneParserTest(argc, argv);
         }
         return -1;  /* test not found */
     }

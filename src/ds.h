@@ -183,6 +183,7 @@ void RRSetDestroy(RRSet *rs);
 RRSet *dnsDictValueGet(dnsDictValue *dv, int type);
 void dnsDictValueSet(dnsDictValue *dv, RRSet *rs);
 dnsDictValue *dnsDictValueCreate(void);
+dnsDictValue *dnsDictValueDup(dnsDictValue *dv);
 void dnsDictValueDestroy(dnsDictValue *val);
 
 zone *zoneCreate(char *origin);
@@ -228,7 +229,7 @@ static inline bool isAbsDotDomain(char *ss) {
 extern dictType dnsDictType;
 extern dictType zoneDictType;
 
-#if defined(CDNS_TEST)
+#if defined(SK_TEST)
 int zoneParserTest(int argc, char *argv[]);
 int dsTest(int argc, char *argv[]);
 #endif

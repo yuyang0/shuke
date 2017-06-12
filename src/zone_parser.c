@@ -761,7 +761,7 @@ int loadZoneFromFile(const char *fname, zone **zpp) {
     return err;
 }
 
-#if defined(CDNS_TEST)
+#if defined(SK_TEST)
 #include <stdio.h>
 #include <stdlib.h>
 #include "sds.h"
