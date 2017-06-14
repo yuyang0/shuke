@@ -165,10 +165,10 @@ static void _dictReset(dictht *ht)
 }
 
 /* Create a new hash table */
-dict *dictCreate(dictType *type,
-        void *privDataPtr)
+dict *dictCreate(dictType *type, void *privDataPtr, int socket_id)
 {
-    dict *d = zmalloc(sizeof(*d));
+    dict *d = socket_malloc(socket_id, sizeof(*d));
+    d->socket_id = socket_id;
 
     _dictInit(d,type,privDataPtr);
     return d;
@@ -217,7 +217,7 @@ int dictExpand(dict *d, unsigned long size)
     /* Allocate the new hash table and initialize all pointers to NULL */
     n.size = realsize;
     n.sizemask = realsize-1;
-    n.table = zcalloc(realsize*sizeof(dictEntry*));
+    n.table = socket_calloc(d->socket_id, realsize, sizeof(dictEntry*));
     n.used = 0;
 
     /* Is this the first initialization? If so it's not really a rehashing
@@ -276,7 +276,7 @@ int dictRehash(dict *d, int n) {
 
     /* Check if we already rehashed the whole table... */
     if (d->ht[0].used == 0) {
-        zfree(d->ht[0].table);
+        socket_free(d->socket_id, d->ht[0].table);
         d->ht[0] = d->ht[1];
         _dictReset(&d->ht[1]);
         d->rehashidx = -1;
@@ -361,7 +361,7 @@ dictEntry *dictAddRaw(dict *d, void *key)
      * system it is more likely that recently added entries are accessed
      * more frequently. */
     ht = dictIsRehashing(d) ? &d->ht[1] : &d->ht[0];
-    entry = zmalloc(sizeof(*entry));
+    entry = socket_malloc(d->socket_id, sizeof(*entry));
     entry->next = ht->table[index];
     ht->table[index] = entry;
     ht->used++;
@@ -434,7 +434,7 @@ static int dictGenericDelete(dict *d, const void *key, int nofree)
                     dictFreeKey(d, he);
                     dictFreeVal(d, he);
                 }
-                zfree(he);
+                socket_free(d->socket_id, he);
                 d->ht[table].used--;
                 return DICT_OK;
             }
@@ -462,20 +462,20 @@ int _dictClear(dict *d, dictht *ht, void(callback)(void *)) {
     for (i = 0; i < ht->size && ht->used > 0; i++) {
         dictEntry *he, *nextHe;
 
-        if (callback && (i & 65535) == 0) callback(d->privdata);
+        if (callback && (i & 65535) == 0) callback(d);
 
         if ((he = ht->table[i]) == NULL) continue;
         while(he) {
             nextHe = he->next;
             dictFreeKey(d, he);
             dictFreeVal(d, he);
-            zfree(he);
+            socket_free(d->socket_id, he);
             ht->used--;
             he = nextHe;
         }
     }
     /* Free the table and the allocated cache structure */
-    zfree(ht->table);
+    socket_free(d->socket_id, ht->table);
     /* Re-initialize the table */
     _dictReset(ht);
     return DICT_OK; /* never fails */
@@ -486,7 +486,7 @@ void dictRelease(dict *d)
 {
     _dictClear(d,&d->ht[0],NULL);
     _dictClear(d,&d->ht[1],NULL);
-    zfree(d);
+    socket_free(d->socket_id, d);
 }
 
 dictEntry *dictFind(dict *d, const void *key)
@@ -557,7 +557,7 @@ long long dictFingerprint(dict *d) {
 
 dictIterator *dictGetIterator(dict *d)
 {
-    dictIterator *iter = zmalloc(sizeof(*iter));
+    dictIterator *iter = socket_malloc(d->socket_id, sizeof(*iter));
 
     iter->d = d;
     iter->table = 0;
@@ -618,7 +618,7 @@ void dictReleaseIterator(dictIterator *iter)
         else
             assert(iter->fingerprint == dictFingerprint(iter->d));
     }
-    zfree(iter);
+    socket_free(iter->d->socket_id, iter);
 }
 
 /* Return a random entry from the hash table. Useful to

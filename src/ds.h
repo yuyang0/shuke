@@ -90,6 +90,8 @@ typedef struct {
   NOTICE: SOA and CNAME don't allow multiple records for same name.
 */
 typedef struct {
+    int socket_id;
+
     uint16_t num;          // the number of RR
     uint16_t type;         // RRSet type
     unsigned int free;     //
@@ -126,6 +128,7 @@ typedef struct _dnsDictValue {
 
 typedef struct _zone {
     rte_atomic32_t refcnt;
+    int socket_id;
     char *origin;          // in <len label> format
     char *dotOrigin;       // in <label dot> format
     uint32_t default_ttl;  // $TTL directive
@@ -141,6 +144,8 @@ typedef struct _zone {
 
     // timestamp of last reload of this zone, need sync
     rte_atomic64_t ts;
+    rte_atomic16_t is_reloading;
+
     // some information of SOA record.
     uint32_t sn;
     int32_t refresh;
@@ -155,6 +160,7 @@ if (rte_atomic32_dec_and_test(&(z->refcnt))) zoneDestroy(z); \
 } while(0)
 
 typedef struct _zoneDict {
+    int socket_id;
     rte_rwlock_t lock;
     // the key is the origin of the zone(len label format)
     // the value is zone instance.
@@ -168,8 +174,8 @@ typedef struct _zoneDict {
 #define zoneDictInitLock(zd) rte_rwlock_init(&((zd)->lock))
 #define zoneDictDestroyLock(zd)
 
-RRSet *RRSetCreate(uint16_t type);
-RRSet *RRSetDup(RRSet *rs);
+RRSet *RRSetCreate(uint16_t type, int socket_id);
+RRSet *RRSetDup(RRSet *rs, int socket_id);
 RRSet* RRSetCat(RRSet *rs, char *buf, size_t len);
 RRSet *RRSetRemoveFreeSpace(RRSet *rs);
 
@@ -182,12 +188,12 @@ void RRSetDestroy(RRSet *rs);
 
 RRSet *dnsDictValueGet(dnsDictValue *dv, int type);
 void dnsDictValueSet(dnsDictValue *dv, RRSet *rs);
-dnsDictValue *dnsDictValueCreate(void);
-dnsDictValue *dnsDictValueDup(dnsDictValue *dv);
-void dnsDictValueDestroy(dnsDictValue *val);
+dnsDictValue *dnsDictValueCreate(int socket_id);
+dnsDictValue *dnsDictValueDup(dnsDictValue *dv, int socket_id);
+void dnsDictValueDestroy(dnsDictValue *val, int socket_id);
 
-zone *zoneCreate(char *origin);
-zone *zoneCopy(zone *z);
+zone *zoneCreate(char *origin, int socket_id);
+zone *zoneCopy(zone *z, int socket_id);
 void zoneDestroy(zone *zn);
 void zoneUpdateRRSetOffsets(zone *z);
 dnsDictValue *zoneFetchValue(zone *z, void *key);
@@ -196,8 +202,8 @@ int zoneReplace(zone *z, void *key, dnsDictValue *val);
 int zoneReplaceTypeVal(zone *z, char *key, RRSet *rs);
 sds zoneToStr(zone *z);
 
-zoneDict *zoneDictCreate();
-zoneDict *zoneDictCopy(zoneDict *zd);
+zoneDict *zoneDictCreate(int socket_id);
+zoneDict *zoneDictCopy(zoneDict *zd, int socket_id);
 void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
 zone *zoneDictGetZone(zoneDict *zd, char *name);

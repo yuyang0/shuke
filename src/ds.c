@@ -17,28 +17,28 @@
 
 #define RRSET_MAX_PREALLOC (1024*1024)
 
-dnsDictValue *dnsDictValueCreate(void) {
-    dnsDictValue *dv = zcalloc(sizeof(*dv));
+dnsDictValue *dnsDictValueCreate(int socket_id) {
+    dnsDictValue *dv = socket_calloc(socket_id, 1, sizeof(*dv));
     return dv;
 }
 
-dnsDictValue *dnsDictValueDup(dnsDictValue *dv) {
-    dnsDictValue *new_dv = zmemdup(dv, sizeof(*dv));
+dnsDictValue *dnsDictValueDup(dnsDictValue *dv, int socket_id) {
+    dnsDictValue *new_dv = socket_memdup(socket_id, dv, sizeof(*dv));
     for (int i = 0; i < SUPPORT_TYPE_NUM; ++i) {
         if (dv->v.rsArr[i]) {
-            new_dv->v.rsArr[i] = RRSetDup(dv->v.rsArr[i]);
+            new_dv->v.rsArr[i] = RRSetDup(dv->v.rsArr[i], socket_id);
         }
     }
     return new_dv;
 }
 
-void dnsDictValueDestroy(dnsDictValue *dv) {
+void dnsDictValueDestroy(dnsDictValue *dv, int socket_id) {
     if (dv == NULL) return;
     for (int i = 0; i < SUPPORT_TYPE_NUM; ++i) {
         RRSet *rs = dv->v.rsArr[i];
         RRSetDestroy(rs);
     }
-    zfree(dv);
+    socket_free(socket_id, dv);
 }
 
 RRSet *dnsDictValueGet(dnsDictValue *dv, int type) {
@@ -105,16 +105,18 @@ void dnsDictValueSet(dnsDictValue *dv, RRSet *rs) {
 /*----------------------------------------------
  *     RRSet definition
  *---------------------------------------------*/
-RRSet *RRSetCreate(uint16_t type) {
-    RRSet *rs = zcalloc(sizeof(*rs));
+RRSet *RRSetCreate(uint16_t type, int socket_id) {
+    RRSet *rs = socket_calloc(socket_id, 1, sizeof(*rs));
+    rs->socket_id = socket_id;
     rs->type = type;
     return rs;
 }
 
-RRSet *RRSetDup(RRSet *rs) {
+RRSet *RRSetDup(RRSet *rs, int socket_id) {
     size_t sz = sizeof(*rs) + rs->len + rs->free;
-    RRSet *new = zmalloc(sz);
+    RRSet *new = socket_malloc(socket_id, sz);
     memcpy(new, rs, sz);
+    new->socket_id = socket_id;
     return new;
 }
 
@@ -127,9 +129,9 @@ void RRSetUpdateOffsets(RRSet *rs) {
     char *ptr = rs->data;
 
     if (rs->offsets == NULL) {
-        rs->offsets = zmalloc(rs->num * sizeof(size_t));
+        rs->offsets = socket_malloc(rs->socket_id, rs->num * sizeof(size_t));
     } else {
-        rs->offsets = zrealloc(rs->offsets, rs->num * sizeof(size_t));
+        rs->offsets = socket_realloc(rs->socket_id, rs->offsets, rs->num * sizeof(size_t));
     }
     for (i = 0; i < rs->num; ++i) {
         rs->offsets[i] = offset;
@@ -151,7 +153,7 @@ RRSet* RRSetMakeRoomFor(RRSet *rs, size_t addlen) {
         newlen *= 2;
     else
         newlen += RRSET_MAX_PREALLOC;
-    new_rs = zrealloc(rs, sizeof(*rs)+newlen);
+    new_rs = socket_realloc(rs->socket_id, rs, sizeof(*rs)+newlen);
 
     new_rs->free = newlen - len;
     return new_rs;
@@ -159,7 +161,7 @@ RRSet* RRSetMakeRoomFor(RRSet *rs, size_t addlen) {
 
 RRSet *RRSetRemoveFreeSpace(RRSet *rs) {
     if (rs->free == 0) return rs;
-    RRSet *new = zrealloc(rs, sizeof(*rs)+rs->len);
+    RRSet *new = socket_realloc(rs->socket_id, rs, sizeof(*rs)+rs->len);
     new->free = 0;
     return new;
 }
@@ -354,8 +356,8 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
 
 void RRSetDestroy(RRSet *rs) {
     if (rs == NULL) return;
-    zfree(rs->offsets);
-    zfree(rs);
+    socket_free(rs->socket_id, rs->offsets);
+    socket_free(rs->socket_id, rs);
 }
 
 sds RRSetToStr(RRSet *rs) {
@@ -494,10 +496,10 @@ sds RRSetToStr(RRSet *rs) {
 /*----------------------------------------------
  *     zone definition
  *---------------------------------------------*/
-zone *zoneCreate(char *ss) {
+zone *zoneCreate(char *ss, int socket_id) {
     char domain[256];
     char *origin, *dotOrigin;
-    zone *zn = zcalloc(sizeof(*zn));
+    zone *zn = socket_zmalloc(socket_id, sizeof(*zn));
     // convert len label format if necessary.
     if (strchr(ss, '.') != NULL) {
         dot2lenlabel(ss, domain);
@@ -508,22 +510,24 @@ zone *zoneCreate(char *ss) {
         dotOrigin = domain;
         origin = ss;
     }
-    zn->origin = zstrdup(origin);
+    zn->origin = socket_strdup(socket_id, origin);
     if (checkLenLabel(zn->origin, 0) == PROTO_ERR) {
         LOG_ERROR(USER1, "origin %s is invalid.", dotOrigin);
-        zfree(zn->origin);
-        zfree(zn);
+        socket_free(socket_id, zn->origin);
+        socket_free(socket_id, zn);
         return NULL;
     }
-    zn->dotOrigin = zstrdup(dotOrigin);
-    zn->d = dictCreate(&dnsDictType, NULL);
+    zn->dotOrigin = socket_strdup(socket_id, dotOrigin);
+    zn->socket_id = socket_id;
+    zn->d = dictCreate(&dnsDictType, NULL, socket_id);
     rte_atomic32_set(&(zn->refcnt), 1);
     rte_atomic64_set(&(zn->ts), (int64_t )time(NULL));
+    rte_atomic16_clear(&(zn->is_reloading));
     return zn;
 }
 
-zone *zoneCopy(zone *z) {
-    zone *new_z = zoneCreate(z->dotOrigin);
+zone *zoneCopy(zone *z, int socket_id) {
+    zone *new_z = zoneCreate(z->dotOrigin, socket_id);
     assert(new_z != NULL);
 
     dictIterator *it = dictGetIterator(z->d);
@@ -531,7 +535,7 @@ zone *zoneCopy(zone *z) {
     while((de = dictNext(it)) != NULL) {
         char *name = dictGetKey(de);
         dnsDictValue *dv = dictGetVal(de);
-        dnsDictValue *new_dv = dnsDictValueDup(dv);
+        dnsDictValue *new_dv = dnsDictValueDup(dv, socket_id);
         dictReplace(new_z->d, name, new_dv);
     }
     dictReleaseIterator(it);
@@ -542,9 +546,9 @@ void zoneDestroy(zone *zn) {
     if (zn == NULL) return;
     LOG_DEBUG(USER1, "zone %s is destroyed", zn->dotOrigin);
     dictRelease(zn->d);
-    zfree(zn->origin);
-    zfree(zn->dotOrigin);
-    zfree(zn);
+    socket_free(zn->socket_id, zn->origin);
+    socket_free(zn->socket_id, zn->dotOrigin);
+    socket_free(zn->socket_id, zn);
 }
 
 dnsDictValue *zoneFetchValue(zone *z, void *key) {
@@ -587,7 +591,7 @@ int zoneReplace(zone *z, void *key, dnsDictValue *val) {
 int zoneReplaceTypeVal(zone *z, char *key, RRSet *rs) {
     dnsDictValue *dv = dictFetchValue(z->d, key);
     if (dv == NULL) {
-        dv = dnsDictValueCreate();
+        dv = dnsDictValueCreate(z->socket_id);
         dnsDictValueSet(dv, rs);
         dictReplace(z->d, key, dv);
     } else {
@@ -667,15 +671,16 @@ void zoneUpdateRRSetOffsets(zone *z) {
 /*----------------------------------------------
  *     zone dict definition
  *---------------------------------------------*/
-zoneDict *zoneDictCreate() {
-    zoneDict *zd = zcalloc(sizeof(*zd));
+zoneDict *zoneDictCreate(int socket_id) {
+    zoneDict *zd = socket_zmalloc(socket_id, sizeof(*zd));
     zoneDictInitLock(zd);
-    zd->d = dictCreate(&zoneDictType, NULL);
+    zd->d = dictCreate(&zoneDictType, NULL, socket_id);
+    zd->socket_id = socket_id;
     return zd;
 }
 
-zoneDict *zoneDictCopy(zoneDict *zd) {
-    zoneDict *new_zd = zoneDictCreate();
+zoneDict *zoneDictCopy(zoneDict *zd, int socket_id) {
+    zoneDict *new_zd = zoneDictCreate(socket_id);
 
     zoneDictRLock(zd);
     dictIterator *it = dictGetIterator(zd->d);
@@ -683,7 +688,7 @@ zoneDict *zoneDictCopy(zoneDict *zd) {
     while((de = dictNext(it)) != NULL) {
         char *origin = dictGetKey(de);
         zone *z = dictGetVal(de);
-        zone *new_z = zoneCopy(z);
+        zone *new_z = zoneCopy(z, socket_id);
         dictReplace(new_zd->d, origin, new_z);
     }
     dictReleaseIterator(it);
@@ -694,7 +699,7 @@ zoneDict *zoneDictCopy(zoneDict *zd) {
 void zoneDictDestroy(zoneDict *zd) {
     dictRelease(zd->d);
     zoneDictDestroyLock(zd);
-    zfree(zd);
+    socket_free(zd->socket_id, zd);
 }
 
 /*
@@ -817,16 +822,75 @@ sds zoneDictToStr(zoneDict *zd) {
     return s;
 }
 
+/*----------------------------------------------
+ *     dict type definition
+ *---------------------------------------------*/
+static unsigned int _dictStringCaseHash(const void *key)
+{
+    return dictGenCaseHashFunction(key, strlen(key));
+}
+
+static void *_dictStringKeyDup(void *privdata, const void *key)
+{
+    dict *d = privdata;
+    return socket_strdup(d->socket_id, key);
+}
+
+static void _dictStringKeyDestructor(void *privdata, void *key)
+{
+    dict *d = privdata;
+    socket_free(d->socket_id, key);
+}
+
+static int _dictStringKeyCaseCompare(void *privdata, const void *key1,
+                                     const void *key2)
+{
+    DICT_NOTUSED(privdata);
+    return strcasecmp(key1, key2) == 0;
+}
+
+/* ----------------------- dns Hash Table Type ------------------------*/
+static void _dnsDictValDestructor(void *privdata, void *val)
+{
+    dict *d = privdata;
+    dnsDictValueDestroy(val, d->socket_id);
+}
+
+dictType dnsDictType = {
+        _dictStringCaseHash, /* hash function */
+        _dictStringKeyDup,             /* key dup */
+        NULL,                          /* val dup */
+        _dictStringKeyCaseCompare,         /* key compare */
+        _dictStringKeyDestructor,         /* key destructor */
+        _dnsDictValDestructor,         /* val destructor */
+};
+
+/* ----------------------- zone Hash Table Type ------------------------*/
+static void _zoneDictValDestructor(void *privdata, void *val)
+{
+    DICT_NOTUSED(privdata);
+    zone *z = val;
+    zoneDecRef(z);
+}
+
+dictType zoneDictType = {
+        _dictStringCaseHash,  /* hash function */
+        _dictStringKeyDup,              /* key dup */
+        NULL,                           /* val dup */
+        _dictStringKeyCaseCompare,          /* key compare */
+        _dictStringKeyDestructor,         /* key destructor */
+        _zoneDictValDestructor,         /* val destructor */
+};
 #if defined(SK_TEST)
 #include "testhelp.h"
 int dsTest(int argc, char *argv[]) {
     ((void)argc); ((void) argv);
     char origin[] = "\7example\3com";
-    zone *z = zoneCreate(origin);
+    zone *z = zoneCreate(origin, SOCKET_ID_HEAP);
     char k[] = "\3www";
     {
-        RRSet *rs1 = RRSetCreate(DNS_TYPE_A);
-        RRSet *rs2 = RRSetCreate(DNS_TYPE_AAAA);
+        RRSet *rs1 = RRSetCreate(DNS_TYPE_A, SOCKET_ID_HEAP);
+        RRSet *rs2 = RRSetCreate(DNS_TYPE_AAAA, SOCKET_ID_HEAP);
         zoneReplaceTypeVal(z, k, rs1);
         zoneReplaceTypeVal(z, k, rs2);
         test_cond("zone 1", zoneFetchValue(z, "aaa") == NULL);

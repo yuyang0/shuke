@@ -144,7 +144,7 @@ init_per_lcore() {
     qconf->tsc_hz = rte_get_tsc_hz();
     qconf->start_us = (uint64_t )ustime();
     qconf->start_tsc = rte_rdtsc();
-    CUR_NODE = &sk.nodes[get_numa_id()];
+    CUR_NODE = &sk.nodes[rte_lcore_to_socket_id(lcore_id)];
 }
 
 static int
@@ -899,9 +899,9 @@ initDpdkEal() {
             sk.mem_channels,
             buf,
             "--proc-type=auto",
-            ""
+            "--"
     };
-    const int argc = 6;
+    const int argc = 8;
     /*
      * reset optind, because rte_eal_init uses getopt.
      */
@@ -1123,6 +1123,8 @@ initDpdkModule() {
     rte_timer_subsystem_init();
     sk.hz = rte_get_timer_hz();
 
+    init_per_lcore();
+
     return 0;
 }
 
@@ -1135,7 +1137,6 @@ int startDpdkThreads(void) {
         if (ret != 0)
             rte_exit(EXIT_FAILURE, "Failed to start lcore %d, return %d", i, ret);
     }
-    init_per_lcore();
     return 0;
 }
 

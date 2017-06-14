@@ -74,7 +74,7 @@ int initAdminServer(void) {
     char *host = sk.admin_host;
     int port = sk.admin_port;
 
-    sk.commands = dictCreate(&commandTableDictType, NULL);
+    sk.commands = dictCreate(&commandTableDictType, NULL, SOCKET_ID_ANY);
     int numcommands = sizeof(adminCommandTable)/sizeof(adminCommand);
     for (int j = 0; j < numcommands; j++) {
         adminCommand *c = adminCommandTable+j;
@@ -653,7 +653,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         for (int i = 2; i < argc; ++i) {
             strncpy(dotOrigin, argv[i], MAX_DOMAIN_LEN);
             if (!isAbsDotDomain(dotOrigin)) strcat(dotOrigin, ".");
-            enqueueZoneReloadTaskRaw(dotOrigin, 0, -1);
+            enqueueZoneReloadTaskRaw(dotOrigin, NULL);
         }
     } else if (strcasecmp(argv[1], "RELOADALL") == 0) {
         if (argc != 2) {

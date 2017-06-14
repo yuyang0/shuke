@@ -306,8 +306,8 @@ int RRParserDoParse(RRParser *psr, zone *z, bool check_top_soa) {
     }
 
     rs = zoneFetchTypeVal(z, domain, type);
-    if (rs == NULL) rs = RRSetCreate(type);
-    else rs = RRSetDup(rs);
+    if (rs == NULL) rs = RRSetCreate(type, z->socket_id);
+    else rs = RRSetDup(rs, z->socket_id);
 
     if (psr->ttl > rs->ttl) {
         rs->ttl = psr->ttl;
@@ -723,7 +723,7 @@ int loadZoneFromStr(char *errstr, char *zbuf, zone **zpp) {
         goto error;
     }
     psr = RRParserCreate("@", default_ttl, dotOrigin);
-    z = zoneCreate(dotOrigin);
+    z = zoneCreate(dotOrigin, SOCKET_ID_ANY);
     z->default_ttl = default_ttl;
 
     while ((err= readFullRecord(errstr, &ss, rbuf, RECORD_SIZE, &line_idx)) == DS_OK) {

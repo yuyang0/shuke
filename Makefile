@@ -3,8 +3,11 @@ $(error "Please define RTE_SDK environment variable")
 endif
 RTE_TARGET ?= x86_64-native-linuxapp-gcc
 
+include $(RTE_SDK)/mk/rte.vars.mk
+
 ifdef TEST
 SHUKE_CFLAGS=-DSK_TEST
+OPTIMIZATION?=-O0
 endif
 
 SHUKE_BUILD_DIR ?= build
@@ -23,21 +26,20 @@ DEBUG=-g -ggdb
 LIB_DIR_LIST=/usr/local/lib \
 						 $(RTE_SDK)/$(RTE_TARGET)/lib
 INC_DIR_LIST=$(SHUKE_SRC_DIR) \
-			       3rd/himongo \
-				     3rd \
-				     $(RTE_SDK)/$(RTE_TARGET)/include
+				     3rd
+				     # $(RTE_SDK)/$(RTE_TARGET)/include
 SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c ds.c mongo.c \
-            protocol.c sds.c shuke.c str.c utils.c zone_parser.c replicate.c
+            protocol.c sds.c shuke.c str.c utils.c zone_parser.c replicate.c \
+            zmalloc.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
-#include $(RTE_SDK)/mk/rte.vars.mk
 
 FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS) $(SHUKE_CFLAGS)
 FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG)
-FINAL_LIBS=$(HIMONGO_STATICLIB) -pthread -lrt -lnuma
+FINAL_LIBS=$(HIMONGO_STATICLIB) -pthread -lrt
 
-FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
+# FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
 FINAL_CFLAGS += $(addprefix -I,$(INC_DIR_LIST))
 
 FINAL_LDFLAGS += $(addprefix -L,$(LIB_DIR_LIST))
@@ -63,9 +65,14 @@ endif
 
 all: $(SHUKE_BUILD_DIR) $(SHUKE_BUILD_DIR)/shuke-server
 
+include Makefile.dep
+
 Makefile.dep:
-	-$(SHUKE_CC) -MM $(SHUKE_SRC_DIR)/*.c > Makefile.dep 2> /dev/null || true
-	-sed "s/^\([^\.]*\.o\)/$(SHUKE_BUILD_DIR)\/\1/g" $@ > aaa.txt
+	set -e; rm -f $@; \
+	$(CC) -I$(SHUKE_SRC_DIR) -I3rd -MM $(SHUKE_SRC) > Makefile.dep 2> /dev/null || true; \
+	sed "s/^\([^\.]*\.o\)/$(SHUKE_BUILD_DIR)\/\1/g" $@ > $@.$$$$; \
+	mv -f $@.$$$$ $@; \
+	rm -f $@.$$$$
 
 dep:
 	$(MAKE) Makefile.dep
@@ -101,49 +108,53 @@ dnsbench: src/bench.c src/ae.c
 
 
 #Libraries of dpdk
-#DPDKLIBS += --whole-archive
-DPDKLIBS += -ldpdk
-DPDKLIBS += -lrte_acl
-DPDKLIBS += -lrte_cfgfile
-DPDKLIBS += -lrte_cmdline
-DPDKLIBS += -lrte_cryptodev
-DPDKLIBS += -lrte_distributor
-DPDKLIBS += -lrte_eal
-DPDKLIBS += -lrte_ethdev
-DPDKLIBS += -lrte_hash
-DPDKLIBS += -lrte_ip_frag
-DPDKLIBS += -lrte_jobstats
-DPDKLIBS += -lrte_kni
-DPDKLIBS += -lrte_kvargs
-DPDKLIBS += -lrte_lpm
-DPDKLIBS += -lrte_mbuf
-DPDKLIBS += -lrte_mempool
-DPDKLIBS += -lrte_meter
-DPDKLIBS += -lrte_pdump
-DPDKLIBS += -lrte_pipeline
-DPDKLIBS += -lrte_pmd_af_packet
-DPDKLIBS += -lrte_pmd_bnxt
-DPDKLIBS += -lrte_pmd_bond
-DPDKLIBS += -lrte_pmd_cxgbe
-DPDKLIBS += -lrte_pmd_e1000
-DPDKLIBS += -lrte_pmd_ena
-DPDKLIBS += -lrte_pmd_enic
-DPDKLIBS += -lrte_pmd_fm10k
-DPDKLIBS += -lrte_pmd_i40e
-DPDKLIBS += -lrte_pmd_ixgbe
-DPDKLIBS += -lrte_pmd_null
-DPDKLIBS += -lrte_pmd_ring
-#DPDKLIBS += -lrte_pmd_vhost
-DPDKLIBS += -lrte_pmd_virtio
-#DPDKLIBS += -lrte_pmd_vmxnet3_uio
-DPDKLIBS += -lrte_port
-DPDKLIBS += -lrte_power
-
-DPDKLIBS += -lrte_reorder
-DPDKLIBS += -lrte_ring
-DPDKLIBS += -lrte_sched
-DPDKLIBS += -lrte_table
-DPDKLIBS += -lrte_timer
-#DPDKLIBS += -lrte_vhost
-DPDKLIBS += -lrt
-DPDKLIBS += -lm -ldl
+DPDKLIBS += -Wl,-lrte_kni
+DPDKLIBS += -Wl,-lrte_pipeline
+DPDKLIBS += -Wl,-lrte_table
+DPDKLIBS += -Wl,-lrte_port
+DPDKLIBS += -Wl,-lrte_pdump
+DPDKLIBS += -Wl,-lrte_distributor
+DPDKLIBS += -Wl,-lrte_reorder
+DPDKLIBS += -Wl,-lrte_ip_frag
+DPDKLIBS += -Wl,-lrte_meter
+DPDKLIBS += -Wl,-lrte_sched
+DPDKLIBS += -Wl,-lrte_lpm
+DPDKLIBS += -Wl,--whole-archive
+DPDKLIBS += -Wl,-lrte_acl
+DPDKLIBS += -Wl,--no-whole-archive
+DPDKLIBS += -Wl,-lrte_jobstats
+DPDKLIBS += -Wl,-lrte_power
+DPDKLIBS += -Wl,--whole-archive
+DPDKLIBS += -Wl,-lrte_timer
+DPDKLIBS += -Wl,-lrte_hash
+DPDKLIBS += -Wl,-lrte_vhost
+DPDKLIBS += -Wl,-lrte_kvargs
+DPDKLIBS += -Wl,-lrte_mbuf
+DPDKLIBS += -Wl,-lrte_net
+DPDKLIBS += -Wl,-lrte_ethdev
+DPDKLIBS += -Wl,-lrte_cryptodev
+DPDKLIBS += -Wl,-lrte_mempool
+DPDKLIBS += -Wl,-lrte_ring
+DPDKLIBS += -Wl,-lrte_eal
+DPDKLIBS += -Wl,-lrte_cmdline
+DPDKLIBS += -Wl,-lrte_cfgfile
+DPDKLIBS += -Wl,-lrte_pmd_bond
+DPDKLIBS += -Wl,-lrte_pmd_af_packet
+DPDKLIBS += -Wl,-lrte_pmd_bnxt
+DPDKLIBS += -Wl,-lrte_pmd_cxgbe
+DPDKLIBS += -Wl,-lrte_pmd_e1000
+DPDKLIBS += -Wl,-lrte_pmd_ena
+DPDKLIBS += -Wl,-lrte_pmd_enic
+DPDKLIBS += -Wl,-lrte_pmd_fm10k
+DPDKLIBS += -Wl,-lrte_pmd_i40e
+DPDKLIBS += -Wl,-lrte_pmd_ixgbe
+DPDKLIBS += -Wl,-lrte_pmd_null
+DPDKLIBS += -Wl,-lrte_pmd_qede
+DPDKLIBS += -Wl,-lrte_pmd_ring
+DPDKLIBS += -Wl,-lrte_pmd_virtio
+DPDKLIBS += -Wl,-lrte_pmd_vhost
+DPDKLIBS += -Wl,-lrte_pmd_vmxnet3_uio
+DPDKLIBS += -Wl,-lrte_pmd_null_crypto
+DPDKLIBS += -Wl,--no-whole-archive
+DPDKLIBS += -Wl,-lrt
+DPDKLIBS += -Wl,-lm -Wl,-ldl -Wl,-export-dynamic

@@ -8,6 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <rte_malloc.h>
+#include <rte_memcpy.h>
+
+#define SOCKET_ID_HEAP   -1010
+
 #if defined(USE_MALLOC) || defined (SK_TEST)
 
 #define zmalloc(size) malloc(size)
@@ -23,9 +28,6 @@ static inline void *zmemdup(const void *ptr, size_t size) {
 }
 
 #else
-
-#include <rte_malloc.h>
-#include <rte_memcpy.h>
 
 static inline void *zmalloc(size_t size) {
     return rte_malloc(NULL, size, 0);
@@ -55,9 +57,15 @@ static inline void zfree(void *ptr) {
 
 #endif
 
-#define hmalloc malloc
-#define hfree free
-#define hrealloc realloc
-#define hstrdup strdup
+void malloc_set_oom_handler(void (*oom_handler)(size_t));
+void socket_malloc_set_oom_handler(void (*oom_handler)(size_t));
+
+void *socket_malloc(int socket_id, size_t size);
+void *socket_zmalloc(int socket_id, size_t size);
+void *socket_calloc(int socket_id, size_t nmemb, size_t size);
+void *socket_realloc(int socket_id, void *ptr, size_t size);
+void *socket_memdup(int socket_id, const void *ptr, size_t size);
+void *socket_strdup(int socket_id, const char *s);
+void socket_free(int socket_id, void *ptr);
 
 #endif /* _ZMALLOC_H_ */

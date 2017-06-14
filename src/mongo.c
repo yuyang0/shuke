@@ -105,19 +105,19 @@ static int mongoAeAttach(aeEventLoop *loop, mongoAsyncContext *ac) {
  *---------------------------------------------*/
 static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     ((void) c);
+    mongoReply *reply = r;
+    zoneReloadTask *t = privdata;
     char *name, *type, *rdata;
     uint32_t ttl;
-    zoneReloadTask *t = privdata;
-    if (t->status == TASK_ERROR) {
-        goto error;
-    }
-    if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin);
-    zone *z = t->new_zn;
-
-    mongoReply *reply = r;
     if (reply == NULL) {
         goto error;
     }
+    if (t->status == TASK_ERROR) {
+        goto error;
+    }
+
+    if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin, SOCKET_ID_ANY);
+    zone *z = t->new_zn;
 
     LOG_DEBUG(USER1, "RRSET cb %s %d", t->dotOrigin, reply->numberReturned);
 
@@ -140,15 +140,18 @@ ok:
     if (!reply || reply->cursorID == 0) {
         if (t->status == TASK_ERROR) {
             LOG_ERROR(USER1, "failed to reload zone %s asynchronously.", t->dotOrigin);
-            zoneReloadTaskReset(t);
-            enqueueZoneReloadTask(t);
+            if (enqueueZoneReloadTask(t) == ERR_CODE) {
+                zoneReloadTaskDestroy(t);
+            }
         } else if (t->new_zn->soa == NULL) {
             LOG_ERROR(USER1, "zone %s must contain a SOA record.", t->dotOrigin);
-            zoneReloadTaskReset(t);
-            enqueueZoneReloadTask(t);
+            if (enqueueZoneReloadTask(t) == ERR_CODE) {
+                zoneReloadTaskDestroy(t);
+            }
         } else {
             LOG_INFO(USER1, "reload zone %s successfully. ", t->dotOrigin);
             zoneDictReplace(CUR_NODE->zd, t->new_zn);
+            reloadZoneOtherNuma(t->new_zn);
             t->new_zn = NULL;
             zoneReloadTaskDestroy(t);
         }
@@ -172,8 +175,8 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         // remove the zone
         dot2lenlabel(t->dotOrigin, origin);
         zoneDictDelete(CUR_NODE->zd, origin);
-        zfree(t->dotOrigin);
-        zfree(t);
+        deleteZoneOtherNuma(origin);
+        zoneReloadTaskDestroy(t);
         goto ok;
     }
     rdata = bson_extract_string(reply->docs[0], "rdata");
@@ -186,26 +189,18 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     }
     LOG_DEBUG(USER1, "sn cb: %d %d", sn, t->sn);
 
-    /*
-     * negative `ts` means this zone is not in current memory cache,
-     * so we don't need to validate sn, just fetch all the zone data.
-     */
-    if (t->sn >= sn && t->ts >= 0) {
-        // update zone's ts field
-        dot2lenlabel(t->dotOrigin, origin);
+    assert(t->old_zn != NULL);
 
-        zone *z = zoneDictFetchVal(CUR_NODE->zd, origin);
+    if (t->sn >= sn) {
+        // update zone's ts field
+        zone *z = t->old_zn;
         rte_atomic64_set(&(z->ts), (int64_t)now);
-        zoneDecRef(z);
 
         zoneReloadTaskDestroy(t);
         goto ok;
     } else {
-        if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin);
+        if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin, SOCKET_ID_ANY);
         if (t->psr == NULL) t->psr = RRParserCreate("@", 0, t->dotOrigin);
-        // if (RRParserFeed(t->psr, reply->str, "@", t->new_zn) == DS_ERR) {
-        //     goto error;
-        // }
 
         errcode = mongoAsyncFindAll(c, RRSetGetCallback, t, sk.mongo_dbname,
                                     t->dotOrigin, NULL, NULL, 0);
@@ -216,8 +211,9 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     }
     goto ok;
 error:
-    zoneReloadTaskReset(t);
-    enqueueZoneReloadTask(t);
+    if (enqueueZoneReloadTask(t) == ERR_CODE) {
+        zoneReloadTaskDestroy(t);
+    }
 ok:
     return;
 }
@@ -237,7 +233,7 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
             LOG_WARN(USER1, "%s is too long, ignore it.", dotOrigin);
             continue;
         }
-        enqueueZoneReloadTaskRaw(dotOrigin, 0, -1);
+        enqueueZoneReloadTaskRaw(dotOrigin, NULL);
     }
     sk.last_all_reload_ts = sk.unixtime;
     freev((void **)namev);
@@ -293,7 +289,11 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
     uint32_t ttl;
     char *type, *rdata, *name;
 
-    zone *z = zoneCreate(dotOrigin);
+#ifdef SK_TEST
+    zone *z = zoneCreate(dotOrigin, SOCKET_ID_HEAP);
+#else
+    zone *z = zoneCreate(dotOrigin, SOCKET_ID_ANY);
+#endif
 
     replies = mongoFindAll(c, db, col, NULL, NULL, 0);
 
@@ -382,17 +382,27 @@ int mongoAsyncReloadZone(zoneReloadTask *t) {
     LOG_INFO(USER1, "asynchronous reload zone %s.", t->dotOrigin);
 
     LOG_DEBUG(USER1, "async sn: %d, ts: %d", t->sn, t->ts);
-    bson_t *q = BCON_NEW("type", BCON_UTF8("SOA"));
-    errcode = mongoAsyncFindOne(sk.mongo_ctx, zoneSOAGetCallback, t,
-                                sk.mongo_dbname, t->dotOrigin, q, NULL);
+    if (t->old_zn != NULL) {
+        bson_t *q = BCON_NEW("type", BCON_UTF8("SOA"));
+        errcode = mongoAsyncFindOne(sk.mongo_ctx, zoneSOAGetCallback, t,
+                                    sk.mongo_dbname, t->dotOrigin, q, NULL);
+    } else {
+        /*
+         * new zone.
+         * skip checking sn.
+         */
+        errcode = mongoAsyncFindAll(sk.mongo_ctx, RRSetGetCallback, t, sk.mongo_dbname,
+                                    t->dotOrigin, NULL, NULL, 0);
+    }
     if (errcode != MONGO_OK) {
         LOG_ERROR(USER1, "MONGO ERROR: %s", sk.mongo_ctx->errstr);
         goto error;
     }
     goto ok;
 error:
-    zoneReloadTaskReset(t);
-    enqueueZoneReloadTask(t);
+    if (enqueueZoneReloadTask(t) == ERR_CODE) {
+        zoneReloadTaskDestroy(t);
+    }
     retcode = ERR_CODE;
 ok:
     return retcode;
@@ -413,7 +423,7 @@ int mongoAsyncReloadAllZone() {
 #if defined(SK_TEST)
 int mongoTest(int argc, char *argv[]) {
     ((void) argc); ((void) argv);
-    zoneDict *zd = zoneDictCreate();
+    zoneDict *zd = zoneDictCreate(SOCKET_ID_HEAP);
 
     _mongoGetAllZone(zd, "127.0.0.1", 27017, "zone");
 
@@ -421,7 +431,7 @@ int mongoTest(int argc, char *argv[]) {
     printf("%s\n", s);
     sdsfree(s);
 
-    zoneDict *copy_zd = zoneDictCopy(zd);
+    zoneDict *copy_zd = zoneDictCopy(zd, SOCKET_ID_HEAP);
     zoneDictDestroy(zd);
     s = zoneDictToStr(copy_zd);
 

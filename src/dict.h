@@ -74,6 +74,7 @@ typedef struct dictht {
 } dictht;
 
 typedef struct dict {
+    int socket_id;
     dictType *type;
     void *privdata;
     dictht ht[2];
@@ -102,11 +103,11 @@ typedef void (dictScanFunction)(void *privdata, const dictEntry *de);
 /* ------------------------------- Macros ------------------------------------*/
 #define dictFreeVal(d, entry) \
     if ((d)->type->valDestructor) \
-        (d)->type->valDestructor((d)->privdata, (entry)->v.val)
+        (d)->type->valDestructor((d), (entry)->v.val)
 
 #define dictSetVal(d, entry, _val_) do { \
     if ((d)->type->valDup) \
-        entry->v.val = (d)->type->valDup((d)->privdata, _val_); \
+        entry->v.val = (d)->type->valDup((d), _val_); \
     else \
         entry->v.val = (_val_); \
 } while(0)
@@ -122,18 +123,18 @@ typedef void (dictScanFunction)(void *privdata, const dictEntry *de);
 
 #define dictFreeKey(d, entry) \
     if ((d)->type->keyDestructor) \
-        (d)->type->keyDestructor((d)->privdata, (entry)->key)
+        (d)->type->keyDestructor((d), (entry)->key)
 
 #define dictSetKey(d, entry, _key_) do { \
     if ((d)->type->keyDup) \
-        entry->key = (d)->type->keyDup((d)->privdata, _key_); \
+        entry->key = (d)->type->keyDup((d), _key_); \
     else \
         entry->key = (_key_); \
 } while(0)
 
 #define dictCompareKeys(d, key1, key2) \
     (((d)->type->keyCompare) ? \
-        (d)->type->keyCompare((d)->privdata, key1, key2) : \
+        (d)->type->keyCompare((d), key1, key2) : \
         (key1) == (key2))
 
 #define dictHashKey(d, key) (d)->type->hashFunction(key)
@@ -147,7 +148,7 @@ typedef void (dictScanFunction)(void *privdata, const dictEntry *de);
 #define dictIsRehashing(d) ((d)->rehashidx != -1)
 
 /* API */
-dict *dictCreate(dictType *type, void *privDataPtr);
+dict *dictCreate(dictType *type, void *privDataPtr, int socket_id);
 int dictExpand(dict *d, unsigned long size);
 int dictAdd(dict *d, void *key, void *val);
 dictEntry *dictAddRaw(dict *d, void *key);

@@ -11,7 +11,7 @@
 typedef struct {
     int type;
     zone *z;
-    char *origin;
+    char origin[MAX_DOMAIN_LEN];
 }replicateLog;
 
 replicateLog *replicateLogCreate(int type, char *origin, zone *z);

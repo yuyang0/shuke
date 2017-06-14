@@ -35,23 +35,32 @@ struct shuke sk;
  *             -1 means this function needs to check if this zone is in memory cache.
  * @return obj if everything is ok otherwise return NULL
  */
-zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, uint32_t sn, long ts) {
+zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, zone *old_zn) {
+    uint32_t sn = 0;
+    long ts = -1;
+    if (old_zn == NULL) {
+        char origin[MAX_DOMAIN_LEN+2];
+        dot2lenlabel(dotOrigin, origin);
+        old_zn = zoneDictFetchVal(CUR_NODE->zd, origin);
+    } else {
+        zoneIncRef(old_zn);
+    }
+    //TODO: incr the reference count of zone object.
+    if (old_zn != NULL) {
+        if (rte_atomic16_test_and_set(&(old_zn->is_reloading))) {
+            sn = old_zn->sn;
+            ts = rte_atomic64_read(&(old_zn->ts));
+        } else {
+            return NULL;
+        }
+    }
     zoneReloadTask *t = zcalloc(sizeof(*t));
     t->type = TASK_RELOAD_ZONE;
     t->dotOrigin = zstrdup(dotOrigin);
-    if (ts < 0) {
-        char origin[MAX_DOMAIN_LEN+2];
-        dot2lenlabel(dotOrigin, origin);
-        zone *z = zoneDictFetchVal(CUR_NODE->zd, origin);
-        if (z != NULL) {
-            sn = z->sn;
-            ts = rte_atomic64_read(&(z->ts));
-            zoneDecRef(z);
-        }
-    }
     t->sn = sn;
     t->ts = ts;
     t->status = TASK_PENDING;
+    t->old_zn = old_zn;
     return t;
 }
 
@@ -70,23 +79,22 @@ void *dequeueTask(void) {
  */
 int enqueueZoneReloadTask(zoneReloadTask *t) {
     int errcode = OK_CODE;
+    zoneReloadTaskReset(t);
     if (rte_ring_mp_enqueue(sk.tq, t) != 0) errcode = ERR_CODE;
     return errcode;
 }
 
-int enqueueZoneReloadTaskRaw(char *dotOrigin, uint32_t sn, long ts) {
+int enqueueZoneReloadTaskRaw(char *dotOrigin, zone *old_zn) {
     int errcode = OK_CODE;
-    TQLock();
-    if (dictFind(sk.tq_origins, dotOrigin) != NULL) goto end;
-    zoneReloadTask *t = zoneReloadTaskCreate(dotOrigin, sn, ts);
-    assert(dictAdd(sk.tq_origins, t->dotOrigin, NULL) == DICT_OK);
+    zoneReloadTask *t = zoneReloadTaskCreate(dotOrigin, old_zn);
+    if (t == NULL) return ERR_CODE;
+
     if (rte_ring_mp_enqueue(sk.tq, t) != 0) {
         zoneReloadTaskDestroy(t);
         errcode = ERR_CODE;
         goto end;
     }
 end:
-    TQUnlock();
     return errcode;
 }
 
@@ -97,14 +105,33 @@ void zoneReloadTaskReset(zoneReloadTask *t) {
 }
 
 void zoneReloadTaskDestroy(zoneReloadTask *t) {
-    TQLock();
-    dictDelete(sk.tq_origins, t->dotOrigin);
-    TQUnlock();
-
     zfree(t->dotOrigin);
+    if (t->old_zn){
+        rte_atomic16_clear(&(t->old_zn->is_reloading));
+        zoneDecRef(t->old_zn);
+    }
     if (t->new_zn) zoneDestroy(t->new_zn);
     if (t->psr) RRParserDestroy(t->psr);
     zfree(t);
+}
+
+void deleteZoneOtherNuma(char *origin) {
+    for (int i = 0; ; ++i) {
+        int numa_id = sk.numa_ids[i];
+        if (numa_id == INVALID_NUMA_ID || numa_id == sk.master_numa_id) break;
+        replicateLog *l = replicateLogCreate(REPLICATE_DEL, origin, NULL);
+        rte_ring_sp_enqueue(sk.nodes[numa_id].tq, (void *)l);
+    }
+}
+
+void reloadZoneOtherNuma(zone *z) {
+    for (int i = 0; ; ++i) {
+        int numa_id = sk.numa_ids[i];
+        if (numa_id == INVALID_NUMA_ID || numa_id == sk.master_numa_id) break;
+        zone *new_z = zoneCopy(z, numa_id);
+        replicateLog *l = replicateLogCreate(REPLICATE_ADD, NULL, new_z);
+        rte_ring_sp_enqueue(sk.nodes[numa_id].tq, (void *)l);
+    }
 }
 
 void createPidFile(void) {
@@ -447,7 +474,7 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
     if (CUR_NODE->numa_id == sk.master_numa_id) {
         if (ts + z->refresh < now) {
             // put async task to queue to reload zone.
-            enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
+            enqueueZoneReloadTaskRaw(z->dotOrigin, z);
         }
     }
     if (ts + z->expiry < now) {
@@ -496,7 +523,7 @@ void checkRandomZones(void) {
         if (ts + z->refresh < now) {
             // put async task to queue to reload zone.
             LOG_DEBUG(USER1, "enqueue %s.", z->dotOrigin);
-            enqueueZoneReloadTaskRaw(z->dotOrigin, z->sn, ts);
+            enqueueZoneReloadTaskRaw(z->dotOrigin, z);
         }
         ncheck++;
 
@@ -577,39 +604,6 @@ static int _dictStringKeyCaseCompare(void *privdata, const void *key1,
     DICT_NOTUSED(privdata);
     return strcasecmp(key1, key2) == 0;
 }
-
-/* ----------------------- dns Hash Table Type ------------------------*/
-static void _dnsDictValDestructor(void *privdata, void *val)
-{
-    DICT_NOTUSED(privdata);
-    dnsDictValueDestroy(val);
-}
-
-dictType dnsDictType = {
-        _dictStringCaseHash, /* hash function */
-        _dictStringKeyDup,             /* key dup */
-        NULL,                          /* val dup */
-        _dictStringKeyCaseCompare,         /* key compare */
-        _dictStringKeyDestructor,         /* key destructor */
-        _dnsDictValDestructor,         /* val destructor */
-};
-
-/* ----------------------- zone Hash Table Type ------------------------*/
-static void _zoneDictValDestructor(void *privdata, void *val)
-{
-    DICT_NOTUSED(privdata);
-    zone *z = val;
-    zoneDecRef(z);
-}
-
-dictType zoneDictType = {
-        _dictStringCaseHash,  /* hash function */
-        _dictStringKeyDup,              /* key dup */
-        NULL,                           /* val dup */
-        _dictStringKeyCaseCompare,          /* key compare */
-        _dictStringKeyDestructor,         /* key destructor */
-        _zoneDictValDestructor,         /* val destructor */
-};
 
 /* ----------------------- zone file Hash Table Type ------------------------*/
 dictType zoneFileDictType = {
@@ -811,7 +805,7 @@ static void initDataStoreConfig(char *cbuf) {
             fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
             exit(1);
         }
-        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL);
+        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_ANY);
         if (getBlockVal(sk.errstr, cbuf, "zone_files", &handleZoneFileConf, sk.zone_files_dict) != CONF_OK) {
             fprintf(stderr, "Config Error: %s.\n", sk.errstr);
             exit(1);
@@ -863,9 +857,7 @@ static void initShuke() {
     sk.starttime = time(NULL);
     updateCachedTime();
 
-    TQInitLock();
     sk.tq = rte_ring_create("TQ_QUEUE", 1024, rte_socket_id(), RING_F_SC_DEQ);
-    sk.tq_origins = dictCreate(&tqOriginsDictType, NULL);
 
     sk.el = aeCreateEventLoop(1024, true);
 
@@ -882,13 +874,6 @@ static void initShuke() {
         }
     }
 
-    // if (strcasecmp(sk.data_store, "redis") == 0) {
-    //     sk.initAsyncContext = &initRedis;
-    //     sk.checkAsyncContext = &checkRedis;
-    //     sk.syncGetAllZone = &redisGetAllZone;
-    //     sk.asyncReloadAllZone = &redisAsyncReloadAllZone;
-    //     sk.asyncReloadZone = &redisAsyncReloadZone;
-    // } else
     if (strcasecmp(sk.data_store, "mongo") == 0) {
         sk.initAsyncContext = &initMongo;
         sk.checkAsyncContext = &checkMongo;
@@ -905,6 +890,7 @@ static void initShuke() {
         LOG_FATAL(USER1, "invalid data store config %s", sk.data_store);
     }
 
+    CUR_NODE->zd = zoneDictCreate(SOCKET_ID_ANY);
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
         LOG_FATAL(USER1, "can't load all zone data from %s", sk.data_store);
@@ -913,9 +899,11 @@ static void initShuke() {
     LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
     // replicate zone data to other numa node
     for (int i = 0; i < MAX_NUMA_NODES; ++i) {
-        if (sk.nodes[i].numa_id == INVALID_NUMA_ID) continue;
+        int numa_id = sk.nodes[i].numa_id;
+        if (numa_id == INVALID_NUMA_ID || numa_id == sk.master_numa_id) continue;
 
-        sk.nodes[i].zd = zoneDictCopy(CUR_NODE->zd);
+        // FIXME: should allocate memory belongs to numa node
+        sk.nodes[i].zd = zoneDictCopy(CUR_NODE->zd, numa_id);
         snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
         sk.nodes[i].tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
     }
@@ -988,7 +976,7 @@ int initNuma() {
     int nr_id = 1024;
     int last_id = last_lcore_id();
     sk.master_lcore_id = last_id;
-    sk.master_numa_id = numa_node_of_cpu(last_id);
+    sk.master_numa_id = rte_lcore_to_socket_id(last_id);
     for (int i = 0; i < MAX_NUMA_NODES; ++i) {
         sk.nodes[i].numa_id = INVALID_NUMA_ID;
         sk.nodes[i].main_lcore_id = INVALID_LCORE_ID;
@@ -999,7 +987,7 @@ int initNuma() {
     }
     for (int i = 0; i < nr_id; ++i) {
         int lcore_id = ids[i];
-        int numa_id = numa_node_of_cpu(lcore_id);
+        int numa_id = rte_lcore_to_socket_id(lcore_id);
         sk.nodes[numa_id].numa_id = numa_id;
         if (sk.nodes[numa_id].main_lcore_id != INVALID_LCORE_ID) {
             sk.nodes[numa_id].main_lcore_id = lcore_id;
@@ -1059,3 +1047,4 @@ int main(int argc, char *argv[]) {
 
     cleanupDpdkModule();
 }
+

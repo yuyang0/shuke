@@ -52,10 +52,6 @@ struct numaNode_s;
 RTE_DECLARE_PER_LCORE(struct numaNode_s*, __node);
 #define CUR_NODE RTE_PER_LCORE(__node)
 
-#define TQLock() rte_spinlock_lock(&(sk.tq_lock))
-#define TQUnlock() rte_spinlock_unlock(&(sk.tq_lock))
-#define TQInitLock() rte_spinlock_init(&(sk.tq_lock))
-
 enum taskStates {
     TASK_PENDING = 0,
     TASK_RUNNING = 1,
@@ -87,6 +83,7 @@ typedef struct {
 
     RRParser *psr;
     size_t nr_names;  // number of pending names.
+    zone *old_zn;
     zone *new_zn;
 }zoneReloadTask;
 
@@ -173,9 +170,7 @@ struct shuke {
 
     aeEventLoop *el;      // event loop for main thread.
 
-    rte_spinlock_t tq_lock;
     struct rte_ring *tq;            // task queue, used for async tasks
-    dict *tq_origins;     // the origins which is reloading.
 
     // redis context
     // it will be NULL when cdns is disconnected with redis,
@@ -215,11 +210,11 @@ int snpack(char *buf, int offset, size_t size, char const *fmt, ...);
 /*----------------------------------------------
  *     zoneReloadTask
  *---------------------------------------------*/
-zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, uint32_t sn, long ts);
+zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, zone *old_zn);
 void zoneReloadTaskReset(zoneReloadTask *t);
 void zoneReloadTaskDestroy(zoneReloadTask *t);
 
-int enqueueZoneReloadTaskRaw(char *dotOrigin, uint32_t sn, long ts);
+int enqueueZoneReloadTaskRaw(char *dotOrigin, zone *old_zn);
 int enqueueZoneReloadTask(zoneReloadTask *t);
 void *dequeueTask(void);
 /*----------------------------------------------
@@ -239,6 +234,10 @@ int mongoAsyncReloadAllZone(void);
 
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
                        char *src_addr, uint16_t src_port, bool is_ipv4);
+
+
+void deleteZoneOtherNuma(char *origin);
+void reloadZoneOtherNuma(zone *z);
 
 #ifdef SK_TEST
 int mongoTest(int argc, char *argv[]);
