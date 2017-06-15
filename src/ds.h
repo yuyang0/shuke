@@ -26,9 +26,6 @@
 #define IP_STR_LEN  INET6_ADDRSTRLEN
 
 struct context {
-    char cliaddr[IP_STR_LEN];    // client address of udp peer.
-    socklen_t  clilen;
-
     // information parsed from dns query packet.
     dnsHeader_t hdr;
     // information of question.

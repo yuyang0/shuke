@@ -12,10 +12,10 @@
 #include "zmalloc.h"
 
 #include "shuke.h"
+
 #include <getopt.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <numa.h>
 
 #define RANDOM_CHECK_ZONES  10
 #define RANDOM_CHECK_US     1000   // microseconds
@@ -354,7 +354,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         zoneDecRef(ar_z);
     }
     // update the header. don't update `cur` in ctx
-    cur = snpack(ctx->resp, 2, ctx->totallen, ">hhhhh", hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
+    cur = snpack(ctx->resp, 0, ctx->totallen, "h>hhhhh", hdr.xid, hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
     assert(cur != ERR_CODE);
 
     return OK_CODE;
@@ -370,7 +370,7 @@ int dumpDnsError(struct context *ctx, int err) {
     if (err == DNS_RCODE_NXDOMAIN) SET_AA(hdr.flag);
 
     // a little trick, overwrite the dns header, don't update `cur` in ctx
-    cur = snpack(ctx->resp, 2, ctx->totallen, ">hhhhh", hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
+    cur = snpack(ctx->resp, 0, ctx->totallen, "h>hhhhh", hdr.xid, hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
     assert(cur != ERR_CODE);
     return OK_CODE;
 }
@@ -391,20 +391,14 @@ static inline int dumpDnsRefusedErr(struct context *ctx) {
     return dumpDnsError(ctx, DNS_RCODE_REFUSED);
 }
 
-int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
-                       char *src_addr, uint16_t src_port, bool is_ipv4)
+static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
 {
-    struct context tmp_ctx;
-    struct context *ctx = &tmp_ctx;
     zone *z = NULL;
     dnsDictValue *dv = NULL;
     int64_t ts, now;
     char *name;
     int ret;
 
-    ctx->resp = resp;
-    ctx->totallen = respLen;
-    ctx->cur = 0;
 
     if (sz < 12) {
         LOG_WARN(USER1, "receive bad dns query message with only %d bytes, drop it", sz);
@@ -440,15 +434,6 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
         // TODO parse OPT message(EDNS)
     }
     LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
-
-    if (sk.query_log_fp) {
-        char cip[IP_STR_LEN];
-        int cport;
-        int af = is_ipv4? AF_INET:AF_INET6;
-        inet_ntop(af, (void*)src_addr,cip,IP_STR_LEN);
-        cport = ntohs(src_port);
-        logQuery(ctx, cip, cport, false);
-    }
 
     name = ctx->name;
 
@@ -493,6 +478,49 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
 end:
     if (z != NULL) zoneDecRef(z);
     return ctx->cur;
+}
+
+int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
+                       char *src_addr, uint16_t src_port, bool is_ipv4)
+{
+    struct context ctx;
+    ctx.resp = resp;
+    ctx.totallen = respLen;
+    ctx.cur = 0;
+    int status;
+    status = _getDnsResponse(buf, sz, &ctx);
+
+    if (status != ERR_CODE && sk.query_log_fp) {
+        char cip[IP_STR_LEN];
+        int cport;
+        int af = is_ipv4? AF_INET:AF_INET6;
+        inet_ntop(af, (void*)src_addr,cip,IP_STR_LEN);
+        cport = ntohs(src_port);
+        logQuery(&ctx, cip, cport, false);
+    }
+    return status;
+}
+
+int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
+{
+    int status;
+    char resp[4096];
+    size_t respLen = 4096;
+
+    struct context ctx;
+    ctx.resp = resp;
+    ctx.totallen = respLen;
+    ctx.cur = 0;
+
+    status = _getDnsResponse(buf, sz, &ctx);
+
+    if (status != ERR_CODE && sk.query_log_fp) {
+        logQuery(&ctx, conn->cip, conn->cport, true);
+    }
+
+    snpack(ctx.resp, DNS_HDR_SIZE, respLen, "m>hh", ctx.name, ctx.nameLen+1, ctx.qType, ctx.qClass);
+    tcpConnAppendDnsResponse(conn, ctx.resp, ctx.cur);
+    return status;
 }
 
 static void updateCachedTime() {
@@ -563,6 +591,8 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
     }
     //TODO remove the removed zone in zoneDict.
     checkRandomZones();
+    // run tcp dns server cron
+    tcpServerCron(el, id, (void *)sk.tcp_srv);
     return TIME_INTERVAL;
 }
 
@@ -755,6 +785,12 @@ static void initConfig(char *cbuf) {
     /*        sk.rx_queue_config, sk.promiscuous_on, */
     /*        sk.jumbo_on); */
 
+    sk.bindaddr_count = CONFIG_BINDADDR_MAX;
+    if (getStrArrayVal(sk.errstr, cbuf, "bind", sk.bindaddr, &(sk.bindaddr_count)) < 0) {
+        fprintf(stderr, "Config Error: %s\n", sk.errstr);
+        exit(1);
+    }
+
     conf_err = getIntVal(sk.errstr, cbuf, "port", &sk.port);
     CHECK_CONF_ERR(conf_err, sk.errstr);
 
@@ -923,6 +959,7 @@ static void initShuke() {
     if (initAdminServer() == ERR_CODE) {
         LOG_FATAL(USER1, "can't init admin server.");
     }
+    sk.tcp_srv = tcpServerCreate();
 }
 
 static int last_lcore_id(void) {
@@ -1047,4 +1084,3 @@ int main(int argc, char *argv[]) {
 
     cleanupDpdkModule();
 }
-

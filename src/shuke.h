@@ -29,6 +29,7 @@
 
 #include "himongo/async.h"
 
+#define CONFIG_BINDADDR_MAX 16
 #define TIME_INTERVAL 1000
 
 #define TASK_RELOAD_ZONE     1
@@ -71,6 +72,52 @@ typedef struct {
     int type;
 } object;
 
+struct tcpContext {
+    struct tcpConn *sock;
+
+    struct tcpContext *next;
+
+    size_t wcur;       // tcp write cursor.
+    size_t wsize;      // total size of data size.
+    char reply[];
+};
+
+typedef struct _tcpServer {
+    int ipfd[CONFIG_BINDADDR_MAX];  // only for tcp server(listening fd)
+    int ipfd_count;
+
+    aeEventLoop *el;
+    pthread_t tid;
+    struct list_head tcp_head;     // tcp connection list.
+
+    char errstr[ERR_STR_LEN];
+} tcpServer;
+
+typedef struct _tcpConn {
+    int fd;
+    aeEventLoop *el;
+    char buf[MAX_UDP_SIZE];
+    size_t nRead;
+    struct tcpContext *whead;
+    struct tcpContext *wtail;
+    struct _tcpServer *srv;
+
+    char cip[IP_STR_LEN];
+    int cport;
+
+    char len[2];
+    // when the query packet size is smaller than MAX_UDP_SIZE, data points to buf
+    // otherwise it will point to dynamic allocated memory, in this case,
+    // memory free is needed when finished.
+    char *data;
+    int state;
+
+    long lastActiveTs;
+
+    size_t dnsPacketSize;    // size of current dns query packet
+    struct list_head node;     // for connection list
+} tcpConn;
+
 typedef struct {
     int type;
 
@@ -103,6 +150,8 @@ struct shuke {
     int max_pkt_len;
     char *rx_queue_config;
 
+    char *bindaddr[CONFIG_BINDADDR_MAX];
+    int bindaddr_count;
     int port;
     char *pidfile;
     bool daemonize;
@@ -163,6 +212,8 @@ struct shuke {
     dict *commands;
     struct list_head head;
 
+    // dns tcp server
+    tcpServer *tcp_srv;
 
     int arch_bits;
     long last_all_reload_ts; // timestamp of last all reload
@@ -197,6 +248,10 @@ struct shuke {
     // statistics
     rte_atomic64_t nr_req;                   // number of processed requests
     rte_atomic64_t nr_dropped;
+
+    uint64_t num_tcp_conn;
+    uint64_t total_tcp_conn;
+    uint64_t rejected_tcp_conn;
 };
 
 /*----------------------------------------------
@@ -224,6 +279,13 @@ int initAdminServer(void);
 void releaseAdminServer(void);
 
 /*----------------------------------------------
+ *     tcp server
+ *---------------------------------------------*/
+tcpServer *tcpServerCreate();
+int tcpServerCron(struct aeEventLoop *el, long long id, void *clientData);
+void tcpConnAppendDnsResponse(tcpConn *conn, char *resp, size_t respLen);
+
+/*----------------------------------------------
  *     mongo
  *---------------------------------------------*/
 int initMongo(void);
@@ -235,6 +297,7 @@ int mongoAsyncReloadAllZone(void);
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
                        char *src_addr, uint16_t src_port, bool is_ipv4);
 
+int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz);
 
 void deleteZoneOtherNuma(char *origin);
 void reloadZoneOtherNuma(zone *z);
