@@ -609,16 +609,16 @@ static unsigned int _dictStringCaseHash(const void *key)
     return dictGenCaseHashFunction(key, strlen(key));
 }
 
-static void *_dictStringKeyDup(void *privdata, const void *key)
+static void *_dictStringDup(void *privdata, const void *key)
 {
-    DICT_NOTUSED(privdata);
-    return zstrdup(key);
+    dict *d = privdata;
+    return socket_strdup(d->socket_id, key);
 }
 
-static void _dictStringKeyDestructor(void *privdata, void *key)
+static void _dictStringDestructor(void *privdata, void *key)
 {
-    DICT_NOTUSED(privdata);
-    zfree(key);
+    dict *d = privdata;
+    socket_free(d->socket_id, key);
 }
 
 // static int _dictStringKeyCompare(void *privdata, const void *key1,
@@ -637,21 +637,21 @@ static int _dictStringKeyCaseCompare(void *privdata, const void *key1,
 
 /* ----------------------- zone file Hash Table Type ------------------------*/
 dictType zoneFileDictType = {
-        _dictStringCaseHash,  /* hash function */
-        _dictStringKeyDup,              /* key dup */
-        _dictStringKeyDup,                           /* val dup */
-        _dictStringKeyCaseCompare,          /* key compare */
-        _dictStringKeyDestructor,         /* key destructor */
-        _dictStringKeyDestructor,         /* val destructor */
+        _dictStringCaseHash,         /* hash function */
+        _dictStringDup,              /* key dup */
+        _dictStringDup,              /* val dup */
+        _dictStringKeyCaseCompare,   /* key compare */
+        _dictStringDestructor,       /* key destructor */
+        _dictStringDestructor,       /* val destructor */
 };
 /* ----------------------- command Hash Table Type ------------------------*/
 dictType commandTableDictType = {
-        _dictStringCaseHash,  /* hash function */
-        NULL,              /* key dup */
-        NULL,                           /* val dup */
-        _dictStringKeyCaseCompare,          /* key compare */
-        _dictStringKeyDestructor,         /* key destructor */
-        NULL,         /* val destructor */
+        _dictStringCaseHash,          /* hash function */
+        NULL,                         /* key dup */
+        NULL,                         /* val dup */
+        _dictStringKeyCaseCompare,    /* key compare */
+        _dictStringDestructor,        /* key destructor */
+        NULL,                         /* val destructor */
 };
 
 dictType tqOriginsDictType = {
@@ -730,8 +730,15 @@ static char *getConfigBuf(int argc, char **argv) {
     return cbuf;
 }
 
-static void initConfig(char *cbuf) {
+static void initConfig(int argc, char *argv[]) {
     int conf_err;
+    char cwd[MAXLINE];
+
+    char *cbuf = getConfigBuf(argc, argv);
+    if (getcwd(cwd, MAXLINE) == NULL) {
+        fprintf(stderr, "getcwd: %s.\n", strerror(errno));
+        exit(1);
+    }
 
     // set default values
     sk.promiscuous_on = false;
@@ -826,22 +833,14 @@ static void initConfig(char *cbuf) {
     CHECK_CONF_ERR(conf_err, sk.errstr);
     conf_err = getBoolVal(sk.errstr, cbuf, "minimize_resp", &sk.minimize_resp);
     CHECK_CONF_ERR(conf_err, sk.errstr);
-}
 
-static void initDataStoreConfig(char *cbuf) {
-    char cwd[MAXLINE];
-    int conf_err;
-    if (getcwd(cwd, MAXLINE) == NULL) {
-        fprintf(stderr, "getcwd: %s.\n", strerror(errno));
-        exit(1);
-    }
     if (strcasecmp(sk.data_store, "file") == 0) {
         sk.zone_files_root = getStrVal(cbuf, "zone_files_root", cwd);
         if (*(sk.zone_files_root) != '/') {
             fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
             exit(1);
         }
-        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_ANY);
+        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_HEAP);
         if (getBlockVal(sk.errstr, cbuf, "zone_files", &handleZoneFileConf, sk.zone_files_dict) != CONF_OK) {
             fprintf(stderr, "Config Error: %s.\n", sk.errstr);
             exit(1);
@@ -874,6 +873,7 @@ static void initDataStoreConfig(char *cbuf) {
         fprintf(stderr, "invalid data_store config.\n");
         exit(1);
     }
+    free(cbuf);
 }
 
 static void
@@ -959,6 +959,7 @@ static void initShuke() {
     if (initAdminServer() == ERR_CODE) {
         LOG_FATAL(USER1, "can't init admin server.");
     }
+    LOG_INFO(USER1, "starting dns tcp server.");
     sk.tcp_srv = tcpServerCreate();
 }
 
@@ -1041,7 +1042,6 @@ int initNuma() {
 
 int main(int argc, char *argv[]) {
     struct timeval tv;
-    char *cbuf;
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
@@ -1062,8 +1062,7 @@ int main(int argc, char *argv[]) {
     rte_atomic64_init(&(sk.nr_req));
     rte_atomic64_init(&(sk.nr_dropped));
 
-    cbuf = getConfigBuf(argc, argv);
-    initConfig(cbuf);
+    initConfig(argc, argv);
     initNuma();
 
     if (sk.daemonize) daemonize();
@@ -1074,8 +1073,6 @@ int main(int argc, char *argv[]) {
     sk.force_quit = false;
     initDpdkModule();
 
-    initDataStoreConfig(cbuf);
-    free(cbuf);
     initShuke();
 
     startDpdkThreads();
