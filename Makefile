@@ -28,7 +28,7 @@ LIB_DIR_LIST=/usr/local/lib \
 INC_DIR_LIST=$(SHUKE_SRC_DIR) \
 				     3rd
 				     # $(RTE_SDK)/$(RTE_TARGET)/include
-SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c ds.c mongo.c \
+SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c ds.c mongo.c \
             protocol.c sds.c shuke.c str.c utils.c zone_parser.c replicate.c \
             zmalloc.c tcpserver.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))

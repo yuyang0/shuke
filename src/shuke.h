@@ -47,6 +47,7 @@
 #define MAX_NUMA_NODES  32
 #define INVALID_NUMA_ID -110
 #define INVALID_LCORE_ID -120
+#define INVALID_PORT_ID -130
 
 struct numaNode_s;
 
@@ -63,6 +64,7 @@ enum taskStates {
 typedef struct numaNode_s {
     int numa_id;
     int main_lcore_id;
+    int nr_lcore_ids;           // enabled lcores belong this numa node;
     zoneDict *zd;
     struct rte_ring *tq;            // task queue, used for async tasks
     struct rte_timer *timer;
@@ -141,6 +143,8 @@ struct shuke {
     char *configfile;
 
     char *coremask;
+    char *kni_tx_coremask;
+    char *kni_kernel_coremask;
     char *mem_channels;
     int portmask;
     bool promiscuous_on;
@@ -186,6 +190,29 @@ struct shuke {
     int all_reload_interval;
     bool minimize_resp;
     // end config
+
+    /*
+     * these fields will allocate using malloc
+     */
+    lcore_conf_t lcore_conf[RTE_MAX_LCORE];
+    port_kni_conf_t *kni_conf[RTE_MAX_ETHPORTS];
+
+    numaNode_t *nodes[MAX_NUMA_NODES];
+    int numa_ids[MAX_NUMA_NODES];
+    int nr_numa_id;
+
+    int master_numa_id;
+    int master_lcore_id;
+
+    int *lcore_ids;
+    int nr_lcore_ids;
+    int *kni_tx_lcore_ids;
+    int nr_kni_tx_lcore_id;
+    int *port_ids;
+    int nr_ports;
+    // char *total_coremask;
+    char *total_lcore_list;
+    // end
 
     volatile bool force_quit;
     FILE *query_log_fp;
@@ -237,11 +264,6 @@ struct shuke {
     time_t    starttime;     // server start time
     long long zone_load_time;
 
-    lcore_conf_t lcore_conf[RTE_MAX_LCORE];
-    numaNode_t nodes[MAX_NUMA_NODES];
-    int numa_ids[MAX_NUMA_NODES];
-    int master_numa_id;
-    int master_lcore_id;
 
     uint64_t hz;		/**< Number of events per seconds */
 

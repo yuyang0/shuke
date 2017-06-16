@@ -2,6 +2,7 @@
 // Created by Yu Yang <yyangplus@NOSPAM.gmail.com> on 2017-05-02
 //
 
+#include <assert.h>
 #include "dpdk_module.h"
 #include "shuke.h"
 #include "utils.h"
@@ -144,7 +145,7 @@ init_per_lcore() {
     qconf->tsc_hz = rte_get_tsc_hz();
     qconf->start_us = (uint64_t )ustime();
     qconf->start_tsc = rte_rdtsc();
-    CUR_NODE = &sk.nodes[rte_lcore_to_socket_id(lcore_id)];
+    CUR_NODE = sk.nodes[rte_lcore_to_socket_id(lcore_id)];
 }
 
 static int
@@ -440,6 +441,37 @@ send_single_packet(lcore_conf_t *qconf,
     return 0;
 }
 
+/* Enqueue a single packet, and send burst if queue is filled */
+static inline int
+kni_send_single_packet(port_kni_conf_t *kconf, struct rte_mbuf *m)
+{
+    int ret = 0;
+    uint16_t len;
+
+    len = kconf->kni_tx_mbufs.len;
+    kconf->kni_tx_mbufs.m_table[len] = m;
+    len++;
+
+    /* enough pkts to be sent */
+    if (unlikely(len == MAX_PKT_BURST)) {
+        struct rte_mbuf **m_table;
+
+        m_table = (struct rte_mbuf **)kconf->kni_tx_mbufs.m_table;
+
+        ret = rte_kni_tx_burst(kconf->kni, m_table, MAX_PKT_BURST);
+        if (unlikely(ret < MAX_PKT_BURST)) {
+            do {
+                rte_pktmbuf_free(m_table[ret]);
+            } while (++ret < MAX_PKT_BURST);
+        }
+
+        len = 0;
+    }
+
+    kconf->kni_tx_mbufs.len = len;
+    return ret;
+}
+
 static uint16_t
 get_psd_sum(void *l3_hdr, uint16_t l3_ptypes, uint64_t ol_flags)
 {
@@ -481,6 +513,16 @@ verify_cksum(struct rte_mbuf *m) {
 }
 
 static inline __attribute__((always_inline)) void
+__handle_tcp_packet(struct rte_mbuf *m, uint8_t portid)
+{
+    //TODO Check the dest tcp port of packet
+    port_kni_conf_t *kconf = sk.kni_conf[portid];
+    /* Burst tx to kni */
+    if (kni_send_single_packet(kconf, m) > 0)
+        rte_kni_handle_request(kconf->kni);
+}
+
+static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
 {
@@ -491,7 +533,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     struct ipv4_hdr *ipv4_h = NULL;
     struct ipv6_hdr *ipv6_h = NULL;
     struct udp_hdr  *udp_h = NULL;
-    uint32_t is_udp;
+    uint32_t is_udp, is_tcp;
     uint32_t l3_ptypes;
     bool is_ipv4;
     struct ether_addr eth_addr;
@@ -503,17 +545,22 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
     is_udp = m->packet_type & RTE_PTYPE_L4_UDP;
+    is_tcp = m->packet_type & RTE_PTYPE_L4_TCP;
     l3_ptypes = m->packet_type & RTE_PTYPE_L3_MASK;
     is_ipv4 = (l3_ptypes == RTE_PTYPE_L3_IPV4);
-
-    if (!is_udp || (l3_ptypes != RTE_PTYPE_L3_IPV4 && l3_ptypes != RTE_PTYPE_L3_IPV6))
-    {
-        goto invalid;
-    }
 
     if (!verify_cksum(m)) {
         goto invalid;
     }
+    // if (is_tcp) {
+    //     __handle_tcp_packet(m, portid);
+    //     return;
+    // }
+    if (!is_udp)
+    {
+        goto invalid;
+    }
+
 
     if (l3_ptypes == RTE_PTYPE_L3_IPV4) {
         /* Handle IPv4 headers.*/
@@ -533,6 +580,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         m->ol_flags |= PKT_TX_IPV6;
         l3_h = ipv6_h;
         src_addr = ipv6_h->src_addr;
+    } else {
+        goto invalid;
     }
 
     // check the udp port
@@ -893,8 +942,8 @@ initDpdkEal() {
     /* initialize the rte env first*/
     char *argv[] = {
             "",
-            "-c",
-            sk.coremask,
+            "-l",
+            sk.total_lcore_list,
             "-n",
             sk.mem_channels,
             buf,
@@ -1130,12 +1179,15 @@ initDpdkModule() {
 
 int startDpdkThreads(void) {
     int ret = 0;
-    for (unsigned i = 0; i < RTE_MAX_LCORE; i++) {
-        if ( (i == rte_get_master_lcore()) || !rte_lcore_is_enabled(i) )
+    for (int i = 0; i < sk.nr_lcore_ids; i++) {
+        unsigned lcore_id = (unsigned )sk.lcore_ids[i];
+        assert(rte_lcore_is_enabled(lcore_id));
+
+        if (lcore_id == rte_get_master_lcore())
             continue;
-        ret = rte_eal_remote_launch(launch_one_lcore, NULL, i);
+        ret = rte_eal_remote_launch(launch_one_lcore, NULL, lcore_id);
         if (ret != 0)
-            rte_exit(EXIT_FAILURE, "Failed to start lcore %d, return %d", i, ret);
+            rte_exit(EXIT_FAILURE, "Failed to start lcore %d, return %d", lcore_id, ret);
     }
     return 0;
 }

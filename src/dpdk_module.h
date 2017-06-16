@@ -71,6 +71,7 @@
 #include <rte_string_fns.h>
 #include <rte_cpuflags.h>
 #include <rte_timer.h>
+#include <rte_kni.h>
 
 #define NUMA_TIMER_TICK_RATE sk.hz  // one second.
 
@@ -119,6 +120,16 @@ typedef struct lcore_conf {
     int64_t nr_req;                   // number of processed requests
     int64_t nr_dropped;
 } __rte_cache_aligned lcore_conf_t;
+
+typedef struct port_kni_conf {
+    char name[RTE_KNI_NAMESIZE];
+    uint8_t port_id;
+    int lcore_tx;
+    int lcore_k;
+    uint16_t tx_queue_id;
+    struct rte_kni *kni;
+    struct mbuf_table kni_tx_mbufs;
+} __rte_cache_aligned port_kni_conf_t;
 
 /* ethernet addresses of ports */
 extern struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];

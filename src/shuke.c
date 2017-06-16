@@ -116,21 +116,21 @@ void zoneReloadTaskDestroy(zoneReloadTask *t) {
 }
 
 void deleteZoneOtherNuma(char *origin) {
-    for (int i = 0; ; ++i) {
+    for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
-        if (numa_id == INVALID_NUMA_ID || numa_id == sk.master_numa_id) break;
+        if (numa_id == sk.master_numa_id) continue;
         replicateLog *l = replicateLogCreate(REPLICATE_DEL, origin, NULL);
-        rte_ring_sp_enqueue(sk.nodes[numa_id].tq, (void *)l);
+        rte_ring_sp_enqueue(sk.nodes[numa_id]->tq, (void *)l);
     }
 }
 
 void reloadZoneOtherNuma(zone *z) {
-    for (int i = 0; ; ++i) {
+    for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
-        if (numa_id == INVALID_NUMA_ID || numa_id == sk.master_numa_id) break;
+        if (numa_id == sk.master_numa_id) continue;
         zone *new_z = zoneCopy(z, numa_id);
         replicateLog *l = replicateLogCreate(REPLICATE_ADD, NULL, new_z);
-        rte_ring_sp_enqueue(sk.nodes[numa_id].tq, (void *)l);
+        rte_ring_sp_enqueue(sk.nodes[numa_id]->tq, (void *)l);
     }
 }
 
@@ -766,6 +766,11 @@ static void initConfig(int argc, char *argv[]) {
     sk.coremask = getStrVal(cbuf, "coremask", NULL);
     CHECK_CONFIG("coremask", sk.coremask != NULL,
                  "Config Error: coremask can't be empty");
+    sk.kni_tx_coremask = getStrVal(cbuf, "kni_tx_coremask", NULL);
+    CHECK_CONFIG("kni_tx_coremask", sk.kni_tx_coremask != NULL,
+                 "Config Error: kni_tx_coremask can't be empty");
+    sk.kni_kernel_coremask = getStrVal(cbuf, "kni_kernel_coremask", NULL);
+
     sk.mem_channels = getStrVal(cbuf, "mem_channels", NULL);
     CHECK_CONFIG("mem_channels", sk.mem_channels != NULL,
                  "Config Error: mem_channels can't be empty");
@@ -934,14 +939,14 @@ static void initShuke() {
     sk.zone_load_time = mstime() - reload_all_start;
     LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
     // replicate zone data to other numa node
-    for (int i = 0; i < MAX_NUMA_NODES; ++i) {
-        int numa_id = sk.nodes[i].numa_id;
-        if (numa_id == INVALID_NUMA_ID || numa_id == sk.master_numa_id) continue;
+    for (int i = 0; i < sk.nr_numa_id; ++i) {
+        int numa_id = sk.numa_ids[i];
+        if (numa_id == sk.master_numa_id) continue;
 
         // FIXME: should allocate memory belongs to numa node
-        sk.nodes[i].zd = zoneDictCopy(CUR_NODE->zd, numa_id);
+        sk.nodes[numa_id]->zd = zoneDictCopy(CUR_NODE->zd, numa_id);
         snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
-        sk.nodes[i].tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
+        sk.nodes[numa_id]->tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
     }
 
     sk.last_all_reload_ts = sk.unixtime;
@@ -963,23 +968,28 @@ static void initShuke() {
     sk.tcp_srv = tcpServerCreate();
 }
 
-static int last_lcore_id(void) {
-    int id = 0;
-    char *p = sk.coremask;
-    // skip '0' and 'x'
-    p += 2;
-    while(*p == '0') p++;
-    id = (int)(4 * (strlen(p) - 1)) - 1;
-    if ((*p >= '8' && *p <= '9') || toupper(*p) >= 'A') {
-        id += 4;
-    } else if (*p >= '4') {
-        id += 3;
-    } else if (*p >= '2') {
-        id += 2;
-    } else {
-        id += 1;
+static int construct_lcore_list() {
+
+    // construct total lcore list
+    char buffer[4096];
+    int offset = 0;
+    int n = 0;
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        if (offset >= 4096) return ERR_CODE;
+        if (i == 0)
+            n = snprintf(buffer+offset, 4096-offset, "%d", sk.lcore_ids[i]);
+        else
+            n = snprintf(buffer+offset, 4096-offset, ",%d", sk.lcore_ids[i]);
+        offset += n;
     }
-    return id;
+
+    for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
+        if (offset >= 4096) return ERR_CODE;
+        n = snprintf(buffer+offset, 4096-offset, ",%d", sk.kni_tx_lcore_ids[i]);
+        offset += n;
+    }
+    sk.total_lcore_list = strdup(buffer);
+    return OK_CODE;
 }
 
 static int hexchar_to_int(char c) {
@@ -987,14 +997,14 @@ static int hexchar_to_int(char c) {
     return (int)strtol(buf, NULL, 16);
 }
 
-static int get_lcore_ids(int buf[], int *n) {
+static int parse_str_coremask(char *coremask, int buf[], int *n) {
     int max = *n;
     int nr_id = 0;
     // skip '0' and 'x'
-    char *start = sk.coremask + 2;
-    char *end = sk.coremask + strlen(sk.coremask) - 1;
+    char *start = coremask + 2;
+    char *end = coremask + strlen(coremask) - 1;
     char *p = end;
-    for (; p <= start; --p) {
+    for (; p >= start; --p) {
         int char_int = hexchar_to_int(*p);
         for (int i = 0; i < 4; ++i) {
             if ((1 << i) & char_int) {
@@ -1008,39 +1018,128 @@ static int get_lcore_ids(int buf[], int *n) {
     return OK_CODE;
 }
 
+static int get_port_ids(int buf[], int *n) {
+    int max = *n;
+    int nr_id = 0;
+    int num_bits = sizeof(sk.portmask) * 8;
+    for (int i = 0; i < num_bits; ++i) {
+        if (sk.portmask & (1 << i)) {
+            if (nr_id >= max) return ERR_CODE;
+            buf[nr_id++] = i;
+        }
+    }
+    *n = nr_id;
+    return OK_CODE;
+}
+
 int initNuma() {
     int n = 0;
     int ids[1024];
-    int nr_id = 1024;
-    int last_id = last_lcore_id();
-    sk.master_lcore_id = last_id;
-    sk.master_numa_id = rte_lcore_to_socket_id(last_id);
-    for (int i = 0; i < MAX_NUMA_NODES; ++i) {
-        sk.nodes[i].numa_id = INVALID_NUMA_ID;
-        sk.nodes[i].main_lcore_id = INVALID_LCORE_ID;
-    }
-    if (get_lcore_ids(ids, &nr_id) == ERR_CODE) {
-        printf("error: the number of locre is bigger than %d.\n", nr_id);
+    int nr_id;
+
+    nr_id = 1024;
+    if (parse_str_coremask(sk.coremask, ids, &nr_id) == ERR_CODE) {
+        fprintf(stderr, "error: the number of locre is bigger than %d.\n", nr_id);
         abort();
     }
-    for (int i = 0; i < nr_id; ++i) {
-        int lcore_id = ids[i];
-        int numa_id = rte_lcore_to_socket_id(lcore_id);
-        sk.nodes[numa_id].numa_id = numa_id;
-        if (sk.nodes[numa_id].main_lcore_id != INVALID_LCORE_ID) {
-            sk.nodes[numa_id].main_lcore_id = lcore_id;
+    sk.lcore_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_lcore_ids = nr_id;
+    // the last lcore is the master
+    sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
+    sk.master_numa_id = rte_lcore_to_socket_id((unsigned)sk.master_lcore_id);
+
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        int lcore_id = sk.lcore_ids[i];
+        int numa_id = rte_lcore_to_socket_id((unsigned)lcore_id);
+        if (sk.nodes[numa_id] == NULL) {
+            sk.nodes[numa_id] = malloc(sizeof(numaNode_t));
+            sk.nodes[numa_id]->numa_id = numa_id;
+            sk.nodes[numa_id]->main_lcore_id = lcore_id;
+            sk.nodes[numa_id]->nr_lcore_ids = 1;
+        } else {
+            sk.nodes[numa_id]->nr_lcore_ids++;
         }
     }
+    n = 0;
     for (int i = 0; i < MAX_NUMA_NODES; ++i) {
-        if (sk.nodes[i].numa_id != INVALID_NUMA_ID) {
-            sk.numa_ids[n++] = sk.nodes[i].numa_id;
+        if (sk.nodes[i] != NULL) {
+            sk.numa_ids[n++] = sk.nodes[i]->numa_id;
         }
     }
-    sk.numa_ids[n] = INVALID_NUMA_ID;
+    sk.nr_numa_id = n;
+    if (construct_lcore_list() == ERR_CODE) {
+        fprintf(stderr, "error: lcore list is too long\n");
+        exit(-1);
+    }
+    // printf("lcore list: %s\n", sk.total_lcore_list);
     return 0;
 }
 
+int initKniConfig() {
+    int ids[1024];
+    int nr_id;
+
+    nr_id = 1024;
+    if (parse_str_coremask(sk.kni_tx_coremask, ids, &nr_id) == ERR_CODE) {
+        fprintf(stderr, "error: the number of kni locre is bigger than %d.\n", nr_id);
+        abort();
+    }
+    sk.kni_tx_lcore_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_kni_tx_lcore_id = nr_id;
+    // all kni tx lcores should stay in one socket
+    unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
+    for (int i = i; i < sk.nr_kni_tx_lcore_id; ++i) {
+        if (kni_socket_id != rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[i])) {
+            fprintf(stderr, "all kni tx lcores should stay in one socket");
+            exit(-1);
+        }
+    }
+
+    nr_id = 1024;
+    if (get_port_ids(ids, &nr_id) == ERR_CODE) {
+        fprintf(stderr, "error: the number of port is bigger than %d.\n", nr_id);
+        abort();
+    }
+    sk.port_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_ports = nr_id;
+
+    // initialize kni config
+    if (sk.nr_kni_tx_lcore_id != sk.nr_ports) {
+        fprintf(stderr, "kni tx cores must equal to numble of ports\n");
+        exit(-1);
+    }
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        assert(sk.kni_conf[portid] == NULL);
+        sk.kni_conf[portid] = malloc(sizeof(struct port_kni_conf));
+        assert(sk.kni_conf[portid]);
+        snprintf(sk.kni_conf[portid]->name, RTE_KNI_NAMESIZE, "vEth%u", portid);
+        sk.kni_conf[portid]->port_id = (uint8_t)portid;
+        sk.kni_conf[portid]->lcore_tx = sk.kni_tx_lcore_ids[i];
+        sk.kni_conf[portid]->lcore_k = -1;
+    }
+    if (sk.kni_kernel_coremask) {
+        nr_id = 1024;
+        if (parse_str_coremask(sk.kni_kernel_coremask, ids, &nr_id) == ERR_CODE) {
+            fprintf(stderr, "error: the number of kni kernel locre is bigger than %d.\n", nr_id);
+            abort();
+        }
+        if (nr_id != sk.nr_ports) {
+            fprintf(stderr, "kni kernel cores must equal to numble of ports\n");
+            exit(-1);
+        }
+        for (int i = 0; i < sk.nr_ports; ++i) {
+            int portid = sk.port_ids[i];
+            assert(sk.kni_conf[portid]);
+            sk.kni_conf[portid]->lcore_k = ids[i];
+        }
+    }
+    return OK_CODE;
+}
+
 int main(int argc, char *argv[]) {
+    memset(&sk, 0, sizeof(sk));
+
     struct timeval tv;
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
@@ -1064,6 +1163,7 @@ int main(int argc, char *argv[]) {
 
     initConfig(argc, argv);
     initNuma();
+    initKniConfig();
 
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
