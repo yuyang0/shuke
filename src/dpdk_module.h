@@ -73,7 +73,17 @@
 #include <rte_timer.h>
 #include <rte_kni.h>
 
+/*
+ * Configurable number of RX/TX ring descriptors
+ */
+#define RTE_TEST_RX_DESC_DEFAULT 128
+#define RTE_TEST_TX_DESC_DEFAULT 512
+
+#define MAX_TX_QUEUE_PER_PORT RTE_MAX_ETHPORTS
+#define MAX_RX_QUEUE_PER_PORT 128
+
 #define NUMA_TIMER_TICK_RATE sk.hz  // one second.
+
 
 #define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
 
@@ -131,6 +141,7 @@ typedef struct port_kni_conf {
     struct mbuf_table kni_tx_mbufs;
 } __rte_cache_aligned port_kni_conf_t;
 
+extern struct rte_eth_conf default_port_conf;
 /* ethernet addresses of ports */
 extern struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
 
@@ -143,5 +154,13 @@ int cleanupDpdkModule(void);
 uint64_t rte_tsc_ustime();
 uint64_t rte_tsc_mstime();
 uint64_t rte_tsc_time();
+
+/*----------------------------------------------
+ *     kni
+ *---------------------------------------------*/
+void init_kni_module(void);
+int cleanup_kni_module();
+int start_kni_tx_threads();
+int kni_ifconfig_all();
 
 #endif  /* __DPDK_MODULE_H__ */

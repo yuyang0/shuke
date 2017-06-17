@@ -8,14 +8,6 @@
 #include "utils.h"
 
 #define STAT_ATOMIC_WRITE_BATCH   100
-/*
- * Configurable number of RX/TX ring descriptors
- */
-#define RTE_TEST_RX_DESC_DEFAULT 128
-#define RTE_TEST_TX_DESC_DEFAULT 512
-
-#define MAX_TX_QUEUE_PER_PORT RTE_MAX_ETHPORTS
-#define MAX_RX_QUEUE_PER_PORT 128
 
 #define MAX_LCORE_PARAMS 1024
 
@@ -89,7 +81,7 @@ static struct lcore_params * lcore_params = lcore_params_array_default;
 static uint16_t nb_lcore_params = sizeof(lcore_params_array_default) /
     sizeof(lcore_params_array_default[0]);
 
-static struct rte_eth_conf port_conf = {
+struct rte_eth_conf default_port_conf = {
     .rxmode = {
         .mq_mode = ETH_MQ_RX_RSS,
         .max_rx_pkt_len = ETHER_MAX_LEN,
@@ -552,12 +544,12 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     if (!verify_cksum(m)) {
         goto invalid;
     }
-    // if (is_tcp) {
-    //     __handle_tcp_packet(m, portid);
-    //     return;
-    // }
-    if (!is_udp)
-    {
+    if (is_tcp) {
+        __handle_tcp_packet(m, portid);
+        return;
+    }
+
+    if (!is_udp) {
         goto invalid;
     }
 
@@ -995,13 +987,13 @@ initDpdkModule() {
 
     /* parse application arguments (after the EAL ones) */
     if (sk.jumbo_on) {
-        port_conf.rxmode.jumbo_frame = 1;
+        default_port_conf.rxmode.jumbo_frame = 1;
         if ((sk.max_pkt_len < 64) ||
             (sk.max_pkt_len > MAX_JUMBO_PKT_LEN)) {
             printf("Invalid packet length\n");
             return -1;
         }
-        port_conf.rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
+        default_port_conf.rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
     }
 
     parse_config(sk.rx_queue_config);
@@ -1035,14 +1027,17 @@ initDpdkModule() {
         fflush(stdout);
 
         nb_rx_queue = get_port_n_rx_queues(portid);
-        // we need ignore the master lcore
-        n_tx_queue = nb_lcores-1;
+        /*
+         * every core should has a tx queue except master core
+         * every port should preserve a tx queue for kni tx thread
+         */
+        n_tx_queue = (uint32_t )sk.nr_lcore_ids;
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
         LOG_INFO(USER1, "Creating queues: port=%d nb_rxq=%d nb_txq=%u... \n",
                  portid, nb_rx_queue, (unsigned)n_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
-                                    (uint16_t)n_tx_queue, &port_conf);
+                                    (uint16_t)n_tx_queue, &default_port_conf);
         if (ret < 0)
             rte_exit(EXIT_FAILURE,
                      "Cannot configure device: err=%d, port=%d\n",
@@ -1065,9 +1060,10 @@ initDpdkModule() {
 
         /* init one TX queue per couple (lcore,port) */
         queueid = 0;
-        for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-            if ((lcore_id == rte_get_master_lcore()) || rte_lcore_is_enabled(lcore_id) == 0)
-                continue;
+        for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+            lcore_id = (unsigned )sk.lcore_ids[i];
+            if (lcore_id == rte_get_master_lcore()) continue;
+            assert(rte_lcore_is_enabled(lcore_id) == 0);
 
             if (sk.numa_on)
                 socketid =
@@ -1075,11 +1071,11 @@ initDpdkModule() {
             else
                 socketid = 0;
 
-            LOG_INFO(USER1, "txq=%u,%d,%d ", lcore_id, queueid, socketid);
+            LOG_INFO(USER1, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
 
             rte_eth_dev_info_get(portid, &dev_info);
             txconf = &dev_info.default_txconf;
-            if (port_conf.rxmode.jumbo_frame)
+            if (default_port_conf.rxmode.jumbo_frame)
                 txconf->txq_flags = 0;
             ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
                                          socketid, txconf);
@@ -1098,9 +1094,11 @@ initDpdkModule() {
         printf("\n");
     }
 
-    for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-        if (lcore_id == rte_get_master_lcore() || rte_lcore_is_enabled(lcore_id) == 0)
-            continue;
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        lcore_id = (unsigned )sk.lcore_ids[i];
+        if (lcore_id == rte_get_master_lcore()) continue;
+        assert(rte_lcore_is_enabled(lcore_id) == 0);
+
         qconf = &sk.lcore_conf[lcore_id];
         printf("\nInitializing rx queues on lcore %u ... ", lcore_id );
         fflush(stdout);
@@ -1115,7 +1113,7 @@ initDpdkModule() {
             else
                 socketid = 0;
 
-            printf("rxq=%d,%d,%d ", portid, queueid, socketid);
+            printf("rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
             fflush(stdout);
 
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,

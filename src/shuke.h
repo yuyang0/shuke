@@ -74,16 +74,6 @@ typedef struct {
     int type;
 } object;
 
-struct tcpContext {
-    struct tcpConn *sock;
-
-    struct tcpContext *next;
-
-    size_t wcur;       // tcp write cursor.
-    size_t wsize;      // total size of data size.
-    char reply[];
-};
-
 typedef struct _tcpServer {
     int ipfd[CONFIG_BINDADDR_MAX];  // only for tcp server(listening fd)
     int ipfd_count;
@@ -119,6 +109,16 @@ typedef struct _tcpConn {
     size_t dnsPacketSize;    // size of current dns query packet
     struct list_head node;     // for connection list
 } tcpConn;
+
+struct tcpContext {
+    tcpConn *sock;
+
+    struct tcpContext *next;
+
+    size_t wcur;       // tcp write cursor.
+    size_t wsize;      // total size of data size.
+    char reply[];
+};
 
 typedef struct {
     int type;
@@ -194,9 +194,12 @@ struct shuke {
     /*
      * these fields will allocate using malloc
      */
+    // MAP: lcore_id => lcore_conf_t
     lcore_conf_t lcore_conf[RTE_MAX_LCORE];
+    // MAP: portid => port_kni_conf_t*
     port_kni_conf_t *kni_conf[RTE_MAX_ETHPORTS];
 
+    //MAP: socketid => numaNode_t*
     numaNode_t *nodes[MAX_NUMA_NODES];
     int numa_ids[MAX_NUMA_NODES];
     int nr_numa_id;

@@ -3,6 +3,11 @@
 //
 
 #include <assert.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "shuke.h"
 
@@ -32,20 +37,6 @@
 
 #define KNI_MAX_KTHREAD 32
 
-/* Options for configuring ethernet port */
-static struct rte_eth_conf port_conf = {
-        .rxmode = {
-                .header_split = 0,      /* Header Split disabled */
-                .hw_ip_checksum = 0,    /* IP checksum offload disabled */
-                .hw_vlan_filter = 0,    /* VLAN filtering disabled */
-                .jumbo_frame = 0,       /* Jumbo Frame Support disabled */
-                .hw_strip_crc = 0,      /* CRC stripped by hardware */
-        },
-        .txmode = {
-                .mq_mode = ETH_MQ_TX_NONE,
-        },
-};
-
 /* Mempool for mbufs */
 static struct rte_mempool * pktmbuf_pool = NULL;
 
@@ -70,6 +61,58 @@ static struct kni_interface_stats kni_stats[RTE_MAX_ETHPORTS];
 static int kni_change_mtu(uint8_t port_id, unsigned new_mtu);
 static int kni_config_network_interface(uint8_t port_id, uint8_t if_up);
 
+static int
+kni_ifconfig(char *ifname, char *ipaddr) {
+
+    struct ifreq ifr;
+    struct sockaddr_in* addr = (struct sockaddr_in*)&ifr.ifr_addr;
+    int sockfd;                     /* socket fd we use to manipulate stuff with */
+    // int selector;
+
+    int ret;
+
+    /* Create a channel to the NET kernel. */
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    /* get interface name */
+    strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+
+    addr->sin_family = AF_INET;
+    inet_pton(AF_INET, ipaddr, &addr->sin_addr);
+
+    ret = ioctl(sockfd, SIOCSIFADDR, &ifr);
+    if (ret < 0) {
+        LOG_ERROR(USER1, "set address error %s\n", strerror(errno));
+        exit(-1);
+    }
+    ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
+
+    if (ret < 0) {
+        LOG_ERROR(USER1, "get flags error %s\n", strerror(errno));
+        exit(-1);
+    }
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING | IFF_DEBUG;
+    // ifr.ifr_flags &= ~selector;  // unset something
+
+    ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
+    if (ret < 0) {
+        LOG_ERROR(USER1, "set flags error %s\n", strerror(errno));
+        exit(-1);
+    }
+    close(sockfd);
+    return OK_CODE;
+}
+
+int kni_ifconfig_all()
+{
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        port_kni_conf_t *kconf = sk.kni_conf[portid];
+        kni_ifconfig(kconf->name, sk.bindaddr[i]);
+    }
+    return OK_CODE;
+}
+
 static void
 kni_burst_free_mbufs(struct rte_mbuf **pkts, unsigned num)
 {
@@ -81,6 +124,47 @@ kni_burst_free_mbufs(struct rte_mbuf **pkts, unsigned num)
     for (i = 0; i < num; i++) {
         rte_pktmbuf_free(pkts[i]);
         pkts[i] = NULL;
+    }
+}
+
+static void kni_init_tx_queue() {
+    int ret;
+    int portid;
+    uint16_t queueid;
+    unsigned lcore_id;
+    uint8_t socketid;
+
+    struct rte_eth_dev_info dev_info;
+    struct rte_eth_txconf *txconf;
+
+    uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
+
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        portid = sk.port_ids[i];
+        port_kni_conf_t *kconf = sk.kni_conf[portid];
+
+        queueid = kconf->tx_queue_id;
+        lcore_id = (unsigned )kconf->lcore_tx;
+        assert(rte_lcore_is_enabled(lcore_id) == 0);
+
+        if (sk.numa_on)
+            socketid =
+                    (uint8_t)rte_lcore_to_socket_id(lcore_id);
+        else
+            socketid = 0;
+
+        LOG_INFO(USER1, "kni txq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
+
+        rte_eth_dev_info_get(portid, &dev_info);
+        txconf = &dev_info.default_txconf;
+        if (default_port_conf.rxmode.jumbo_frame)
+            txconf->txq_flags = 0;
+        ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
+                                     socketid, txconf);
+        if (ret < 0)
+            rte_exit(EXIT_FAILURE,
+                     "rte_eth_tx_queue_setup: err=%d, "
+                             "port=%d\n", ret, portid);
     }
 }
 
@@ -148,7 +232,7 @@ kni_change_mtu(uint8_t port_id, unsigned new_mtu)
     /* Stop specific port */
     rte_eth_dev_stop(port_id);
 
-    memcpy(&conf, &port_conf, sizeof(conf));
+    memcpy(&conf, &default_port_conf, sizeof(conf));
     /* Set new MTU */
     if (new_mtu > ETHER_MAX_LEN)
         conf.rxmode.jumbo_frame = 1;
@@ -239,7 +323,7 @@ kni_alloc(uint8_t port_id)
 
 /* Initialize KNI subsystem */
 void
-init_kni(void)
+init_kni_module(void)
 {
     int portid = sk.port_ids[0];
     int lcore_id = sk.kni_conf[portid]->lcore_tx;
@@ -255,10 +339,11 @@ init_kni(void)
         int portid = sk.port_ids[i];
         kni_alloc(portid);
     }
+    kni_init_tx_queue();
 }
 
 int
-free_kni()
+cleanup_kni_module()
 {
     /* Release resources */
     for (int i = 0; i < sk.nr_ports; i++) {
@@ -274,7 +359,7 @@ free_kni()
     return 0;
 }
 
-port_kni_conf_t *getKniConf(unsigned lcore_id) {
+static port_kni_conf_t *getKniConf(unsigned lcore_id) {
     for (int i = 0; i < sk.nr_ports; ++i) {
         if (sk.kni_conf[i]->lcore_tx == (int)lcore_id) return sk.kni_conf[i];
     }

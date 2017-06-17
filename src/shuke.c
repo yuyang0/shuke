@@ -1060,6 +1060,11 @@ int initNuma() {
             sk.nodes[numa_id]->nr_lcore_ids++;
         }
     }
+    if (sk.nodes[sk.master_numa_id]->nr_lcore_ids <= 1) {
+        fprintf(stderr, "master lcore (%d) is the only enabled core on numa %d.\n",
+                sk.master_lcore_id, sk.master_numa_id);
+        exit(-1);
+    }
     n = 0;
     for (int i = 0; i < MAX_NUMA_NODES; ++i) {
         if (sk.nodes[i] != NULL) {
@@ -1108,6 +1113,10 @@ int initKniConfig() {
         fprintf(stderr, "kni tx cores must equal to numble of ports\n");
         exit(-1);
     }
+    if (sk.bindaddr_count != sk.nr_ports) {
+        fprintf(stderr, "the number of ip address should equal to number of ports.\n");
+        exit(-1);
+    }
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
         assert(sk.kni_conf[portid] == NULL);
@@ -1117,6 +1126,7 @@ int initKniConfig() {
         sk.kni_conf[portid]->port_id = (uint8_t)portid;
         sk.kni_conf[portid]->lcore_tx = sk.kni_tx_lcore_ids[i];
         sk.kni_conf[portid]->lcore_k = -1;
+        sk.kni_conf[portid]->tx_queue_id = (uint16_t )(sk.nr_lcore_ids - 1);
     }
     if (sk.kni_kernel_coremask) {
         nr_id = 1024;
@@ -1172,12 +1182,16 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     sk.force_quit = false;
     initDpdkModule();
+    init_kni_module();
 
     initShuke();
 
     startDpdkThreads();
+    start_kni_tx_threads();
+    kni_ifconfig_all();
 
     aeMain(sk.el);
 
+    cleanup_kni_module();
     cleanupDpdkModule();
 }
