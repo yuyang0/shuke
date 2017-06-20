@@ -743,7 +743,6 @@ static void initConfigFromFile(int argc, char **argv) {
     // set default values
     sk.promiscuous_on = false;
     sk.numa_on = false;
-    sk.parse_ptype = false;
 
     sk.port = 53;
     sk.daemonize = false;
@@ -777,8 +776,6 @@ static void initConfigFromFile(int argc, char **argv) {
     conf_err = getBoolVal(sk.errstr, cbuf, "promiscuous_on", &sk.promiscuous_on);
     CHECK_CONF_ERR(conf_err, sk.errstr);
     conf_err = getIntVal(sk.errstr, cbuf, "portmask", &sk.portmask);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "parse_ptype", &sk.parse_ptype);
     CHECK_CONF_ERR(conf_err, sk.errstr);
     conf_err = getBoolVal(sk.errstr, cbuf, "numa_on", &sk.numa_on);
     CHECK_CONF_ERR(conf_err, sk.errstr);

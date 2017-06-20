@@ -475,9 +475,9 @@ kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port)
 }
 
 static uint16_t
-get_psd_sum(void *l3_hdr, uint16_t l3_ptypes, uint64_t ol_flags)
+get_psd_sum(void *l3_hdr, bool is_ipv4, uint64_t ol_flags)
 {
-    if (l3_ptypes == RTE_PTYPE_L3_IPV4)
+    if (is_ipv4)
         return rte_ipv4_phdr_cksum(l3_hdr, ol_flags);
     else /* assume ethertype == ETHER_TYPE_IPv6 */
         return rte_ipv6_phdr_cksum(l3_hdr, ol_flags);
@@ -525,16 +525,22 @@ static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
 {
+    if (!verify_cksum(m)) {
+        goto invalid;
+    }
+
+    uint16_t ether_type;
+    uint8_t ipproto;
+    int l2_len;
     uint32_t ipv4_addr;
     uint16_t udp_port;
-    void *l3_h = NULL;
+    char *l3_h = NULL;
     struct ether_hdr *eth_h;
     struct ipv4_hdr *ipv4_h = NULL;
     struct ipv6_hdr *ipv6_h = NULL;
     struct udp_hdr  *udp_h = NULL;
-    uint32_t is_udp, is_tcp;
-    uint32_t l3_ptypes, l2_ptypes;
-    bool is_ipv4;
+    struct tcp_hdr  *tcp_h = NULL;
+    bool is_ipv4 = false;
     struct ether_addr eth_addr;
     char ipv6_addr[16];
     char *udp_data;
@@ -543,58 +549,56 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     void *src_addr = NULL;
 
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
-    is_udp = m->packet_type & RTE_PTYPE_L4_UDP;
-    is_tcp = m->packet_type & RTE_PTYPE_L4_TCP;
-    l2_ptypes = m->packet_type & RTE_PTYPE_L2_MASK;
-    l3_ptypes = m->packet_type & RTE_PTYPE_L3_MASK;
+    ether_type = rte_be_to_cpu_16(eth_h->ether_type);
+    l3_h = (char *)(eth_h+1);
+    l2_len = sizeof(*eth_h);
 
-    is_ipv4 = (l3_ptypes == RTE_PTYPE_L3_IPV4);
-
-    if (!verify_cksum(m)) {
-        goto invalid;
-    }
-    // if (l2_ptypes == RTE_PTYPE_L2_ETHER_ARP)
-    //     printf("port %d got arp packet\n", portid);
-
-    // if (is_tcp || l2_ptypes == RTE_PTYPE_L2_ETHER_ARP) {
-    //     __send_to_kni(qconf, m, portid);
-    //     return;
-    // }
-
-    // if (!is_udp) {
-    //     goto invalid;
-    // }
-    if (!is_udp) {
-        __send_to_kni(qconf, m, portid);
-        return;
+    if (ether_type == ETHER_TYPE_VLAN) {
+        struct vlan_hdr *vlan_h = (struct vlan_hdr *) ((char *) eth_h + l2_len);
+        ether_type = rte_be_to_cpu_16(vlan_h->eth_proto);
+        l3_h += sizeof(*vlan_h);
     }
 
+    switch (ether_type) {
+        case ETHER_TYPE_ARP:
+            __send_to_kni(qconf, m, portid);
+            return;
+        case ETHER_TYPE_IPv4:
+            is_ipv4 = true;
+            ipv4_h = (struct ipv4_hdr *)l3_h;
 
-    if (l3_ptypes == RTE_PTYPE_L3_IPV4) {
-        /* Handle IPv4 headers.*/
-        ipv4_h = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *,
-                                         sizeof(struct ether_hdr));
-        udp_h = (struct udp_hdr *) (ipv4_h + 1);
-        m->l3_len = 20;
-        l3_h = ipv4_h;
-        src_addr = &(ipv4_h->src_addr);
-    } else if (l3_ptypes == RTE_PTYPE_L3_IPV6) {
-        /* Handle IPv6 headers.*/
-        ipv6_h = rte_pktmbuf_mtod_offset(m, struct ipv6_hdr *,
-                                         sizeof(struct ether_hdr));
-        udp_h = (struct udp_hdr *) (ipv6_h + 1);
-
-        m->l3_len = sizeof(*ipv6_h);
-        m->ol_flags |= PKT_TX_IPV6;
-        l3_h = ipv6_h;
-        src_addr = ipv6_h->src_addr;
-    } else {
-        goto invalid;
+            m->l3_len = (ipv4_h->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
+            src_addr = &(ipv4_h->src_addr);
+            ipproto = ipv4_h->next_proto_id;
+            break;
+        case ETHER_TYPE_IPv6:
+            ipv6_h = (struct ipv6_hdr *)l3_h;
+            m->l3_len = sizeof(*ipv6_h);
+            m->ol_flags |= PKT_TX_IPV6;
+            src_addr = ipv6_h->src_addr;
+            ipproto = ipv6_h->proto;
+            break;
+        default:
+            goto invalid;
     }
-
-    // check the udp port
-    if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
-        goto invalid;
+    switch (ipproto) {
+        case IPPROTO_UDP:
+            udp_h = (struct udp_hdr *) (l3_h + m->l3_len);
+            // check the udp port
+            if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
+                goto invalid;
+            }
+            break;
+        case IPPROTO_TCP:
+            tcp_h = (struct tcp_hdr *) (l3_h + m->l3_len);
+            // check the tcp port
+            if (rte_be_to_cpu_16(tcp_h->dst_port) != sk.port) {
+                goto invalid;
+            }
+            __send_to_kni(qconf, m, portid);
+            return;
+        default:
+            goto invalid;
     }
 
     m->l2_len = sizeof(struct ether_hdr);
@@ -618,7 +622,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     ether_addr_copy(&eth_h->d_addr, &eth_h->s_addr);
     ether_addr_copy(&eth_addr, &eth_h->d_addr);
 
-    if (l3_ptypes == RTE_PTYPE_L3_IPV4) {
+    if (is_ipv4) {
         ipv4_addr = ipv4_h->src_addr;
         ipv4_h->src_addr = ipv4_h->dst_addr;
         ipv4_h->dst_addr = ipv4_addr;
@@ -640,7 +644,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     udp_h->dgram_cksum = 0;
     m->ol_flags |= PKT_TX_UDP_CKSUM;
     udp_h->dgram_len = rte_cpu_to_be_16(m->l4_len + n);
-    udp_h->dgram_cksum = get_psd_sum(l3_h, l3_ptypes, m->ol_flags);
+    udp_h->dgram_cksum = get_psd_sum(l3_h, is_ipv4, m->ol_flags);
 
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
@@ -775,143 +779,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         }
     }
 
-    return 0;
-}
-
-/* Requirements:
- * 1. IP packets without extension;
- * 2. L4 payload should be either TCP or UDP.
- */
-int
-check_ptype(int portid)
-{
-    int i, ret;
-    int ptype_l3_ipv4_ext = 0;
-    int ptype_l3_ipv6_ext = 0;
-    int ptype_l4_tcp = 0;
-    int ptype_l4_udp = 0;
-    uint32_t ptype_mask = RTE_PTYPE_L3_MASK | RTE_PTYPE_L4_MASK;
-
-    ret = rte_eth_dev_get_supported_ptypes(portid, ptype_mask, NULL, 0);
-    if (ret <= 0)
-        return 0;
-
-    uint32_t ptypes[ret];
-
-    ret = rte_eth_dev_get_supported_ptypes(portid, ptype_mask, ptypes, ret);
-    for (i = 0; i < ret; ++i) {
-        switch (ptypes[i]) {
-        case RTE_PTYPE_L3_IPV4_EXT:
-            ptype_l3_ipv4_ext = 1;
-            break;
-        case RTE_PTYPE_L3_IPV6_EXT:
-            ptype_l3_ipv6_ext = 1;
-            break;
-        case RTE_PTYPE_L4_TCP:
-            ptype_l4_tcp = 1;
-            break;
-        case RTE_PTYPE_L4_UDP:
-            ptype_l4_udp = 1;
-            break;
-        }
-    }
-
-    if (ptype_l3_ipv4_ext == 0)
-        printf("port %d cannot parse RTE_PTYPE_L3_IPV4_EXT\n", portid);
-    if (ptype_l3_ipv6_ext == 0)
-        printf("port %d cannot parse RTE_PTYPE_L3_IPV6_EXT\n", portid);
-    if (!ptype_l3_ipv4_ext || !ptype_l3_ipv6_ext)
-        return 0;
-
-    if (ptype_l4_tcp == 0)
-        printf("port %d cannot parse RTE_PTYPE_L4_TCP\n", portid);
-    if (ptype_l4_udp == 0)
-        printf("port %d cannot parse RTE_PTYPE_L4_UDP\n", portid);
-    if (ptype_l4_tcp && ptype_l4_udp)
-        return 1;
-
-    return 0;
-}
-
-static inline int
-parse_ptype_func(struct rte_mbuf *m)
-{
-    int l2_len;
-    struct ether_hdr *eth_h;
-    uint32_t packet_type = RTE_PTYPE_UNKNOWN;
-    uint16_t ether_type;
-    char *l3;
-    int hdr_len;
-    struct ipv4_hdr *ipv4_h;
-    struct ipv6_hdr *ipv6_h;
-
-    eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
-    ether_type = eth_h->ether_type;
-    l3 = (char *)eth_h + sizeof(struct ether_hdr);
-    l2_len = sizeof(*eth_h);
-
-    if (ether_type == rte_cpu_to_be_16(ETHER_TYPE_VLAN)) {
-        struct vlan_hdr *vlan_h = (struct vlan_hdr *) ((char *) eth_h + l2_len);
-        ether_type = vlan_h->eth_proto;
-        l3 += sizeof(*vlan_h);
-    }
-
-    if (ether_type == rte_cpu_to_be_16(ETHER_TYPE_IPv4)) {
-        ipv4_h = (struct ipv4_hdr *)l3;
-        hdr_len = (ipv4_h->version_ihl & IPV4_HDR_IHL_MASK) *
-            IPV4_IHL_MULTIPLIER;
-        if (hdr_len == sizeof(struct ipv4_hdr)) {
-            packet_type |= RTE_PTYPE_L3_IPV4;
-            if (ipv4_h->next_proto_id == IPPROTO_TCP)
-                packet_type |= RTE_PTYPE_L4_TCP;
-            else if (ipv4_h->next_proto_id == IPPROTO_UDP)
-                packet_type |= RTE_PTYPE_L4_UDP;
-        } else
-            packet_type |= RTE_PTYPE_L3_IPV4_EXT;
-    } else if (ether_type == rte_cpu_to_be_16(ETHER_TYPE_IPv6)) {
-        ipv6_h = (struct ipv6_hdr *)l3;
-        if (ipv6_h->proto == IPPROTO_TCP)
-            packet_type |= RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_TCP;
-        else if (ipv6_h->proto == IPPROTO_UDP)
-            packet_type |= RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_UDP;
-        else
-            packet_type |= RTE_PTYPE_L3_IPV6_EXT_UNKNOWN;
-    }
-    m->packet_type = packet_type;
-    return 0;
-}
-
-uint16_t
-cb_parse_ptype(uint8_t port __rte_unused, uint16_t queue __rte_unused,
-               struct rte_mbuf *pkts[], uint16_t nb_pkts,
-               uint16_t max_pkts __rte_unused,
-               void *user_param __rte_unused)
-{
-    unsigned i;
-
-    for (i = 0; i < nb_pkts; ++i)
-        parse_ptype_func(pkts[i]);
-
-    return nb_pkts;
-}
-
-static int
-prepare_ptype_parser(uint8_t portid, uint16_t queueid)
-{
-    if (check_ptype(portid))
-        return 1;
-
-    if (sk.parse_ptype) {
-        printf("Port %d: softly parse packet type info\n", portid);
-        if (rte_eth_add_rx_callback(portid, queueid, cb_parse_ptype, NULL))
-            return 1;
-
-        printf("Failed to add rx callback: port=%d\n", portid);
-        return 0;
-    }
-
-    printf("port %d cannot parse packet type, please enable parse_ptype in config file\n",
-           portid);
     return 0;
 }
 
@@ -1187,8 +1054,6 @@ initDpdkModule() {
         for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
             portid = qconf->rx_queue_list[queue].port_id;
             queueid = qconf->rx_queue_list[queue].queue_id;
-            if (prepare_ptype_parser(portid, queueid) == 0)
-                rte_exit(EXIT_FAILURE, "ptype check fails\n");
         }
     }
 

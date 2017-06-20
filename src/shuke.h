@@ -147,7 +147,6 @@ struct shuke {
     bool promiscuous_on;
     bool numa_on;
     bool jumbo_on;
-    bool parse_ptype;
     int max_pkt_len;
     char *rx_queue_config;
 
