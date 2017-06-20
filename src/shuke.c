@@ -730,7 +730,7 @@ static char *getConfigBuf(int argc, char **argv) {
     return cbuf;
 }
 
-static void initConfig(int argc, char *argv[]) {
+static void initConfigFromFile(int argc, char **argv) {
     int conf_err;
     char cwd[MAXLINE];
 
@@ -901,6 +901,7 @@ static void initShuke() {
     sk.tq = rte_ring_create("TQ_QUEUE", 1024, rte_socket_id(), RING_F_SC_DEQ);
 
     sk.el = aeCreateEventLoop(1024, true);
+    assert(sk.el);
 
     if (isEmptyStr(sk.query_log_file)) {
         sk.query_log_fp = NULL;
@@ -964,12 +965,9 @@ static void initShuke() {
     if (initAdminServer() == ERR_CODE) {
         LOG_FATAL(USER1, "can't init admin server.");
     }
-    LOG_INFO(USER1, "starting dns tcp server.");
-    sk.tcp_srv = tcpServerCreate();
 }
 
 static int construct_lcore_list() {
-
     // construct total lcore list
     char buffer[4096];
     int offset = 0;
@@ -1072,10 +1070,6 @@ int initNuma() {
         }
     }
     sk.nr_numa_id = n;
-    if (construct_lcore_list() == ERR_CODE) {
-        fprintf(stderr, "error: lcore list is too long\n");
-        exit(-1);
-    }
     // printf("lcore list: %s\n", sk.total_lcore_list);
     return 0;
 }
@@ -1120,7 +1114,7 @@ int initKniConfig() {
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
         assert(sk.kni_conf[portid] == NULL);
-        sk.kni_conf[portid] = malloc(sizeof(struct port_kni_conf));
+        sk.kni_conf[portid] = calloc(1, sizeof(struct port_kni_conf));
         assert(sk.kni_conf[portid]);
         snprintf(sk.kni_conf[portid]->name, RTE_KNI_NAMESIZE, "vEth%u", portid);
         sk.kni_conf[portid]->port_id = (uint8_t)portid;
@@ -1143,6 +1137,16 @@ int initKniConfig() {
             assert(sk.kni_conf[portid]);
             sk.kni_conf[portid]->lcore_k = ids[i];
         }
+    }
+    return OK_CODE;
+}
+
+int initOtherConfig() {
+    initNuma();
+    initKniConfig();
+    if (construct_lcore_list() == ERR_CODE) {
+        fprintf(stderr, "error: lcore list is too long\n");
+        exit(-1);
     }
     return OK_CODE;
 }
@@ -1171,9 +1175,8 @@ int main(int argc, char *argv[]) {
     rte_atomic64_init(&(sk.nr_req));
     rte_atomic64_init(&(sk.nr_dropped));
 
-    initConfig(argc, argv);
-    initNuma();
-    initKniConfig();
+    initConfigFromFile(argc, argv);
+    initOtherConfig();
 
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
@@ -1189,6 +1192,11 @@ int main(int argc, char *argv[]) {
     startDpdkThreads();
     start_kni_tx_threads();
     kni_ifconfig_all();
+
+    sleep(4);
+    LOG_INFO(USER1, "starting dns tcp server.");
+    sk.tcp_srv = tcpServerCreate();
+    assert(sk.tcp_srv);
 
     aeMain(sk.el);
 

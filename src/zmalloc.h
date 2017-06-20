@@ -13,6 +13,10 @@
 
 #define SOCKET_ID_HEAP   -1010
 
+static inline void *zalloc(size_t size) {
+    return calloc(1, size);
+}
+
 static inline void *memdup(const void *ptr, size_t size) {
     void *p = malloc(size);
     memcpy(p, ptr, size);
@@ -22,6 +26,7 @@ static inline void *memdup(const void *ptr, size_t size) {
 #if defined(USE_MALLOC) || defined (SK_TEST)
 
 #define zmalloc(size) malloc(size)
+#define zzalloc(size) zalloc(size);
 #define zcalloc(size) calloc(1, size)
 #define zrealloc(p, size) realloc(p, size)
 #define zstrdup(s) strdup(s)

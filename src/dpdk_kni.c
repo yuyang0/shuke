@@ -91,7 +91,7 @@ kni_ifconfig(char *ifname, char *ipaddr) {
         LOG_ERROR(USER1, "get flags error %s\n", strerror(errno));
         exit(-1);
     }
-    ifr.ifr_flags |= IFF_UP | IFF_RUNNING | IFF_DEBUG;
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
     // ifr.ifr_flags &= ~selector;  // unset something
 
     ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
@@ -127,7 +127,7 @@ kni_burst_free_mbufs(struct rte_mbuf **pkts, unsigned num)
     }
 }
 
-static void kni_init_tx_queue() {
+void kni_init_tx_queue() {
     int ret;
     int portid;
     uint16_t queueid;
@@ -145,7 +145,7 @@ static void kni_init_tx_queue() {
 
         queueid = kconf->tx_queue_id;
         lcore_id = (unsigned )kconf->lcore_tx;
-        assert(rte_lcore_is_enabled(lcore_id) == 0);
+        assert(rte_lcore_is_enabled(lcore_id));
 
         if (sk.numa_on)
             socketid =
@@ -189,13 +189,16 @@ kni_egress(port_kni_conf_t *p)
         RTE_LOG(ERR, APP, "Error receiving from KNI\n");
         return;
     }
-    /* Burst tx to eth */
-    nb_tx = rte_eth_tx_burst(port_id, p->tx_queue_id, pkts_burst, (uint16_t)num);
-    kni_stats[port_id].tx_packets += nb_tx;
-    if (unlikely(nb_tx < num)) {
-        /* Free mbufs not tx to NIC */
-        kni_burst_free_mbufs(&pkts_burst[nb_tx], num - nb_tx);
-        kni_stats[port_id].tx_dropped += num - nb_tx;
+    if (num > 0) {
+        /* Burst tx to eth */
+        nb_tx = rte_eth_tx_burst(port_id, p->tx_queue_id, pkts_burst, (uint16_t)num);
+        kni_stats[port_id].tx_packets += nb_tx;
+
+        if (unlikely(nb_tx < num)) {
+            /* Free mbufs not tx to NIC */
+            kni_burst_free_mbufs(&pkts_burst[nb_tx], num - nb_tx);
+            kni_stats[port_id].tx_dropped += num - nb_tx;
+        }
     }
 }
 
@@ -211,6 +214,7 @@ main_loop(__rte_unused void *arg)
         if (sk.force_quit)
             break;
         kni_egress(kconf);
+        rte_kni_handle_request(kconf->kni);
     }
     return 0;
 }
@@ -335,11 +339,11 @@ init_kni_module(void)
         rte_exit(EXIT_FAILURE, "Could not initialise mbuf pool\n");
     }
 
+    rte_kni_init(sk.nr_ports);
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
         kni_alloc(portid);
     }
-    kni_init_tx_queue();
 }
 
 int
@@ -349,7 +353,7 @@ cleanup_kni_module()
     for (int i = 0; i < sk.nr_ports; i++) {
         int portid = sk.port_ids[i];
         if (rte_kni_release(sk.kni_conf[portid]->kni))
-            printf("Fail to release kni\n");
+            LOG_ERR(USER1, "Fail to release kni\n");
     }
 #ifdef RTE_LIBRTE_XEN_DOM0
     rte_kni_close();

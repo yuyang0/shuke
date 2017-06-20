@@ -119,6 +119,8 @@ typedef struct lcore_conf {
     uint16_t tx_port_id[RTE_MAX_ETHPORTS];
     uint16_t tx_queue_id[RTE_MAX_ETHPORTS];
     struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
+    // used for kni
+    struct mbuf_table kni_tx_mbufs[RTE_MAX_ETHPORTS];
 
     int numa_id;
     // used to implement time function
@@ -138,7 +140,6 @@ typedef struct port_kni_conf {
     int lcore_k;
     uint16_t tx_queue_id;
     struct rte_kni *kni;
-    struct mbuf_table kni_tx_mbufs;
 } __rte_cache_aligned port_kni_conf_t;
 
 extern struct rte_eth_conf default_port_conf;
@@ -162,5 +163,6 @@ void init_kni_module(void);
 int cleanup_kni_module();
 int start_kni_tx_threads();
 int kni_ifconfig_all();
+void kni_init_tx_queue();
 
 #endif  /* __DPDK_MODULE_H__ */

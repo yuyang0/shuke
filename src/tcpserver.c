@@ -321,7 +321,7 @@ static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, 
                 LOG_ERROR(USER1, "Accepting client connection: %s", srv->errstr);
             return;
         }
-        if (++sk.num_tcp_conn > sk.max_tcp_connections) {
+        if (++sk.num_tcp_conn > (unsigned)sk.max_tcp_connections) {
             --sk.num_tcp_conn;
             // the number of connections reach the limit, just close it.
             close(cfd);

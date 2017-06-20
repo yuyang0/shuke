@@ -45,9 +45,6 @@
 #define CONN_MAX_STATE  7     /**< Max state value (used for assertion) */
 
 #define MAX_NUMA_NODES  32
-#define INVALID_NUMA_ID -110
-#define INVALID_LCORE_ID -120
-#define INVALID_PORT_ID -130
 
 struct numaNode_s;
 

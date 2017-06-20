@@ -289,7 +289,7 @@ print_ethaddr(const char *name, const struct ether_addr *eth_addr)
 {
     char buf[ETHER_ADDR_FMT_SIZE];
     ether_format_addr(buf, ETHER_ADDR_FMT_SIZE, eth_addr);
-    printf("%s%s", name, buf);
+    printf("%s%s\n", name, buf);
 }
 
 static int
@@ -433,34 +433,44 @@ send_single_packet(lcore_conf_t *qconf,
     return 0;
 }
 
+/* Send burst of packets on an output interface */
+static inline int
+kni_send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
+{
+    port_kni_conf_t *kconf = sk.kni_conf[port];
+    struct rte_mbuf **m_table;
+    int ret;
+
+    m_table = (struct rte_mbuf **)qconf->kni_tx_mbufs[port].m_table;
+    ret = rte_kni_tx_burst(kconf->kni, m_table, n);
+    if (unlikely(ret < n)) {
+        do {
+            rte_pktmbuf_free(m_table[ret]);
+        } while (++ret < n);
+    }
+
+    qconf->kni_tx_mbufs[port].len = 0;
+    return 0;
+}
+
 /* Enqueue a single packet, and send burst if queue is filled */
 static inline int
-kni_send_single_packet(port_kni_conf_t *kconf, struct rte_mbuf *m)
+kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port)
 {
     int ret = 0;
     uint16_t len;
 
-    len = kconf->kni_tx_mbufs.len;
-    kconf->kni_tx_mbufs.m_table[len] = m;
+    len = qconf->kni_tx_mbufs[port].len;
+    qconf->kni_tx_mbufs[port].m_table[len] = m;
     len++;
 
     /* enough pkts to be sent */
     if (unlikely(len == MAX_PKT_BURST)) {
-        struct rte_mbuf **m_table;
-
-        m_table = (struct rte_mbuf **)kconf->kni_tx_mbufs.m_table;
-
-        ret = rte_kni_tx_burst(kconf->kni, m_table, MAX_PKT_BURST);
-        if (unlikely(ret < MAX_PKT_BURST)) {
-            do {
-                rte_pktmbuf_free(m_table[ret]);
-            } while (++ret < MAX_PKT_BURST);
-        }
-
+        kni_send_burst(qconf, MAX_PKT_BURST, port);
         len = 0;
     }
 
-    kconf->kni_tx_mbufs.len = len;
+    qconf->kni_tx_mbufs[port].len = len;
     return ret;
 }
 
@@ -505,13 +515,10 @@ verify_cksum(struct rte_mbuf *m) {
 }
 
 static inline __attribute__((always_inline)) void
-__handle_tcp_packet(struct rte_mbuf *m, uint8_t portid)
+__send_to_kni(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t portid)
 {
-    //TODO Check the dest tcp port of packet
-    port_kni_conf_t *kconf = sk.kni_conf[portid];
     /* Burst tx to kni */
-    if (kni_send_single_packet(kconf, m) > 0)
-        rte_kni_handle_request(kconf->kni);
+    kni_send_single_packet(qconf, m, portid);
 }
 
 static inline __attribute__((always_inline)) void
@@ -526,7 +533,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     struct ipv6_hdr *ipv6_h = NULL;
     struct udp_hdr  *udp_h = NULL;
     uint32_t is_udp, is_tcp;
-    uint32_t l3_ptypes;
+    uint32_t l3_ptypes, l2_ptypes;
     bool is_ipv4;
     struct ether_addr eth_addr;
     char ipv6_addr[16];
@@ -538,19 +545,28 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
     is_udp = m->packet_type & RTE_PTYPE_L4_UDP;
     is_tcp = m->packet_type & RTE_PTYPE_L4_TCP;
+    l2_ptypes = m->packet_type & RTE_PTYPE_L2_MASK;
     l3_ptypes = m->packet_type & RTE_PTYPE_L3_MASK;
+
     is_ipv4 = (l3_ptypes == RTE_PTYPE_L3_IPV4);
 
     if (!verify_cksum(m)) {
         goto invalid;
     }
-    if (is_tcp) {
-        __handle_tcp_packet(m, portid);
-        return;
-    }
+    // if (l2_ptypes == RTE_PTYPE_L2_ETHER_ARP)
+    //     printf("port %d got arp packet\n", portid);
 
+    // if (is_tcp || l2_ptypes == RTE_PTYPE_L2_ETHER_ARP) {
+    //     __send_to_kni(qconf, m, portid);
+    //     return;
+    // }
+
+    // if (!is_udp) {
+    //     goto invalid;
+    // }
     if (!is_udp) {
-        goto invalid;
+        __send_to_kni(qconf, m, portid);
+        return;
     }
 
 
@@ -727,12 +743,19 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 
             for (i = 0; i < qconf->n_tx_port; ++i) {
                 portid = qconf->tx_port_id[i];
-                if (qconf->tx_mbufs[portid].len == 0)
-                    continue;
-                send_burst(qconf,
-                           qconf->tx_mbufs[portid].len,
-                           portid);
-                qconf->tx_mbufs[portid].len = 0;
+                if (qconf->tx_mbufs[portid].len > 0) {
+                    send_burst(qconf,
+                               qconf->tx_mbufs[portid].len,
+                               portid);
+                    qconf->tx_mbufs[portid].len = 0;
+                }
+                // TODO: loop on rx port of this lcore
+                if (qconf->kni_tx_mbufs[portid].len > 0) {
+                    kni_send_burst(qconf,
+                                   qconf->kni_tx_mbufs[portid].len,
+                                   portid);
+                    qconf->kni_tx_mbufs[portid].len = 0;
+                }
             }
 
             prev_tsc = cur_tsc;
@@ -845,7 +868,7 @@ parse_ptype_func(struct rte_mbuf *m)
                 packet_type |= RTE_PTYPE_L4_UDP;
         } else
             packet_type |= RTE_PTYPE_L3_IPV4_EXT;
-    } else if (ether_type == rte_cpu_to_be_16(ETHER_TYPE_IPv4)) {
+    } else if (ether_type == rte_cpu_to_be_16(ETHER_TYPE_IPv6)) {
         ipv6_h = (struct ipv6_hdr *)l3;
         if (ipv6_h->proto == IPPROTO_TCP)
             packet_type |= RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_TCP;
@@ -875,6 +898,9 @@ cb_parse_ptype(uint8_t port __rte_unused, uint16_t queue __rte_unused,
 static int
 prepare_ptype_parser(uint8_t portid, uint16_t queueid)
 {
+    if (check_ptype(portid))
+        return 1;
+
     if (sk.parse_ptype) {
         printf("Port %d: softly parse packet type info\n", portid);
         if (rte_eth_add_rx_callback(portid, queueid, cb_parse_ptype, NULL))
@@ -883,9 +909,6 @@ prepare_ptype_parser(uint8_t portid, uint16_t queueid)
         printf("Failed to add rx callback: port=%d\n", portid);
         return 0;
     }
-
-    if (check_ptype(portid))
-        return 1;
 
     printf("port %d cannot parse packet type, please enable parse_ptype in config file\n",
            portid);
@@ -1034,7 +1057,7 @@ initDpdkModule() {
         n_tx_queue = (uint32_t )sk.nr_lcore_ids;
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
-        LOG_INFO(USER1, "Creating queues: port=%d nb_rxq=%d nb_txq=%u... \n",
+        LOG_INFO(USER1, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
                  portid, nb_rx_queue, (unsigned)n_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
                                     (uint16_t)n_tx_queue, &default_port_conf);
@@ -1063,7 +1086,7 @@ initDpdkModule() {
         for (int i = 0; i < sk.nr_lcore_ids; ++i) {
             lcore_id = (unsigned )sk.lcore_ids[i];
             if (lcore_id == rte_get_master_lcore()) continue;
-            assert(rte_lcore_is_enabled(lcore_id) == 0);
+            assert(rte_lcore_is_enabled(lcore_id));
 
             if (sk.numa_on)
                 socketid =
@@ -1097,10 +1120,10 @@ initDpdkModule() {
     for (int i = 0; i < sk.nr_lcore_ids; ++i) {
         lcore_id = (unsigned )sk.lcore_ids[i];
         if (lcore_id == rte_get_master_lcore()) continue;
-        assert(rte_lcore_is_enabled(lcore_id) == 0);
+        assert(rte_lcore_is_enabled(lcore_id));
 
         qconf = &sk.lcore_conf[lcore_id];
-        printf("\nInitializing rx queues on lcore %u ... ", lcore_id );
+        printf("Initializing rx queues on lcore %u ... \n", lcore_id );
         fflush(stdout);
         /* init RX queues */
         for(queue = 0; queue < qconf->n_rx_queue; ++queue) {
@@ -1113,7 +1136,7 @@ initDpdkModule() {
             else
                 socketid = 0;
 
-            printf("rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
+            printf("   rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>\n", lcore_id, portid, queueid, socketid);
             fflush(stdout);
 
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
@@ -1128,6 +1151,8 @@ initDpdkModule() {
     }
 
     printf("\n");
+
+    kni_init_tx_queue();
 
     /* start ports */
     for (portid = 0; portid < nb_ports; portid++) {
@@ -1153,9 +1178,11 @@ initDpdkModule() {
 
     printf("\n");
 
-    for (lcore_id = 0; lcore_id < RTE_MAX_LCORE; lcore_id++) {
-        if (rte_lcore_is_enabled(lcore_id) == 0)
-            continue;
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        lcore_id = (unsigned )sk.lcore_ids[i];
+        if (lcore_id == rte_get_master_lcore()) continue;
+        assert(rte_lcore_is_enabled(lcore_id));
+
         qconf = &sk.lcore_conf[lcore_id];
         for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
             portid = qconf->rx_queue_list[queue].port_id;
