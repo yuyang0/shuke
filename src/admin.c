@@ -476,8 +476,9 @@ static sds genInfoString(char *section) {
                           zoneDictGetNumZones(CUR_NODE->zd, 1));
 
         struct rte_eth_stats eth_stats;
-        for (int i = 0; i < rte_eth_dev_count(); i++) {
-            if (rte_eth_stats_get(i, &eth_stats) != 0) {
+        for (int i = 0; i < sk.nr_ports; i++) {
+            uint8_t portid = (uint8_t )sk.port_ids[i];
+            if (rte_eth_stats_get(portid, &eth_stats) != 0) {
                 LOG_WARN(USER1, "can't get stats of port %d.", i);
                 continue;
             }
