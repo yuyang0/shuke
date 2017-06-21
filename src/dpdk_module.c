@@ -137,7 +137,6 @@ init_per_lcore() {
     qconf->tsc_hz = rte_get_tsc_hz();
     qconf->start_us = (uint64_t )ustime();
     qconf->start_tsc = rte_rdtsc();
-    CUR_NODE = sk.nodes[rte_lcore_to_socket_id(lcore_id)];
 }
 
 static int
@@ -610,8 +609,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m),
-                           src_addr, udp_h->src_port, is_ipv4);
+    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
+                           is_ipv4, qconf->node);
     if(n == ERR_CODE) goto invalid;
 
     if (++qconf->nr_req >= STAT_ATOMIC_WRITE_BATCH) {
@@ -690,7 +689,7 @@ static void handle_packets(int nb_rx, struct rte_mbuf **pkts_burst,
 
 static void
 numa_timer_cb(struct rte_timer *tim __rte_unused, void *arg __rte_unused) {
-    processReplicateLog();
+    processReplicateLog(arg);
 }
 
 int
@@ -698,10 +697,11 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 {
     struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
     unsigned lcore_id = rte_lcore_id();
+    lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
+    numaNode_t *node = qconf->node;
     uint64_t prev_tsc, diff_tsc, cur_tsc;
     int i, nb_rx;
     uint8_t portid, queueid;
-    lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
         US_PER_S * BURST_TX_DRAIN_US;
     prev_tsc = 0;
@@ -712,16 +712,16 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         LOG_INFO(USER1, "lcore %u has nothing to do.", lcore_id);
         return 0;
     }
-    if (CUR_NODE->numa_id != sk.master_numa_id && lcore_id == CUR_NODE->main_lcore_id) {
-        rte_timer_init(CUR_NODE->timer);
+    if (node->numa_id != sk.master_numa_id && lcore_id == node->main_lcore_id) {
+        rte_timer_init(node->timer);
 
         /* load timer0, every 1/2 seconds, on Display lcore, reloaded automatically */
-        rte_timer_reset(CUR_NODE->timer,
+        rte_timer_reset(node->timer,
                         NUMA_TIMER_TICK_RATE,
                         PERIODICAL,
                         lcore_id,
                         numa_timer_cb,
-                        NULL);
+                        node);
     }
 
     LOG_INFO(USER1, "entering main loop on lcore %u.", lcore_id);

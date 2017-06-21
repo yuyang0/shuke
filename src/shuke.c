@@ -15,14 +15,11 @@
 
 #include <getopt.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
 
 #define RANDOM_CHECK_ZONES  10
 #define RANDOM_CHECK_US     1000   // microseconds
 //TODO choose a better value
 #define RANDOM_CHECK_INTERVAL 60   // seconds
-
-RTE_DEFINE_PER_LCORE(struct numaNode_s*, __node);
 
 struct shuke sk;
 
@@ -41,7 +38,7 @@ zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, zone *old_zn) {
     if (old_zn == NULL) {
         char origin[MAX_DOMAIN_LEN+2];
         dot2lenlabel(dotOrigin, origin);
-        old_zn = zoneDictFetchVal(CUR_NODE->zd, origin);
+        old_zn = zoneDictFetchVal(sk.master_node->zd, origin);
     } else {
         zoneIncRef(old_zn);
     }
@@ -196,7 +193,7 @@ int getAllZoneFromFile() {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            zoneDictReplace(CUR_NODE->zd, z);
+            zoneDictReplace(sk.master_node->zd, z);
         }
     }
     dictReleaseIterator(it);
@@ -210,7 +207,7 @@ int reloadZoneFromFile(zoneReloadTask *t) {
     char *fname = dictFetchValue(sk.zone_files_dict, t->dotOrigin);
     if (fname == NULL) {
         dot2lenlabel(t->dotOrigin, origin);
-        zoneDictDelete(CUR_NODE->zd, origin);
+        zoneDictDelete(sk.master_node->zd, origin);
     } else {
         if (loadZoneFromFile(fname, &z) == DS_ERR) {
             return ERR_CODE;
@@ -220,7 +217,7 @@ int reloadZoneFromFile(zoneReloadTask *t) {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            zoneDictReplace(CUR_NODE->zd, z);
+            zoneDictReplace(sk.master_node->zd, z);
         }
     }
     return OK_CODE;
@@ -258,6 +255,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     // current start position in response buffer.
     int cur;
     int errcode;
+    numaNode_t *node = ctx->node;
     const int AR_INFO_SIZE = 64;
     const int CPS_INFO_SIZE = 64;
     arInfo ari[AR_INFO_SIZE];
@@ -287,7 +285,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             char *name = ari[0].name;
             size_t offset = ari[0].offset;
             LOG_DEBUG(USER1, "name: %s, offset: %d", name, offset);
-            zone *ns_z = zoneDictGetZone(CUR_NODE->zd, name);
+            zone *ns_z = zoneDictGetZone(node->zd, name);
             if (ns_z) {
                 if (ns_z->ns) {
                     hdr.nNsRR += ns_z->ns->num;
@@ -331,7 +329,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         size_t offset = ari[i].offset;
 
         // TODO avoid fetch when the name belongs to z
-        ar_z = zoneDictGetZone(CUR_NODE->zd, name);
+        ar_z = zoneDictGetZone(node->zd, name);
         if (ar_z == NULL) continue;
         RRSet *ar_a = zoneFetchTypeVal(ar_z, name, DNS_TYPE_A);
         if (ar_a) {
@@ -393,6 +391,7 @@ static inline int dumpDnsRefusedErr(struct context *ctx) {
 
 static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
 {
+    numaNode_t *node = ctx->node;
     zone *z = NULL;
     dnsDictValue *dv = NULL;
     int64_t ts, now;
@@ -443,7 +442,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         // ignore SRV proto
         name += (*name +1);
     }
-    z = zoneDictGetZone(CUR_NODE->zd, name);
+    z = zoneDictGetZone(node->zd, name);
 
     if (z == NULL) {
         // zone is not managed by this server
@@ -456,7 +455,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     // check if zone need reload.
     ts = rte_atomic64_read(&(z->ts));
     // only master numa node needs reload the zone data.
-    if (CUR_NODE->numa_id == sk.master_numa_id) {
+    if (node->numa_id == sk.master_numa_id) {
         if (ts + z->refresh < now) {
             // put async task to queue to reload zone.
             enqueueZoneReloadTaskRaw(z->dotOrigin, z);
@@ -480,10 +479,11 @@ end:
     return ctx->cur;
 }
 
-int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
-                       char *src_addr, uint16_t src_port, bool is_ipv4)
+int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *src_addr, uint16_t src_port, bool is_ipv4,
+                       numaNode_t *node)
 {
     struct context ctx;
+    ctx.node = node;
     ctx.resp = resp;
     ctx.totallen = respLen;
     ctx.cur = 0;
@@ -508,6 +508,7 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     size_t respLen = 4096;
 
     struct context ctx;
+    ctx.node = sk.master_node;
     ctx.resp = resp;
     ctx.totallen = respLen;
     ctx.cur = 0;
@@ -539,12 +540,12 @@ void checkRandomZones(void) {
     if (now - last_run_ts < RANDOM_CHECK_INTERVAL) return;
     last_run_ts = now;
 
-    zoneDictRLock(CUR_NODE->zd);
+    zoneDictRLock(sk.master_node->zd);
 
     start = ustime();
-    max_loop = MIN(zoneDictGetNumZones(CUR_NODE->zd, 0), RANDOM_CHECK_ZONES);
+    max_loop = MIN(zoneDictGetNumZones(sk.master_node->zd, 0), RANDOM_CHECK_ZONES);
     for (size_t i = 0; i < max_loop; ++i) {
-        zone *z = zoneDictGetRandomZone(CUR_NODE->zd, 0);
+        zone *z = zoneDictGetRandomZone(sk.master_node->zd, 0);
         if (z == NULL) goto end;
 
         ts = rte_atomic64_read(&(z->ts));
@@ -560,7 +561,7 @@ void checkRandomZones(void) {
     }
 end:
     LOG_DEBUG(USER1, "random check %d zones.", ncheck);
-    zoneDictRUnlock(CUR_NODE->zd);
+    zoneDictRUnlock(sk.master_node->zd);
 }
 
 static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData) {
@@ -929,7 +930,7 @@ static void initShuke() {
         LOG_FATAL(USER1, "invalid data store config %s", sk.data_store);
     }
 
-    CUR_NODE->zd = zoneDictCreate(SOCKET_ID_ANY);
+    sk.master_node->zd = zoneDictCreate(SOCKET_ID_ANY);
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
         LOG_FATAL(USER1, "can't load all zone data from %s", sk.data_store);
@@ -942,7 +943,7 @@ static void initShuke() {
         if (numa_id == sk.master_numa_id) continue;
 
         // FIXME: should allocate memory belongs to numa node
-        sk.nodes[numa_id]->zd = zoneDictCopy(CUR_NODE->zd, numa_id);
+        sk.nodes[numa_id]->zd = zoneDictCopy(sk.master_node->zd, numa_id);
         snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
         sk.nodes[numa_id]->tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
     }
@@ -1054,7 +1055,9 @@ int initNuma() {
         } else {
             sk.nodes[numa_id]->nr_lcore_ids++;
         }
+        sk.lcore_conf[lcore_id].node = sk.nodes[numa_id];
     }
+    sk.master_node = sk.nodes[sk.master_numa_id];
     if (sk.nodes[sk.master_numa_id]->nr_lcore_ids <= 1) {
         fprintf(stderr, "master lcore (%d) is the only enabled core on numa %d.\n",
                 sk.master_lcore_id, sk.master_numa_id);

@@ -46,11 +46,6 @@
 
 #define MAX_NUMA_NODES  32
 
-struct numaNode_s;
-
-RTE_DECLARE_PER_LCORE(struct numaNode_s*, __node);
-#define CUR_NODE RTE_PER_LCORE(__node)
-
 enum taskStates {
     TASK_PENDING = 0,
     TASK_RUNNING = 1,
@@ -200,6 +195,7 @@ struct shuke {
     int numa_ids[MAX_NUMA_NODES];
     int nr_numa_id;
 
+    numaNode_t *master_node;
     int master_numa_id;
     int master_lcore_id;
 
@@ -315,8 +311,8 @@ int mongoGetAllZone(void);
 int mongoAsyncReloadZone(zoneReloadTask *t);
 int mongoAsyncReloadAllZone(void);
 
-int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
-                       char *src_addr, uint16_t src_port, bool is_ipv4);
+int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *src_addr, uint16_t src_port, bool is_ipv4,
+                       numaNode_t *node);
 
 int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz);
 

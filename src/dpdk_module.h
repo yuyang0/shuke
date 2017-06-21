@@ -112,6 +112,8 @@ struct lcore_rx_queue {
     uint8_t queue_id;
 } __rte_cache_aligned;
 
+struct numaNode_s;
+
 typedef struct lcore_conf {
     uint16_t n_rx_queue;
     struct lcore_rx_queue rx_queue_list[MAX_RX_QUEUE_PER_LCORE];
@@ -122,7 +124,7 @@ typedef struct lcore_conf {
     // used for kni
     struct mbuf_table kni_tx_mbufs[RTE_MAX_ETHPORTS];
 
-    int numa_id;
+    struct numaNode_s *node;
     // used to implement time function
     uint64_t tsc_hz;
     uint64_t start_tsc;

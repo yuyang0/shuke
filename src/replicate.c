@@ -17,16 +17,16 @@ void replicateDestroy(replicateLog *l) {
     zfree(l);
 }
 
-void processReplicateLog() {
+void processReplicateLog(struct numaNode_s *node) {
     replicateLog *l;
-    while (rte_ring_sc_dequeue(CUR_NODE->tq, (void **)&l) == 0) {
+    while (rte_ring_sc_dequeue(node->tq, (void **)&l) == 0) {
         switch (l->type) {
             case REPLICATE_ADD:
                 assert(l->z != NULL);
-                zoneDictReplace(CUR_NODE->zd, l->z);
+                zoneDictReplace(node->zd, l->z);
                 break;
             case REPLICATE_DEL:
-                zoneDictDelete(CUR_NODE->zd, l->origin);
+                zoneDictDelete(node->zd, l->origin);
                 break;
         }
         replicateDestroy(l);

@@ -150,7 +150,7 @@ ok:
             }
         } else {
             LOG_INFO(USER1, "reload zone %s successfully. ", t->dotOrigin);
-            zoneDictReplace(CUR_NODE->zd, t->new_zn);
+            zoneDictReplace(sk.master_node->zd, t->new_zn);
             reloadZoneOtherNuma(t->new_zn);
             t->new_zn = NULL;
             zoneReloadTaskDestroy(t);
@@ -174,7 +174,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (reply->numberReturned == 0) {
         // remove the zone
         dot2lenlabel(t->dotOrigin, origin);
-        zoneDictDelete(CUR_NODE->zd, origin);
+        zoneDictDelete(sk.master_node->zd, origin);
         deleteZoneOtherNuma(origin);
         zoneReloadTaskDestroy(t);
         goto ok;
@@ -371,7 +371,7 @@ ok:
 
 int mongoGetAllZone() {
     LOG_INFO(USER1, "Synchronous get all zones from mongodb.");
-    return _mongoGetAllZone(CUR_NODE->zd, sk.mongo_host, sk.mongo_port, sk.mongo_dbname);
+    return _mongoGetAllZone(sk.master_node->zd, sk.mongo_host, sk.mongo_port, sk.mongo_dbname);
 }
 
 int mongoAsyncReloadZone(zoneReloadTask *t) {

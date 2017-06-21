@@ -3,10 +3,8 @@
 //
 
 #include "shuke.h"
-#include <rte_ethdev.h>
 
 #include <assert.h>
-#include <limits.h>
 #include <sys/resource.h>
 #include <sys/utsname.h>
 
@@ -473,7 +471,7 @@ static sds genInfoString(char *section) {
                           (long long)nr_req,
                           (long long)rte_atomic64_read(&(sk.nr_dropped)),
                           (long long unsigned)(nr_req/uptime),
-                          zoneDictGetNumZones(CUR_NODE->zd, 1));
+                          zoneDictGetNumZones(sk.master_node->zd, 1));
 
         struct rte_eth_stats eth_stats;
         for (int i = 0; i < sk.nr_ports; i++) {
@@ -609,7 +607,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             strcat(dotOrigin, ".");
         }
         dot2lenlabel(dotOrigin, origin);
-        z = zoneDictFetchVal(CUR_NODE->zd, origin);
+        z = zoneDictFetchVal(sk.master_node->zd, origin);
         if (z == NULL) {
             s = sdsnewprintf("zone %s not found", dotOrigin);
             goto end;
@@ -631,7 +629,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             strcat(dotOrigin, ".");
         }
         dot2lenlabel(dotOrigin, origin);
-        z = zoneDictGetZone(CUR_NODE->zd, origin);
+        z = zoneDictGetZone(sk.master_node->zd, origin);
         if (z == NULL) {
             s = sdsnewprintf("zone %s not found.", argv[2]);
             goto end;
@@ -645,7 +643,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             s = sdsnewprintf("ZONE GETALL needs no arguments, but gives %d.", argc-2);
             goto end;
         }
-        s = zoneDictToStr(CUR_NODE->zd);
+        s = zoneDictToStr(sk.master_node->zd);
     } else if (strcasecmp(argv[1], "RELOAD") == 0) {
         if (argc < 3) {
             s = sdsnewprintf("ZONE RELOAD command needs at least 1 arguments but gives  %d.", argc-2);
@@ -673,14 +671,14 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             strcat(dotOrigin, ".");
         }
         dot2lenlabel(dotOrigin, origin);
-        zoneDictDelete(CUR_NODE->zd, origin);
+        zoneDictDelete(sk.master_node->zd, origin);
     } else if (strcasecmp(argv[1], "FLUSHALL") == 0) {
         if (argc != 2) {
             s = sdsnewprintf("ZONE FLUSHALL needs no arguments, but gives %d.", argc-2);
             goto end;
         }
         // delete all zone
-        zoneDictEmpty(CUR_NODE->zd);
+        zoneDictEmpty(sk.master_node->zd);
     } else if (strcasecmp(argv[1], "SET") == 0) {
         if (argc != 4) {
             s = sdsnewprintf("ZONE SET needs 2 argument, but gives %d.", argc-2);
@@ -699,11 +697,11 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
                 s = sdsnewprintf("the origin of the zone loading from string is not %s.", dotOrigin);
                 goto end;
             }
-            zoneDictReplace(CUR_NODE->zd, z);
+            zoneDictReplace(sk.master_node->zd, z);
             s = sdsnew("ok");
         }
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
-        size_t n = zoneDictGetNumZones(CUR_NODE->zd, 1);
+        size_t n = zoneDictGetNumZones(sk.master_node->zd, 1);
         s = sdsnewprintf("%lu", n);
     }
 end:

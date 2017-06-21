@@ -25,7 +25,10 @@
 
 #define IP_STR_LEN  INET6_ADDRSTRLEN
 
+struct numaNode_s;
+
 struct context {
+    struct  numaNode_s *node;
     // information parsed from dns query packet.
     dnsHeader_t hdr;
     // information of question.

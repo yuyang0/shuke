@@ -8,6 +8,8 @@
 #define REPLICATE_ADD   1
 #define REPLICATE_DEL   (1 << 1)
 
+struct numaNode_s;
+
 typedef struct {
     int type;
     zone *z;
@@ -16,6 +18,6 @@ typedef struct {
 
 replicateLog *replicateLogCreate(int type, char *origin, zone *z);
 void replicateDestroy(replicateLog *l);
-void processReplicateLog();
+void processReplicateLog(struct numaNode_s *node);
 
 #endif //SHUKE_REPLICATE_H
