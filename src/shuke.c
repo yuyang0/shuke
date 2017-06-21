@@ -1084,7 +1084,7 @@ int initKniConfig() {
     sk.nr_kni_tx_lcore_id = nr_id;
     // all kni tx lcores should stay in one socket
     unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
-    for (int i = i; i < sk.nr_kni_tx_lcore_id; ++i) {
+    for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
         if (kni_socket_id != rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[i])) {
             fprintf(stderr, "all kni tx lcores should stay in one socket");
             exit(-1);

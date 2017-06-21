@@ -479,7 +479,7 @@ static sds genInfoString(char *section) {
         for (int i = 0; i < sk.nr_ports; i++) {
             uint8_t portid = (uint8_t )sk.port_ids[i];
             if (rte_eth_stats_get(portid, &eth_stats) != 0) {
-                LOG_WARN(USER1, "can't get stats of port %d.", i);
+                LOG_WARN(USER1, "can't get stats of port %d.", portid);
                 continue;
             }
             s = sdscat(s, "\r\n");
