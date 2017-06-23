@@ -5,6 +5,8 @@
 #ifndef CDNS_LIST_H
 #define CDNS_LIST_H
 
+#include "defines.h"
+
 struct list_head {
     struct list_head *next, *prev;
 };
@@ -127,15 +129,4 @@ static inline void list_del(struct list_head *entry)
     for (pos = (head)->next, n = pos->next; pos != (head);  \
          pos = n, n = pos->next)
 
-#define struct_offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
-
-/**
- * container_of - cast a member of a structure out to the containing structure
- * @ptr:	the pointer to the member.
- * @type:	the type of the container struct this is embedded in.
- * @member:	the name of the member within the struct.
- *
- */
-#define container_of(ptr, type, member)                 \
-    ((type *) ((char *)(ptr) - struct_offsetof(type, member)))
 #endif //CDNS_LIST_H

@@ -12,6 +12,7 @@
 
 #include "sds.h"
 #include "dict.h"
+#include "rbtree.h"
 #include "defines.h"
 #include "str.h"
 #include "protocol.h"
@@ -142,16 +143,16 @@ typedef struct _zone {
     RRSet *soa;
     RRSet *ns;
 
-    // timestamp of last reload of this zone, need sync
-    rte_atomic64_t ts;
-    rte_atomic16_t is_reloading;
-
     // some information of SOA record.
     uint32_t sn;
     int32_t refresh;
     int32_t retry;
     int32_t expiry;
     int32_t nx;
+
+    // timestamp when this zone needs reload
+    long refresh_ts;
+    struct rb_node node;
 } zone;
 
 #define zoneIncRef(z) rte_atomic32_inc(&(z->refcnt))
@@ -208,11 +209,11 @@ void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
 zone *zoneDictGetZone(zoneDict *zd, char *name);
 int zoneDictReplace(zoneDict *zd, zone *z);
-int zoneDictAdd(zoneDict *zd, zone *z);
+
 int zoneDictDelete(zoneDict *zd, char *origin);
 int zoneDictEmpty(zoneDict *zd);
 size_t zoneDictGetNumZones(zoneDict *zd, int lock);
-zone *zoneDictGetRandomZone(zoneDict *zd, int lock);
+
 sds zoneDictToStr(zoneDict *zd);
 
 // parser

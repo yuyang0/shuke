@@ -24,7 +24,6 @@
 #include "log.h"
 #include "ds.h"
 #include "replicate.h"
-
 #include "dpdk_module.h"
 
 #include "himongo/async.h"
@@ -50,7 +49,6 @@ enum taskStates {
     TASK_PENDING = 0,
     TASK_RUNNING = 1,
     TASK_ERROR = 2,
-    TASK_FINISHED = 3,
 };
 
 typedef struct numaNode_s {
@@ -59,12 +57,8 @@ typedef struct numaNode_s {
     int nr_lcore_ids;           // enabled lcores belong this numa node;
     zoneDict *zd;
     struct rte_ring *tq;            // task queue, used for async tasks
-    struct rte_timer *timer;
+    struct rte_timer timer;
 } numaNode_t;
-
-typedef struct {
-    int type;
-} object;
 
 typedef struct _tcpServer {
     int ipfd[CONFIG_BINDADDR_MAX];  // only for tcp server(listening fd)
@@ -126,7 +120,7 @@ typedef struct {
     size_t nr_names;  // number of pending names.
     zone *old_zn;
     zone *new_zn;
-}zoneReloadTask;
+}zoneReloadContext;
 
 struct shuke {
     char errstr[ERR_STR_LEN];
@@ -135,6 +129,7 @@ struct shuke {
     char *configfile;
 
     char *coremask;
+    int master_lcore_id;
     char *kni_tx_coremask;
     char *kni_kernel_coremask;
     char *mem_channels;
@@ -168,11 +163,12 @@ struct shuke {
     char *redis_zone_prefix;
     char *redis_soa_prefix;
     char *redis_origins_key;
-    long redis_retry_interval;
 
     char *mongo_host;
     int mongo_port;
     char *mongo_dbname;
+
+    long retry_interval;
 
     char *admin_host;
     int admin_port;
@@ -195,9 +191,7 @@ struct shuke {
     int numa_ids[MAX_NUMA_NODES];
     int nr_numa_id;
 
-    numaNode_t *master_node;
     int master_numa_id;
-    int master_lcore_id;
 
     int *lcore_ids;
     int nr_lcore_ids;
@@ -209,6 +203,10 @@ struct shuke {
     char *total_lcore_list;
     // end
 
+    // pointer to master numa node's zoneDict instance
+    zoneDict *zd;
+    struct rb_root rbroot;
+
     volatile bool force_quit;
     FILE *query_log_fp;
 
@@ -218,16 +216,21 @@ struct shuke {
     /*
      * these two functions should be called only in mainThreadCron.
      *
-     * if zone reloading is needed, just enqueue an zoneReloadTask to task queue.
+     * if zone reloading is needed, just enqueue an zoneReloadContext to task queue.
      * if all zone reloading is needed, just set `last_all_reload_ts` to `now-all_reload_interval`
      * then mainThreadCron will do reloading automatically.
      */
     int (*asyncReloadAllZone)(void);
-    int (*asyncReloadZone)(zoneReloadTask *t);
+    int (*asyncReloadZone)(zoneReloadContext *t);
 
+    // redis context
+    // it will be NULL when shuke is disconnected with redis,
+    // redisAsyncContext *redis_ctx;
+
+    // mongo context
+    // it will be NULL when shuke is disconnected with mongodb
     mongoAsyncContext *mongo_ctx;
     long last_retry_ts;
-    long retry_interval;
 
     // admin server
     int fd;
@@ -243,17 +246,7 @@ struct shuke {
 
     aeEventLoop *el;      // event loop for main thread.
 
-    struct rte_ring *tq;            // task queue, used for async tasks
-
-    // redis context
-    // it will be NULL when cdns is disconnected with redis,
-
-    // redisAsyncContext *redis_ctx;
-    long last_redis_retry_ts;
-
-    bool stop_asap;
-
-    time_t unixtime;
+    long unixtime;
     long long mstime;
 
     time_t    starttime;     // server start time
@@ -280,15 +273,15 @@ extern dictType zoneFileDictType;
 
 int snpack(char *buf, int offset, size_t size, char const *fmt, ...);
 /*----------------------------------------------
- *     zoneReloadTask
+ *     zoneReloadContext
  *---------------------------------------------*/
-zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, zone *old_zn);
-void zoneReloadTaskReset(zoneReloadTask *t);
-void zoneReloadTaskDestroy(zoneReloadTask *t);
+zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn);
+void zoneReloadContextReset(zoneReloadContext *t);
+void zoneReloadContextDestroy(zoneReloadContext *t);
 
-int enqueueZoneReloadTaskRaw(char *dotOrigin, zone *old_zn);
-int enqueueZoneReloadTask(zoneReloadTask *t);
-void *dequeueTask(void);
+int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn);
+int enqueueZoneReloadTask(zoneReloadContext *t);
+
 /*----------------------------------------------
  *     admin server
  *---------------------------------------------*/
@@ -308,7 +301,7 @@ void tcpConnAppendDnsResponse(tcpConn *conn, char *resp, size_t respLen);
 int initMongo(void);
 int checkMongo(void);
 int mongoGetAllZone(void);
-int mongoAsyncReloadZone(zoneReloadTask *t);
+int mongoAsyncReloadZone(zoneReloadContext *t);
 int mongoAsyncReloadAllZone(void);
 
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *src_addr, uint16_t src_port, bool is_ipv4,
@@ -318,6 +311,10 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz);
 
 void deleteZoneOtherNuma(char *origin);
 void reloadZoneOtherNuma(zone *z);
+
+int masterZoneDictReplace(zone *z);
+int masterZoneDictDelete(char *origin);
+void refreshZone(zone* z);
 
 #ifdef SK_TEST
 int mongoTest(int argc, char *argv[]);

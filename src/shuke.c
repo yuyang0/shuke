@@ -16,15 +16,81 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 
-#define RANDOM_CHECK_ZONES  10
-#define RANDOM_CHECK_US     1000   // microseconds
-//TODO choose a better value
-#define RANDOM_CHECK_INTERVAL 60   // seconds
-
 struct shuke sk;
 
+int rbtreeInsertZone(zone *z) {
+    struct rb_node **new = &(sk.rbroot.rb_node), *parent = NULL;
+
+    /* Figure out where to put new node */
+    while (*new) {
+        zone *this = container_of(*new, zone, node);
+        long result = z->refresh_ts - this->refresh_ts;
+
+        parent = *new;
+        if (result <= 0)
+            new = &((*new)->rb_left);
+        else
+            new = &((*new)->rb_right);
+    }
+
+    /* Add new node and rebalance tree. */
+    rb_link_node(&z->node, parent, new);
+    rb_insert_color(&z->node, &sk.rbroot);
+
+    return 1;
+}
+
+void rbtreeDeleteZone(zone *z) {
+    rb_erase(&z->node, &sk.rbroot);
+    RB_CLEAR_NODE(&z->node);
+}
+
+zone *getOldestZone() {
+    struct rb_node *n = rb_first(&sk.rbroot);
+    if (n) {
+        return rb_entry(n, zone, node);
+    }
+    return NULL;
+}
+
+void refreshZone(zone* z) {
+    rbtreeDeleteZone(z);
+    z->refresh_ts = sk.unixtime + z->refresh;
+    rbtreeInsertZone(z);
+}
+
+int masterZoneDictReplace(zone *z) {
+    zoneDict *zd = sk.zd;
+    z->refresh_ts = sk.unixtime + z->refresh;
+    zoneUpdateRRSetOffsets(z);
+
+    zoneDictWLock(zd);
+    zone *old_z = dictFetchValue(zd->d, z->origin);
+    if (old_z) {
+        rbtreeDeleteZone(old_z);
+    }
+    int err = dictReplace(zd->d, z->origin, z);
+    rbtreeInsertZone(z);
+    zoneDictWUnlock(zd);
+    return err;
+}
+
+int masterZoneDictDelete(char *origin) {
+    int err;
+    zoneDict *zd = sk.zd;
+
+    zoneDictWLock(zd);
+    zone *old_z = dictFetchValue(zd->d, origin);
+    if (old_z) {
+        rbtreeDeleteZone(old_z);
+    }
+    err = dictDelete(zd->d, origin);
+    zoneDictWUnlock(zd);
+    return err;
+}
+
 /*!
- * create a zone reload task
+ * create a zone reload Context
  *
  * @param dotOrigin : the origin in <label dot> format
  * @param sn : the serial number of the zone(the sn field in SOA record)
@@ -32,39 +98,42 @@ struct shuke sk;
  *             -1 means this function needs to check if this zone is in memory cache.
  * @return obj if everything is ok otherwise return NULL
  */
-zoneReloadTask *zoneReloadTaskCreate(char *dotOrigin, zone *old_zn) {
+zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
     uint32_t sn = 0;
-    long ts = -1;
     if (old_zn == NULL) {
         char origin[MAX_DOMAIN_LEN+2];
         dot2lenlabel(dotOrigin, origin);
-        old_zn = zoneDictFetchVal(sk.master_node->zd, origin);
+        old_zn = zoneDictFetchVal(sk.zd, origin);
     } else {
         zoneIncRef(old_zn);
     }
     //TODO: incr the reference count of zone object.
     if (old_zn != NULL) {
-        if (rte_atomic16_test_and_set(&(old_zn->is_reloading))) {
-            sn = old_zn->sn;
-            ts = rte_atomic64_read(&(old_zn->ts));
-        } else {
-            return NULL;
-        }
+        sn = old_zn->sn;
     }
-    zoneReloadTask *t = zcalloc(sizeof(*t));
+    zoneReloadContext *t = zcalloc(sizeof(*t));
     t->type = TASK_RELOAD_ZONE;
     t->dotOrigin = zstrdup(dotOrigin);
     t->sn = sn;
-    t->ts = ts;
     t->status = TASK_PENDING;
     t->old_zn = old_zn;
     return t;
 }
 
-void *dequeueTask(void) {
-    void *t;
-    if (rte_ring_sc_dequeue(sk.tq, &t) != 0) t = NULL;
-    return t;
+void zoneReloadContextReset(zoneReloadContext *t) {
+    t->status = TASK_PENDING;
+    if (t->new_zn) zoneDestroy(t->new_zn);
+    t->new_zn = NULL;
+}
+
+void zoneReloadContextDestroy(zoneReloadContext *t) {
+    zfree(t->dotOrigin);
+    if (t->old_zn){
+        zoneDecRef(t->old_zn);
+    }
+    if (t->new_zn) zoneDestroy(t->new_zn);
+    if (t->psr) RRParserDestroy(t->psr);
+    zfree(t);
 }
 
 /*!
@@ -74,42 +143,20 @@ void *dequeueTask(void) {
  * @param t
  * @return
  */
-int enqueueZoneReloadTask(zoneReloadTask *t) {
+int enqueueZoneReloadTask(zoneReloadContext *t) {
     int errcode = OK_CODE;
-    zoneReloadTaskReset(t);
-    if (rte_ring_mp_enqueue(sk.tq, t) != 0) errcode = ERR_CODE;
+    zoneReloadContextReset(t);
+    sk.asyncReloadZone(t);
     return errcode;
 }
 
-int enqueueZoneReloadTaskRaw(char *dotOrigin, zone *old_zn) {
+int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn) {
     int errcode = OK_CODE;
-    zoneReloadTask *t = zoneReloadTaskCreate(dotOrigin, old_zn);
+    zoneReloadContext *t = zoneReloadContextCreate(dotOrigin, old_zn);
     if (t == NULL) return ERR_CODE;
 
-    if (rte_ring_mp_enqueue(sk.tq, t) != 0) {
-        zoneReloadTaskDestroy(t);
-        errcode = ERR_CODE;
-        goto end;
-    }
-end:
+    sk.asyncReloadZone(t);
     return errcode;
-}
-
-void zoneReloadTaskReset(zoneReloadTask *t) {
-    t->status = TASK_PENDING;
-    if (t->new_zn) zoneDestroy(t->new_zn);
-    t->new_zn = NULL;
-}
-
-void zoneReloadTaskDestroy(zoneReloadTask *t) {
-    zfree(t->dotOrigin);
-    if (t->old_zn){
-        rte_atomic16_clear(&(t->old_zn->is_reloading));
-        zoneDecRef(t->old_zn);
-    }
-    if (t->new_zn) zoneDestroy(t->new_zn);
-    if (t->psr) RRParserDestroy(t->psr);
-    zfree(t);
 }
 
 void deleteZoneOtherNuma(char *origin) {
@@ -193,7 +240,7 @@ int getAllZoneFromFile() {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            zoneDictReplace(sk.master_node->zd, z);
+            masterZoneDictReplace(z);
         }
     }
     dictReleaseIterator(it);
@@ -201,13 +248,13 @@ int getAllZoneFromFile() {
     return OK_CODE;
 }
 
-int reloadZoneFromFile(zoneReloadTask *t) {
+int reloadZoneFromFile(zoneReloadContext *t) {
     zone *z;
     char origin[MAX_DOMAIN_LEN+2];
     char *fname = dictFetchValue(sk.zone_files_dict, t->dotOrigin);
     if (fname == NULL) {
         dot2lenlabel(t->dotOrigin, origin);
-        zoneDictDelete(sk.master_node->zd, origin);
+        masterZoneDictDelete(origin);
     } else {
         if (loadZoneFromFile(fname, &z) == DS_ERR) {
             return ERR_CODE;
@@ -217,7 +264,7 @@ int reloadZoneFromFile(zoneReloadTask *t) {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            zoneDictReplace(sk.master_node->zd, z);
+            masterZoneDictReplace(z);
         }
     }
     return OK_CODE;
@@ -394,7 +441,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     numaNode_t *node = ctx->node;
     zone *z = NULL;
     dnsDictValue *dv = NULL;
-    int64_t ts, now;
+    // int64_t now;
     char *name;
     int ret;
 
@@ -451,20 +498,11 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         return ctx->cur;
     }
 
-    now = (int64_t )rte_tsc_time();
-    // check if zone need reload.
-    ts = rte_atomic64_read(&(z->ts));
-    // only master numa node needs reload the zone data.
-    if (node->numa_id == sk.master_numa_id) {
-        if (ts + z->refresh < now) {
-            // put async task to queue to reload zone.
-            enqueueZoneReloadTaskRaw(z->dotOrigin, z);
-        }
-    }
-    if (ts + z->expiry < now) {
-        dumpDnsNameErr(ctx);
-        goto end;
-    }
+    // now = (int64_t )rte_tsc_time();
+    // if (ts + z->expiry < now) {
+    //     dumpDnsNameErr(ctx);
+    //     goto end;
+    // }
 
     dv = zoneFetchValue(z, ctx->name);
     if (dv == NULL) {
@@ -508,7 +546,7 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     size_t respLen = 4096;
 
     struct context ctx;
-    ctx.node = sk.master_node;
+    ctx.node = sk.nodes[sk.master_numa_id];
     ctx.resp = resp;
     ctx.totallen = respLen;
     ctx.cur = 0;
@@ -529,44 +567,9 @@ static void updateCachedTime() {
     sk.mstime = mstime();
 }
 
-void checkRandomZones(void) {
-    static long last_run_ts = 0;
-
-    int ncheck = 0;
-    long long start;
-    long now = sk.unixtime;
-    long ts;
-    size_t max_loop = 0;
-    if (now - last_run_ts < RANDOM_CHECK_INTERVAL) return;
-    last_run_ts = now;
-
-    zoneDictRLock(sk.master_node->zd);
-
-    start = ustime();
-    max_loop = MIN(zoneDictGetNumZones(sk.master_node->zd, 0), RANDOM_CHECK_ZONES);
-    for (size_t i = 0; i < max_loop; ++i) {
-        zone *z = zoneDictGetRandomZone(sk.master_node->zd, 0);
-        if (z == NULL) goto end;
-
-        ts = rte_atomic64_read(&(z->ts));
-        if (ts + z->refresh < now) {
-            // put async task to queue to reload zone.
-            LOG_DEBUG(USER1, "enqueue %s.", z->dotOrigin);
-            enqueueZoneReloadTaskRaw(z->dotOrigin, z);
-        }
-        ncheck++;
-
-        long long elapsed = ustime() - start;
-        if (elapsed > RANDOM_CHECK_US) goto end;
-    }
-end:
-    LOG_DEBUG(USER1, "random check %d zones.", ncheck);
-    zoneDictRUnlock(sk.master_node->zd);
-}
-
 static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData) {
     UNUSED3(el, id, clientData);
-    object *obj;
+    zone *z;
 
     updateCachedTime();
     if (sk.checkAsyncContext() == ERR_CODE) {
@@ -574,15 +577,11 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         sk.initAsyncContext();
     }
     if (sk.checkAsyncContext() == OK_CODE) {
-        while((obj = dequeueTask()) != NULL) {
-            if (obj->type == TASK_RELOAD_ZONE) {
-                if (sk.asyncReloadZone((zoneReloadTask *) obj) != OK_CODE) {
-                    LOG_INFO(USER1, "reload zone");
-                    break;
-                }
-            } else {
-                LOG_ERROR(USER1, "Unknown async task type: %d", obj->type);
-            }
+        //TODO reload the oldest zones
+        while((z = getOldestZone()) != NULL) {
+            if (z->refresh_ts > sk.unixtime) break;
+            rbtreeDeleteZone(z);
+            asyncReloadZoneRaw(NULL, z);
         }
         // check if need to do all reload
         if (sk.unixtime - sk.last_all_reload_ts > sk.all_reload_interval) {
@@ -591,7 +590,6 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         }
     }
     //TODO remove the removed zone in zoneDict.
-    checkRandomZones();
     // run tcp dns server cron
     tcpServerCron(el, id, (void *)sk.tcp_srv);
     return TIME_INTERVAL;
@@ -742,6 +740,7 @@ static void initConfigFromFile(int argc, char **argv) {
     }
 
     // set default values
+    sk.master_lcore_id = -1;
     sk.promiscuous_on = false;
     sk.numa_on = false;
 
@@ -755,7 +754,7 @@ static void initConfigFromFile(int argc, char **argv) {
     sk.max_tcp_connections = 1024;
 
     sk.redis_port = 6379;
-    sk.redis_retry_interval = 120;
+    sk.retry_interval = 120;
     sk.mongo_port = 27017;
 
     sk.admin_port = 14141;
@@ -766,6 +765,9 @@ static void initConfigFromFile(int argc, char **argv) {
     sk.coremask = getStrVal(cbuf, "coremask", NULL);
     CHECK_CONFIG("coremask", sk.coremask != NULL,
                  "Config Error: coremask can't be empty");
+    conf_err = getIntVal(sk.errstr, cbuf, "master_lcore_id", &sk.master_lcore_id);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+
     sk.kni_tx_coremask = getStrVal(cbuf, "kni_tx_coremask", NULL);
     CHECK_CONFIG("kni_tx_coremask", sk.kni_tx_coremask != NULL,
                  "Config Error: kni_tx_coremask can't be empty");
@@ -856,7 +858,7 @@ static void initConfigFromFile(int argc, char **argv) {
         sk.redis_zone_prefix = getStrVal(cbuf, "redis_zone_prefix", NULL);
         sk.redis_soa_prefix = getStrVal(cbuf, "redis_soa_prefix", NULL);
         sk.redis_origins_key = getStrVal(cbuf, "redis_origins_key", NULL);
-        conf_err = getLongVal(sk.errstr, cbuf, "redis_retry_interval", &sk.redis_retry_interval);
+        conf_err = getLongVal(sk.errstr, cbuf, "retry_interval", &sk.retry_interval);
         CHECK_CONF_ERR(conf_err, sk.errstr);
 
         CHECK_CONFIG("redis_host", sk.redis_host != NULL, "redis_host can't be empty");
@@ -868,6 +870,8 @@ static void initConfigFromFile(int argc, char **argv) {
         sk.mongo_host = getStrVal(cbuf, "mongo_host", NULL);
         sk.mongo_dbname = getStrVal(cbuf, "mongo_dbname", NULL);
         conf_err = getIntVal(sk.errstr, cbuf, "mongo_port", &sk.mongo_port);
+        CHECK_CONF_ERR(conf_err, sk.errstr);
+        conf_err = getLongVal(sk.errstr, cbuf, "retry_interval", &sk.retry_interval);
         CHECK_CONF_ERR(conf_err, sk.errstr);
 
         CHECK_CONFIG("mongo_host", sk.mongo_host != NULL, NULL);
@@ -892,11 +896,10 @@ signal_handler(int signum)
 
 static void initShuke() {
     char ring_name[MAXLINE];
+    numaNode_t *master_node = sk.nodes[sk.master_numa_id];
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
     sk.starttime = time(NULL);
     updateCachedTime();
-
-    sk.tq = rte_ring_create("TQ_QUEUE", 1024, rte_socket_id(), RING_F_SC_DEQ);
 
     sk.el = aeCreateEventLoop(1024, true);
     assert(sk.el);
@@ -930,7 +933,9 @@ static void initShuke() {
         LOG_FATAL(USER1, "invalid data store config %s", sk.data_store);
     }
 
-    sk.master_node->zd = zoneDictCreate(SOCKET_ID_ANY);
+    sk.rbroot = RB_ROOT;
+    master_node->zd = zoneDictCreate(SOCKET_ID_ANY);
+    sk.zd = master_node->zd;
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
         LOG_FATAL(USER1, "can't load all zone data from %s", sk.data_store);
@@ -943,7 +948,7 @@ static void initShuke() {
         if (numa_id == sk.master_numa_id) continue;
 
         // FIXME: should allocate memory belongs to numa node
-        sk.nodes[numa_id]->zd = zoneDictCopy(sk.master_node->zd, numa_id);
+        sk.nodes[numa_id]->zd = zoneDictCopy(sk.zd, numa_id);
         snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
         sk.nodes[numa_id]->tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
     }
@@ -1028,20 +1033,8 @@ static int get_port_ids(int buf[], int *n) {
     return OK_CODE;
 }
 
-int initNuma() {
+int initNumaConfig() {
     int n = 0;
-    int ids[1024];
-    int nr_id;
-
-    nr_id = 1024;
-    if (parse_str_coremask(sk.coremask, ids, &nr_id) == ERR_CODE) {
-        fprintf(stderr, "error: the number of locre is bigger than %d.\n", nr_id);
-        abort();
-    }
-    sk.lcore_ids = memdup(ids, nr_id * sizeof(int));
-    sk.nr_lcore_ids = nr_id;
-    // the last lcore is the master
-    sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
     sk.master_numa_id = rte_lcore_to_socket_id((unsigned)sk.master_lcore_id);
 
     for (int i = 0; i < sk.nr_lcore_ids; ++i) {
@@ -1057,7 +1050,6 @@ int initNuma() {
         }
         sk.lcore_conf[lcore_id].node = sk.nodes[numa_id];
     }
-    sk.master_node = sk.nodes[sk.master_numa_id];
     if (sk.nodes[sk.master_numa_id]->nr_lcore_ids <= 1) {
         fprintf(stderr, "master lcore (%d) is the only enabled core on numa %d.\n",
                 sk.master_lcore_id, sk.master_numa_id);
@@ -1070,7 +1062,7 @@ int initNuma() {
         }
     }
     sk.nr_numa_id = n;
-    // printf("lcore list: %s\n", sk.total_lcore_list);
+    LOG_INFO(USER1, "lcore list: %s, numa: %d.", sk.total_lcore_list, sk.nr_numa_id);
     return 0;
 }
 
@@ -1078,13 +1070,6 @@ int initKniConfig() {
     int ids[1024];
     int nr_id;
 
-    nr_id = 1024;
-    if (parse_str_coremask(sk.kni_tx_coremask, ids, &nr_id) == ERR_CODE) {
-        fprintf(stderr, "error: the number of kni locre is bigger than %d.\n", nr_id);
-        abort();
-    }
-    sk.kni_tx_lcore_ids = memdup(ids, nr_id * sizeof(int));
-    sk.nr_kni_tx_lcore_id = nr_id;
     // all kni tx lcores should stay in one socket
     unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
     for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
@@ -1142,12 +1127,42 @@ int initKniConfig() {
 }
 
 int initOtherConfig() {
-    initNuma();
-    initKniConfig();
+    int ids[1024];
+    int nr_id;
+
+    nr_id = 1024;
+    if (parse_str_coremask(sk.coremask, ids, &nr_id) == ERR_CODE) {
+        fprintf(stderr, "error: the number of locre is bigger than %d.\n", nr_id);
+        abort();
+    }
+    sk.lcore_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_lcore_ids = nr_id;
+    /*
+     * if master_lcore_id is not set, then use the last lcore id in coremask
+     */
+    if (sk.master_lcore_id < 0)
+        sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
+
+    nr_id = 1024;
+    if (parse_str_coremask(sk.kni_tx_coremask, ids, &nr_id) == ERR_CODE) {
+        fprintf(stderr, "error: the number of kni locre is bigger than %d.\n", nr_id);
+        abort();
+    }
+    sk.kni_tx_lcore_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_kni_tx_lcore_id = nr_id;
+
     if (construct_lcore_list() == ERR_CODE) {
         fprintf(stderr, "error: lcore list is too long\n");
         exit(-1);
     }
+    /*
+     * because all function provided by dpdk should be called after EAL has been initialized.
+     * so we init EAL here, because when init numa config, we need call rte_lcore_to_socket_id.
+     */
+    initDpdkEal();
+
+    initNumaConfig();
+    initKniConfig();
     return OK_CODE;
 }
 

@@ -95,7 +95,7 @@ struct rte_eth_conf default_port_conf = {
     .rx_adv_conf = {
         .rss_conf = {
             .rss_key = NULL,
-            .rss_hf = ETH_RSS_UDP | ETH_RSS_IP | ETH_RSS_L2_PAYLOAD,
+            .rss_hf = ETH_RSS_TCP | ETH_RSS_UDP | ETH_RSS_IP | ETH_RSS_L2_PAYLOAD,
         },
     },
     .txmode = {
@@ -613,6 +613,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                            is_ipv4, qconf->node);
     if(n == ERR_CODE) goto invalid;
 
+
     if (++qconf->nr_req >= STAT_ATOMIC_WRITE_BATCH) {
         rte_atomic64_add(&(sk.nr_req), qconf->nr_req);
         qconf->nr_req = 0;
@@ -699,11 +700,12 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     unsigned lcore_id = rte_lcore_id();
     lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
     numaNode_t *node = qconf->node;
-    uint64_t prev_tsc, diff_tsc, cur_tsc;
+    uint64_t prev_tsc, diff_tsc, cur_tsc, prev_print_tsc =0;
     int i, nb_rx;
     uint8_t portid, queueid;
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
         US_PER_S * BURST_TX_DRAIN_US;
+    const uint64_t print_interval = (rte_get_tsc_hz() * 2);
     prev_tsc = 0;
 
     init_per_lcore();
@@ -713,10 +715,10 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         return 0;
     }
     if (node->numa_id != sk.master_numa_id && lcore_id == node->main_lcore_id) {
-        rte_timer_init(node->timer);
-
+        rte_timer_init(&node->timer);
+        LOG_INFO(USER1, "setup timer for numa node %d.", node->numa_id);
         /* load timer0, every 1/2 seconds, on Display lcore, reloaded automatically */
-        rte_timer_reset(node->timer,
+        rte_timer_reset(&node->timer,
                         NUMA_TIMER_TICK_RATE,
                         PERIODICAL,
                         lcore_id,
@@ -744,7 +746,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
          */
         diff_tsc = cur_tsc - prev_tsc;
         if (unlikely(diff_tsc > drain_tsc)) {
-
             for (i = 0; i < qconf->n_tx_port; ++i) {
                 portid = qconf->tx_port_id[i];
                 if (qconf->tx_mbufs[portid].len > 0) {
@@ -764,7 +765,12 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 
             prev_tsc = cur_tsc;
         }
-
+#if 0
+        if (unlikely(cur_tsc - prev_print_tsc) > print_interval) {
+            printf("core %d got %lli packets\n", lcore_id, qconf->received_req);
+            prev_print_tsc = cur_tsc;
+        }
+#endif
         /*
          * Read packet from RX queues
          */
@@ -774,6 +780,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
             if (nb_rx == 0)
                 continue;
+            qconf->received_req += nb_rx;
             // LOG_INFO(USER1, "lcore %d receive %d packets", lcore_id, nb_rx);
             handle_packets(nb_rx, pkts_burst, portid, qconf);
         }
@@ -841,6 +848,11 @@ initDpdkEal() {
     ret = rte_eal_init(argc, argv);
     if (ret < 0)
         rte_exit(EXIT_FAILURE, "Invalid EAL parameters\n");
+    /*
+     * since rte_eal_init rewrite the log configuration,
+     * so config_log should stay after rte_eal_init.
+     */
+    config_log();
 }
 
 int
@@ -855,10 +867,9 @@ initDpdkModule() {
     //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 50 */
     //     0x05, 0x05  /* 60 - 8 */
     // };
-
-    // port_conf.rx_adv_conf.rss_conf.rss_key = (uint8_t *)&key;
-    // port_conf.rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
-    initDpdkEal();
+    //
+    // default_port_conf.rx_adv_conf.rss_conf.rss_key = (uint8_t *)&key;
+    // default_port_conf.rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
 
     lcore_conf_t *qconf;
     struct rte_eth_dev_info dev_info;
@@ -869,11 +880,6 @@ initDpdkModule() {
     unsigned lcore_id;
     uint32_t n_tx_queue, nb_lcores;
     uint8_t portid, nb_rx_queue, queue, socketid;
-    /*
-     * since rte_eal_init rewrite the log configuration,
-     * so config_log should stay after rte_eal_init.
-     */
-    config_log();
 
     /* parse application arguments (after the EAL ones) */
     if (sk.jumbo_on) {

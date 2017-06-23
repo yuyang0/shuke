@@ -133,6 +133,8 @@ typedef struct lcore_conf {
     // statistics
     int64_t nr_req;                   // number of processed requests
     int64_t nr_dropped;
+
+    int64_t received_req;
 } __rte_cache_aligned lcore_conf_t;
 
 typedef struct port_kni_conf {
@@ -150,6 +152,7 @@ extern struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
 
 extern xmm_t val_eth[RTE_MAX_ETHPORTS];
 
+void initDpdkEal();
 int initDpdkModule(void);
 int startDpdkThreads(void);
 int cleanupDpdkModule(void);

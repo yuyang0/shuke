@@ -521,8 +521,7 @@ zone *zoneCreate(char *ss, int socket_id) {
     zn->socket_id = socket_id;
     zn->d = dictCreate(&dnsDictType, NULL, socket_id);
     rte_atomic32_set(&(zn->refcnt), 1);
-    rte_atomic64_set(&(zn->ts), (int64_t )time(NULL));
-    rte_atomic16_clear(&(zn->is_reloading));
+    rb_init_node(&zn->node);
     return zn;
 }
 
@@ -749,20 +748,11 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
  * element with such key and dictReplace() just performed a value update
  * operation. */
 int zoneDictReplace(zoneDict *zd, zone *z) {
-    rte_atomic64_set(&(z->ts), (int64_t)time(NULL));
+    z->refresh_ts = time(NULL) + z->refresh;
     zoneUpdateRRSetOffsets(z);
 
     zoneDictWLock(zd);
     int err = dictReplace(zd->d, z->origin, z);
-    zoneDictWUnlock(zd);
-    return err;
-}
-
-int zoneDictAdd(zoneDict *zd, zone *z) {
-    int err;
-
-    zoneDictWLock(zd);
-    err = dictAdd(zd->d, z->origin, z);
     zoneDictWUnlock(zd);
     return err;
 }
@@ -789,17 +779,6 @@ size_t zoneDictGetNumZones(zoneDict *zd, int lock) {
     n = dictSize(zd->d);
     if (lock) zoneDictRUnlock(zd);
     return n;
-}
-
-zone *zoneDictGetRandomZone(zoneDict *zd, int lock) {
-    zone *z = NULL;
-    dictEntry *de;
-    if (lock) zoneDictRLock(zd);
-    if ((de = dictGetRandomKey(zd->d)) == NULL) goto end;
-    z = dictGetVal(de);
-end:
-    if (lock) zoneDictRUnlock(zd);
-    return z;
 }
 
 // may lock the dict long time, mainly for debug.
