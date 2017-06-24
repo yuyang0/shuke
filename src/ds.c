@@ -768,7 +768,7 @@ int zoneDictDelete(zoneDict *zd, char *origin) {
 
 int zoneDictEmpty(zoneDict *zd) {
     zoneDictRLock(zd);
-    dictEmpty(zd->d, NULL);
+    dictEmpty(zd->d);
     zoneDictRUnlock(zd);
     return DS_OK;
 }
