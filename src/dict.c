@@ -45,7 +45,7 @@
 static int _dictExpandIfNeeded(dict *ht);
 static unsigned long _dictNextPower(unsigned long size);
 static int _dictKeyIndex(dict *ht, const void *key);
-static int _dictInit(dict *ht, dictType *type, void *privDataPtr);
+static int _dictInit(dict *ht, dictType *type, void *privDataPtr, int socket_id);
 
 /* -------------------------- hash functions -------------------------------- */
 
@@ -148,17 +148,17 @@ static void _dictReset(dict *ht) {
 /* Create a new hash table */
 dict *dictCreate(dictType *type, void *privDataPtr, int socket_id) {
     dict *ht = socket_malloc(socket_id, sizeof(*ht));
-    ht->socket_id = socket_id;
 
-    _dictInit(ht,type,privDataPtr);
+    _dictInit(ht,type,privDataPtr,socket_id);
     return ht;
 }
 
 /* Initialize the hash table */
-static int _dictInit(dict *ht, dictType *type, void *privDataPtr) {
+static int _dictInit(dict *ht, dictType *type, void *privDataPtr, int socket_id) {
     _dictReset(ht);
     ht->type = type;
     ht->privdata = privDataPtr;
+    ht->socket_id = socket_id;
     return DICT_OK;
 }
 
@@ -172,7 +172,7 @@ int dictExpand(dict *ht, unsigned long size) {
     if (ht->used > size)
         return DICT_ERR;
 
-    _dictInit(&n, ht->type, ht->privdata);
+    _dictInit(&n, ht->type, ht->privdata, ht->socket_id);
     n.size = realsize;
     n.sizemask = realsize-1;
     n.table = socket_calloc(ht->socket_id, realsize, sizeof(dictEntry*));
