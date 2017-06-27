@@ -768,10 +768,10 @@ static void initConfigFromFile(int argc, char **argv) {
     conf_err = getIntVal(sk.errstr, cbuf, "master_lcore_id", &sk.master_lcore_id);
     CHECK_CONF_ERR(conf_err, sk.errstr);
 
-    sk.kni_tx_coremask = getStrVal(cbuf, "kni_tx_coremask", NULL);
-    CHECK_CONFIG("kni_tx_coremask", sk.kni_tx_coremask != NULL,
-                 "Config Error: kni_tx_coremask can't be empty");
-    sk.kni_kernel_coremask = getStrVal(cbuf, "kni_kernel_coremask", NULL);
+    sk.kni_tx_config = getStrVal(cbuf, "kni_tx_config", NULL);
+    CHECK_CONFIG("kni_tx_config", sk.kni_tx_config != NULL,
+                 "Config Error: kni_tx_config can't be empty");
+    sk.kni_kernel_config = getStrVal(cbuf, "kni_kernel_config", NULL);
 
     sk.mem_channels = getStrVal(cbuf, "mem_channels", NULL);
     CHECK_CONFIG("mem_channels", sk.mem_channels != NULL,
@@ -998,6 +998,164 @@ static int hexchar_to_int(char c) {
     return (int)strtol(buf, NULL, 16);
 }
 
+static int parse_kni_tx_config() {
+    int ids[1024];
+    int nr_id = 0;
+    bool found;
+
+    char s[256];
+    const char *p, *p0 = sk.kni_tx_config;
+    char *end;
+    enum fieldnames {
+        FLD_PORT = 0,
+        FLD_LCORE,
+        _NUM_FLD
+    };
+    unsigned long int_fld[_NUM_FLD];
+    char *str_fld[_NUM_FLD];
+    int nr_fld = _NUM_FLD;
+    int i;
+    unsigned size;
+
+    int nb_params = 0;
+
+    while ((p = strchr(p0,'(')) != NULL) {
+        ++p;
+        if((p0 = strchr(p,')')) == NULL) {
+            snprintf(sk.errstr, ERR_STR_LEN, "unbalanced parens.");
+            return ERR_CODE;
+        }
+
+        size = (unsigned)(p0 - p);
+        if(size >= sizeof(s)) {
+            snprintf(sk.errstr, ERR_STR_LEN, "config part is too long(%d chars).", size);
+            return ERR_CODE;
+        }
+
+        snprintf(s, sizeof(s), "%.*s", size, p);
+        if (strsplit(s, " ,", str_fld, &nr_fld) < 0 || nr_fld != _NUM_FLD) {
+            snprintf(sk.errstr, ERR_STR_LEN, "every part should contain %d token.", _NUM_FLD);
+            return ERR_CODE;
+        }
+        for (i = 0; i < _NUM_FLD; i++){
+            errno = 0;
+            int_fld[i] = strtoul(str_fld[i], &end, 0);
+            if (errno != 0 || end == str_fld[i] || int_fld[i] > 255) {
+                snprintf(sk.errstr, ERR_STR_LEN, "token %s is not a number.", str_fld[i]);
+                return ERR_CODE;
+            }
+        }
+        if (nb_params >= sk.nr_ports) {
+            snprintf(sk.errstr, ERR_STR_LEN, "config number should equal to port number.");
+            return ERR_CODE;
+        }
+        unsigned long portid = int_fld[FLD_PORT];
+        int lcore_id = (int)int_fld[FLD_LCORE];
+        found = false;
+        for (int i = 0; i < nr_id; ++i) {
+            if (ids[i] == lcore_id) {
+                found = true;
+                break;
+            }
+        }
+        if (!sk.kni_conf[portid]) {
+            snprintf(sk.errstr, ERR_STR_LEN, "port %lu is not enabled.", portid);
+            return ERR_CODE;
+        }
+        if (found == false) ids[nr_id++] = lcore_id;
+        if (sk.kni_conf[portid]->lcore_tx >= 0) {
+            snprintf(sk.errstr, ERR_STR_LEN, "duplicate config for port %lu.", portid);
+            return ERR_CODE;
+        }
+        sk.kni_conf[portid]->lcore_tx = lcore_id;
+        ++nb_params;
+    }
+    // check if every port contains lcore_tx
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        if (sk.kni_conf[portid]->lcore_tx < 0) {
+            snprintf(sk.errstr, ERR_STR_LEN, "port %d doesn't have kni tx lcore config.", portid);
+            return ERR_CODE;
+        }
+    }
+    sk.kni_tx_lcore_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_kni_tx_lcore_id = nr_id;
+    sortIntArray(sk.kni_tx_lcore_ids, (size_t)sk.nr_kni_tx_lcore_id);
+    return OK_CODE;
+}
+
+static int parse_kni_kernel_config() {
+    char s[256];
+    const char *p, *p0 = sk.kni_kernel_config;
+    char *end;
+    enum fieldnames {
+        FLD_PORT = 0,
+        FLD_LCORE,
+        _NUM_FLD
+    };
+    unsigned long int_fld[_NUM_FLD];
+    char *str_fld[_NUM_FLD];
+    int nr_fld = _NUM_FLD;
+    int i;
+    unsigned size;
+
+    int nb_params = 0;
+
+    while ((p = strchr(p0,'(')) != NULL) {
+        ++p;
+        if((p0 = strchr(p,')')) == NULL) {
+            snprintf(sk.errstr, ERR_STR_LEN, "unbalanced parens.");
+            return ERR_CODE;
+        }
+
+        size = (unsigned )(p0 - p);
+        if(size >= sizeof(s)) {
+            snprintf(sk.errstr, ERR_STR_LEN, "config part is too long(%d chars).", size);
+            return ERR_CODE;
+        }
+
+        snprintf(s, sizeof(s), "%.*s", size, p);
+        if (strsplit(s, " ,", str_fld, &nr_fld) < 0 || nr_fld != _NUM_FLD) {
+            snprintf(sk.errstr, ERR_STR_LEN, "every part should contain %d token.", _NUM_FLD);
+            return ERR_CODE;
+        }
+
+        for (i = 0; i < _NUM_FLD; i++){
+            errno = 0;
+            int_fld[i] = strtoul(str_fld[i], &end, 0);
+            if (errno != 0 || end == str_fld[i] || int_fld[i] > 255) {
+                snprintf(sk.errstr, ERR_STR_LEN, "token %s is not a number.", str_fld[i]);
+                return ERR_CODE;
+            }
+        }
+        if (nb_params >= sk.nr_ports) {
+            snprintf(sk.errstr, ERR_STR_LEN, "config number should equal to port number.");
+            return ERR_CODE;
+        }
+        unsigned long portid = int_fld[FLD_PORT];
+        int lcore_id = (int)int_fld[FLD_LCORE];
+        if (!sk.kni_conf[portid]) {
+            snprintf(sk.errstr, ERR_STR_LEN, "port %lu is not enabled.", portid);
+            return ERR_CODE;
+        }
+        if (sk.kni_conf[portid]->lcore_k >= 0) {
+            snprintf(sk.errstr, ERR_STR_LEN, "duplicate config for port %lu.", portid);
+            return ERR_CODE;
+        }
+        sk.kni_conf[portid]->lcore_k = lcore_id;
+        ++nb_params;
+    }
+    // check if every port contains lcore_k
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        if (sk.kni_conf[portid]->lcore_k < 0) {
+            snprintf(sk.errstr, ERR_STR_LEN, "port %d doesn't have kni kernel lcore config.", portid);
+            return ERR_CODE;
+        }
+    }
+    return OK_CODE;
+}
+
 static int parse_str_coremask(char *coremask, int buf[], int *n) {
     int max = *n;
     int nr_id = 0;
@@ -1070,15 +1228,6 @@ int initKniConfig() {
     int ids[1024];
     int nr_id;
 
-    // all kni tx lcores should stay in one socket
-    unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
-    for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
-        if (kni_socket_id != rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[i])) {
-            fprintf(stderr, "all kni tx lcores should stay in one socket");
-            exit(-1);
-        }
-    }
-
     nr_id = 1024;
     if (get_port_ids(ids, &nr_id) == ERR_CODE) {
         fprintf(stderr, "error: the number of port is bigger than %d.\n", nr_id);
@@ -1088,10 +1237,6 @@ int initKniConfig() {
     sk.nr_ports = nr_id;
 
     // initialize kni config
-    if (sk.nr_kni_tx_lcore_id != sk.nr_ports) {
-        fprintf(stderr, "kni tx cores must equal to numble of ports\n");
-        exit(-1);
-    }
     if (sk.bindaddr_count != sk.nr_ports) {
         fprintf(stderr, "the number of ip address should equal to number of ports.\n");
         exit(-1);
@@ -1103,24 +1248,20 @@ int initKniConfig() {
         assert(sk.kni_conf[portid]);
         snprintf(sk.kni_conf[portid]->name, RTE_KNI_NAMESIZE, "vEth%u", portid);
         sk.kni_conf[portid]->port_id = (uint8_t)portid;
-        sk.kni_conf[portid]->lcore_tx = sk.kni_tx_lcore_ids[i];
+        sk.kni_conf[portid]->lcore_tx = -1;
         sk.kni_conf[portid]->lcore_k = -1;
         sk.kni_conf[portid]->tx_queue_id = (uint16_t )(sk.nr_lcore_ids - 1);
     }
-    if (sk.kni_kernel_coremask) {
-        nr_id = 1024;
-        if (parse_str_coremask(sk.kni_kernel_coremask, ids, &nr_id) == ERR_CODE) {
-            fprintf(stderr, "error: the number of kni kernel locre is bigger than %d.\n", nr_id);
-            abort();
-        }
-        if (nr_id != sk.nr_ports) {
-            fprintf(stderr, "kni kernel cores must equal to numble of ports\n");
+
+    if (parse_kni_tx_config() != OK_CODE) {
+        fprintf(stderr, "kni_tx_config error: %s\n", sk.errstr);
+        exit(-1);
+    }
+
+    if (sk.kni_kernel_config) {
+        if (parse_kni_kernel_config() != OK_CODE) {
+            fprintf(stderr, "kni_kernel_config error: %s.\n", sk.errstr);
             exit(-1);
-        }
-        for (int i = 0; i < sk.nr_ports; ++i) {
-            int portid = sk.port_ids[i];
-            assert(sk.kni_conf[portid]);
-            sk.kni_conf[portid]->lcore_k = ids[i];
         }
     }
     return OK_CODE;
@@ -1143,26 +1284,29 @@ int initOtherConfig() {
     if (sk.master_lcore_id < 0)
         sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
 
-    nr_id = 1024;
-    if (parse_str_coremask(sk.kni_tx_coremask, ids, &nr_id) == ERR_CODE) {
-        fprintf(stderr, "error: the number of kni locre is bigger than %d.\n", nr_id);
-        abort();
-    }
-    sk.kni_tx_lcore_ids = memdup(ids, nr_id * sizeof(int));
-    sk.nr_kni_tx_lcore_id = nr_id;
+    initKniConfig();
 
     if (construct_lcore_list() == ERR_CODE) {
         fprintf(stderr, "error: lcore list is too long\n");
         exit(-1);
     }
     /*
-     * because all function provided by dpdk should be called after EAL has been initialized.
-     * so we init EAL here, because when init numa config, we need call rte_lcore_to_socket_id.
+     * because all function provided by dpdk should be called after EAL has been initialized
+     * and when init numa config, we need call rte_lcore_to_socket_id. so we init EAL here,
      */
     initDpdkEal();
 
     initNumaConfig();
-    initKniConfig();
+
+    // all kni tx lcores should stay in one socket
+    unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
+    for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
+        if (kni_socket_id != rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[i])) {
+            fprintf(stderr, "all kni tx lcores should stay in one socket");
+            exit(-1);
+        }
+    }
+
     return OK_CODE;
 }
 

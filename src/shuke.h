@@ -130,8 +130,8 @@ struct shuke {
 
     char *coremask;
     int master_lcore_id;
-    char *kni_tx_coremask;
-    char *kni_kernel_coremask;
+    char *kni_tx_config;
+    char *kni_kernel_config;
     char *mem_channels;
     int portmask;
     bool promiscuous_on;

@@ -44,6 +44,30 @@ long long mstime(void) {
     return ustime()/1000;
 }
 
+static int intCmpFunc(const void *a, const void *b) {
+    return (*(int*)a - *(int*)b);
+}
+
+void sortIntArray(int arr[], size_t nitems) {
+    qsort(arr, nitems, sizeof(int), intCmpFunc);
+}
+
+int intArrayToStr(int arr[], int nitems, char *seps, char *buf, size_t size) {
+    size_t offset = 0;
+    int n = 0;
+
+    buf[0] = '\0';
+    if (nitems < 1) return -1;
+    n = snprintf(buf, size, "%d", arr[0]);
+    offset = (size_t)n;
+    for (int i = 1; i < nitems; ++i) {
+        if (offset >= size) return -1;
+        n = snprintf(buf+offset, size-offset, "%s%d", seps, arr[i]);
+        offset += n;
+    }
+    return 0;
+}
+
 /* Convert an amount of bytes into a human readable string in the form
  * of 100B, 2G, 100M, 4K, and so forth. */
 void bytesToHuman(char *s, unsigned long long n) {

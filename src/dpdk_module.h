@@ -138,6 +138,8 @@ typedef struct lcore_conf {
 } __rte_cache_aligned lcore_conf_t;
 
 typedef struct port_kni_conf {
+    char eth_addr_s[ETHER_ADDR_FMT_SIZE];
+
     char name[RTE_KNI_NAMESIZE];
     uint8_t port_id;
     int lcore_tx;

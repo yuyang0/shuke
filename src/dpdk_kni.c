@@ -5,14 +5,13 @@
 #include <assert.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include "shuke.h"
 
 /* Macros for printing using RTE_LOG */
-#define RTE_LOGTYPE_APP RTE_LOGTYPE_USER1
+// #define RTE_LOGTYPE_KNI RTE_LOGTYPE_USER1
 
 /* Max size of a single packet */
 #define MAX_PACKET_SZ           2048
@@ -82,13 +81,13 @@ kni_ifconfig(char *ifname, char *ipaddr) {
 
     ret = ioctl(sockfd, SIOCSIFADDR, &ifr);
     if (ret < 0) {
-        LOG_ERROR(USER1, "set address error %s\n", strerror(errno));
+        LOG_ERROR(KNI, "set address error %s\n", strerror(errno));
         exit(-1);
     }
     ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
 
     if (ret < 0) {
-        LOG_ERROR(USER1, "get flags error %s\n", strerror(errno));
+        LOG_ERROR(KNI, "get flags error %s\n", strerror(errno));
         exit(-1);
     }
     ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
@@ -96,7 +95,7 @@ kni_ifconfig(char *ifname, char *ipaddr) {
 
     ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
     if (ret < 0) {
-        LOG_ERROR(USER1, "set flags error %s\n", strerror(errno));
+        LOG_ERROR(KNI, "set flags error %s\n", strerror(errno));
         exit(-1);
     }
     close(sockfd);
@@ -153,7 +152,7 @@ void kni_init_tx_queue() {
         else
             socketid = 0;
 
-        LOG_INFO(USER1, "kni txq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
+        LOG_INFO(KNI, "kni txq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
 
         rte_eth_dev_info_get(portid, &dev_info);
         txconf = &dev_info.default_txconf;
@@ -186,7 +185,7 @@ kni_egress(port_kni_conf_t *p)
     /* Burst rx from kni */
     num = rte_kni_rx_burst(p->kni, pkts_burst, MAX_PKT_BURST);
     if (unlikely(num > MAX_PKT_BURST)) {
-        RTE_LOG(ERR, APP, "Error receiving from KNI\n");
+        LOG_ERR(KNI, "Error receiving from KNI\n");
         return;
     }
     if (num > 0) {
@@ -205,16 +204,30 @@ kni_egress(port_kni_conf_t *p)
 static int
 main_loop(__rte_unused void *arg)
 {
-    port_kni_conf_t *kconf = arg;
     const unsigned lcore_id = rte_lcore_id();
-    assert(lcore_id == (unsigned) kconf->lcore_tx);
+    port_kni_conf_t *kconf_list[RTE_MAX_ETHPORTS];
+    int nr_kconf = 0;
+    port_kni_conf_t *kconf;
 
-    RTE_LOG(INFO, APP, "Lcore %u is writing to port %d\n", kconf->lcore_tx, kconf->port_id);
+    for (int i = 0; i < sk.nr_ports; i++) {
+        int portid = sk.port_ids[i];
+        if (sk.kni_conf[portid]->lcore_tx == (int)lcore_id) {
+            kconf_list[nr_kconf++] = sk.kni_conf[portid];
+            LOG_INFO(KNI, "lcore %u is writing to port %d.", lcore_id, portid);
+        }
+    }
+    if (nr_kconf == 0) {
+        LOG_INFO(KNI, "lcore %d has nothing to do.", lcore_id);
+        return 0;
+    }
     while (1) {
         if (sk.force_quit)
             break;
-        kni_egress(kconf);
-        rte_kni_handle_request(kconf->kni);
+        for (int i = 0; i < nr_kconf; ++i) {
+            kconf = kconf_list[i];
+            kni_egress(kconf);
+            rte_kni_handle_request(kconf->kni);
+        }
     }
     return 0;
 }
@@ -227,11 +240,11 @@ kni_change_mtu(uint8_t port_id, unsigned new_mtu)
     struct rte_eth_conf conf;
 
     if (port_id >= rte_eth_dev_count()) {
-        RTE_LOG(ERR, APP, "Invalid port id %d\n", port_id);
+        LOG_ERR(KNI, "Invalid port id %d\n", port_id);
         return -EINVAL;
     }
 
-    RTE_LOG(INFO, APP, "Change MTU of port %d to %u\n", port_id, new_mtu);
+    LOG_INFO(KNI, "Change MTU of port %d to %u\n", port_id, new_mtu);
 
     /* Stop specific port */
     rte_eth_dev_stop(port_id);
@@ -248,14 +261,14 @@ kni_change_mtu(uint8_t port_id, unsigned new_mtu)
                                  KNI_ENET_FCS_SIZE;
     ret = rte_eth_dev_configure(port_id, 1, 1, &conf);
     if (ret < 0) {
-        RTE_LOG(ERR, APP, "Fail to reconfigure port %d\n", port_id);
+        LOG_ERR(KNI, "Fail to reconfigure port %d\n", port_id);
         return ret;
     }
 
     /* Restart specific port */
     ret = rte_eth_dev_start(port_id);
     if (ret < 0) {
-        RTE_LOG(ERR, APP, "Fail to restart port %d\n", port_id);
+        LOG_ERR(KNI, "Fail to restart port %d\n", port_id);
         return ret;
     }
 
@@ -269,11 +282,11 @@ kni_config_network_interface(uint8_t port_id, uint8_t if_up)
     int ret = 0;
 
     if (port_id >= rte_eth_dev_count() || port_id >= RTE_MAX_ETHPORTS) {
-        RTE_LOG(ERR, APP, "Invalid port id %d\n", port_id);
+        LOG_ERR(KNI, "Invalid port id %d\n", port_id);
         return -EINVAL;
     }
 
-    RTE_LOG(INFO, APP, "Configure network interface of %d %s\n",
+    LOG_INFO(KNI, "Configure network interface of %d %s\n",
             port_id, if_up ? "up" : "down");
 
     return ret;
@@ -291,8 +304,8 @@ kni_alloc(uint8_t port_id)
     /* Clear conf at first */
     memset(&conf, 0, sizeof(conf));
     strncpy(conf.name, kconf->name, RTE_KNI_NAMESIZE);
-    if (kconf->lcore_k > 0) {
-        conf.core_id = kconf->lcore_k;
+    if (kconf->lcore_k >= 0) {
+        conf.core_id = (uint32_t )kconf->lcore_k;
         conf.force_bind = 1;
     }
     conf.group_id = (uint16_t)port_id;
@@ -353,7 +366,7 @@ cleanup_kni_module()
     for (int i = 0; i < sk.nr_ports; i++) {
         int portid = sk.port_ids[i];
         if (rte_kni_release(sk.kni_conf[portid]->kni))
-            LOG_ERR(USER1, "Fail to release kni\n");
+            LOG_ERR(KNI, "Fail to release kni\n");
     }
 #ifdef RTE_LIBRTE_XEN_DOM0
     rte_kni_close();
@@ -363,13 +376,6 @@ cleanup_kni_module()
     return 0;
 }
 
-static port_kni_conf_t *getKniConf(unsigned lcore_id) {
-    for (int i = 0; i < sk.nr_ports; ++i) {
-        if (sk.kni_conf[i]->lcore_tx == (int)lcore_id) return sk.kni_conf[i];
-    }
-    return NULL;
-}
-
 /* Initialise ports/queues etc. and start main loop on each core */
 int
 start_kni_tx_threads()
@@ -377,10 +383,8 @@ start_kni_tx_threads()
     int ret;
     /* Launch per-lcore function on every lcore */
     for (int i=0; i < sk.nr_kni_tx_lcore_id; ++i) {
-        unsigned lcore_id = sk.kni_tx_lcore_ids[i];
-        port_kni_conf_t *kconf = getKniConf(lcore_id);
-        assert(kconf);
-        ret = rte_eal_remote_launch(main_loop, kconf, lcore_id);
+        unsigned lcore_id = (unsigned)sk.kni_tx_lcore_ids[i];
+        ret = rte_eal_remote_launch(main_loop, NULL, lcore_id);
         if (ret != 0) {
             rte_exit(EXIT_FAILURE, "Failed to start kni tx lcore %d, return %d", lcore_id, ret);
         }

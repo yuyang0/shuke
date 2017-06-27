@@ -149,17 +149,17 @@ check_lcore_params(void)
     for (i = 0; i < nb_lcore_params; ++i) {
         queue = lcore_params[i].queue_id;
         if (queue >= MAX_RX_QUEUE_PER_PORT) {
-            LOG_ERR(USER1, "invalid queue number: %hhu", queue);
+            LOG_ERR(DPDK, "invalid queue number: %hhu", queue);
             return -1;
         }
         lcore = lcore_params[i].lcore_id;
         if (!rte_lcore_is_enabled(lcore)) {
-            LOG_ERR(USER1, "lcore %hhu is not enabled in lcore mask", lcore);
+            LOG_ERR(DPDK, "lcore %hhu is not enabled in lcore mask", lcore);
             return -1;
         }
         if ((socketid = rte_lcore_to_socket_id(lcore) != 0) &&
             (sk.numa_on == false)) {
-            LOG_WARNING(USER1, "lcore %hhu is on socket %d with numa off \n",
+            LOG_WARNING(DPDK, "lcore %hhu is on socket %d with numa off \n",
                    lcore, socketid);
         }
     }
@@ -175,11 +175,11 @@ check_port_config(const unsigned nb_ports)
     for (i = 0; i < nb_lcore_params; ++i) {
         portid = lcore_params[i].port_id;
         if ((sk.portmask & (1 << portid)) == 0) {
-            LOG_ERR(USER1, "port %u is not enabled in port mask", portid);
+            LOG_ERR(DPDK, "port %u is not enabled in port mask", portid);
             return -1;
         }
         if (portid >= nb_ports) {
-            LOG_ERR(USER1, "port %u is not present on the board.", portid);
+            LOG_ERR(DPDK, "port %u is not present on the board.", portid);
             return -1;
         }
     }
@@ -215,7 +215,7 @@ init_lcore_rx_queues(void)
         lcore = lcore_params[i].lcore_id;
         nb_rx_queue = sk.lcore_conf[lcore].n_rx_queue;
         if (nb_rx_queue >= MAX_RX_QUEUE_PER_LCORE) {
-            LOG_ERR(USER1, "too many queues (%u) for lcore: %u.",
+            LOG_ERR(DPDK, "too many queues (%u) for lcore: %u.",
                    (unsigned)nb_rx_queue + 1, (unsigned)lcore);
             return -1;
         } else {
@@ -267,7 +267,7 @@ parse_config(const char *q_arg)
                 return -1;
         }
         if (nb_lcore_params >= MAX_LCORE_PARAMS) {
-            LOG_WARN(USER1, "exceeded max number of lcore params: %hu.",
+            LOG_WARN(DPDK, "exceeded max number of lcore params: %hu.",
                    nb_lcore_params);
             return -1;
         }
@@ -281,14 +281,6 @@ parse_config(const char *q_arg)
     }
     lcore_params = lcore_params_array;
     return 0;
-}
-
-static void
-print_ethaddr(const char *name, const struct ether_addr *eth_addr)
-{
-    char buf[ETHER_ADDR_FMT_SIZE];
-    ether_format_addr(buf, ETHER_ADDR_FMT_SIZE, eth_addr);
-    printf("%s%s\n", name, buf);
 }
 
 static int
@@ -324,7 +316,7 @@ init_mem(unsigned nb_mbuf)
                          "Cannot init mbuf pool on socket %d\n",
                          socketid);
             else
-                LOG_INFO(USER1, "Allocated mbuf pool on socket %d.", socketid);
+                LOG_INFO(DPDK, "Allocated mbuf pool on socket %d.", socketid);
 
         }
     }
@@ -650,13 +642,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
     if (n + total_h_len < 60) n = 60 - total_h_len;
     rte_pktmbuf_append(m, (uint16_t)n);
-    LOG_DEBUG(USER1, "pkt_len: %u, udp len: %zu, port: %d",
+    LOG_DEBUG(DPDK, "pkt_len: %u, udp len: %zu, port: %d",
               rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
     send_single_packet(qconf, m, portid);
     return;
 
 invalid:
-    // LOG_DEBUG(USER1, "drop packet.");
+    // LOG_DEBUG(DPDK, "drop packet.");
     if (++qconf->nr_dropped >= STAT_ATOMIC_WRITE_BATCH) {
         rte_atomic64_add(&(sk.nr_dropped), qconf->nr_dropped);
         qconf->nr_dropped = 0;
@@ -711,12 +703,12 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     init_per_lcore();
 
     if (qconf->n_rx_queue == 0) {
-        LOG_INFO(USER1, "lcore %u has nothing to do.", lcore_id);
+        LOG_INFO(DPDK, "lcore %u has nothing to do.", lcore_id);
         return 0;
     }
     if (node->numa_id != sk.master_numa_id && lcore_id == node->main_lcore_id) {
         rte_timer_init(&node->timer);
-        LOG_INFO(USER1, "setup timer for numa node %d.", node->numa_id);
+        LOG_INFO(DPDK, "setup timer for numa node %d.", node->numa_id);
         /* load timer0, every 1/2 seconds, on Display lcore, reloaded automatically */
         rte_timer_reset(&node->timer,
                         NUMA_TIMER_TICK_RATE,
@@ -726,13 +718,13 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
                         node);
     }
 
-    LOG_INFO(USER1, "entering main loop on lcore %u.", lcore_id);
+    LOG_INFO(DPDK, "entering main loop on lcore %u.", lcore_id);
 
     for (i = 0; i < qconf->n_rx_queue; i++) {
 
         portid = qconf->rx_queue_list[i].port_id;
         queueid = qconf->rx_queue_list[i].queue_id;
-        LOG_INFO(USER1,
+        LOG_INFO(DPDK,
                 " -- lcoreid=%u portid=%hhu rxqueueid=%hhu.",
                 lcore_id, portid, queueid);
     }
@@ -781,7 +773,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             if (nb_rx == 0)
                 continue;
             qconf->received_req += nb_rx;
-            // LOG_INFO(USER1, "lcore %d receive %d packets", lcore_id, nb_rx);
+            // LOG_INFO(DPDK, "lcore %d receive %d packets", lcore_id, nb_rx);
             handle_packets(nb_rx, pkts_burst, portid, qconf);
         }
     }
@@ -886,7 +878,7 @@ initDpdkModule() {
         default_port_conf.rxmode.jumbo_frame = 1;
         if ((sk.max_pkt_len < 64) ||
             (sk.max_pkt_len > MAX_JUMBO_PKT_LEN)) {
-            printf("Invalid packet length\n");
+            LOG_ERR(DPDK, "Invalid packet length\n");
             return -1;
         }
         default_port_conf.rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
@@ -907,19 +899,15 @@ initDpdkModule() {
         rte_exit(EXIT_FAILURE, "check_port_config failed\n");
 
     nb_lcores = rte_lcore_count();
-    LOG_INFO(USER1, "found %d cores, master cores: %d, %d", nb_lcores, rte_get_master_lcore(), rte_lcore_id());
+    LOG_INFO(DPDK, "found %d cores, master cores: %d, %d", nb_lcores, rte_get_master_lcore(), rte_lcore_id());
 
 
     /* initialize all ports */
-    for (portid = 0; portid < nb_ports; portid++) {
-        /* skip ports that are not enabled */
-        if ((sk.portmask & (1 << portid)) == 0) {
-            printf("\nSkipping disabled port %d\n", portid);
-            continue;
-        }
+    for (int i = 0; i < sk.nr_ports; i++) {
+        portid = (uint8_t )sk.port_ids[i];
 
         /* init port */
-        printf("Initializing port %d ... \n", portid );
+        LOG_INFO(DPDK, "Initializing port %d ... ", portid );
         fflush(stdout);
 
         nb_rx_queue = get_port_n_rx_queues(portid);
@@ -930,7 +918,7 @@ initDpdkModule() {
         n_tx_queue = (uint32_t )sk.nr_lcore_ids;
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
-        LOG_INFO(USER1, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
+        LOG_INFO(DPDK, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
                  portid, nb_rx_queue, (unsigned)n_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
                                     (uint16_t)n_tx_queue, &default_port_conf);
@@ -940,9 +928,8 @@ initDpdkModule() {
                      ret, portid);
 
         rte_eth_macaddr_get(portid, &ports_eth_addr[portid]);
-        print_ethaddr(" Address:", &ports_eth_addr[portid]);
-        printf(", ");
-
+        ether_format_addr(sk.kni_conf[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &ports_eth_addr[portid]);
+        LOG_INFO(DPDK, "port %d mac address: %s.", portid, sk.kni_conf[portid]->eth_addr_s);
         /*
          * prepare src MACs for each port.
          */
@@ -967,7 +954,7 @@ initDpdkModule() {
             else
                 socketid = 0;
 
-            LOG_INFO(USER1, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
+            LOG_INFO(DPDK, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
 
             rte_eth_dev_info_get(portid, &dev_info);
             txconf = &dev_info.default_txconf;
@@ -987,7 +974,6 @@ initDpdkModule() {
             qconf->tx_port_id[qconf->n_tx_port] = portid;
             qconf->n_tx_port++;
         }
-        printf("\n");
     }
 
     for (int i = 0; i < sk.nr_lcore_ids; ++i) {
@@ -996,7 +982,7 @@ initDpdkModule() {
         assert(rte_lcore_is_enabled(lcore_id));
 
         qconf = &sk.lcore_conf[lcore_id];
-        printf("Initializing rx queues on lcore %u ... \n", lcore_id );
+        LOG_INFO(DPDK, "Initializing rx queues on lcore %u ... ", lcore_id );
         fflush(stdout);
         /* init RX queues */
         for(queue = 0; queue < qconf->n_rx_queue; ++queue) {
@@ -1009,8 +995,7 @@ initDpdkModule() {
             else
                 socketid = 0;
 
-            printf("   rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>\n", lcore_id, portid, queueid, socketid);
-            fflush(stdout);
+            LOG_INFO(DPDK, "   rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
 
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
                                          socketid,
@@ -1022,8 +1007,6 @@ initDpdkModule() {
                          ret, portid);
         }
     }
-
-    printf("\n");
 
     kni_init_tx_queue();
 
@@ -1048,8 +1031,6 @@ initDpdkModule() {
         if (sk.promiscuous_on)
             rte_eth_promiscuous_enable(portid);
     }
-
-    printf("\n");
 
     for (int i = 0; i < sk.nr_lcore_ids; ++i) {
         lcore_id = (unsigned )sk.lcore_ids[i];
@@ -1100,10 +1081,10 @@ int cleanupDpdkModule(void) {
     for (portid = 0; portid < nb_ports; portid++) {
         if ((sk.portmask & (1 << portid)) == 0)
             continue;
-        LOG_INFO(USER1, "Closing port %d...", portid);
+        LOG_INFO(DPDK, "Closing port %d...", portid);
         rte_eth_dev_stop(portid);
         rte_eth_dev_close(portid);
-        printf(" Done\n");
+        LOG_INFO(DPDK, "port %d Done.", portid);
     }
     return 0;
 }
