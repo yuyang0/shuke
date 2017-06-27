@@ -6,59 +6,16 @@ An authority dns server implemented with DPDK
 2. high performance
 
 # buid
-1. build dpdk, shuke is only tested in dpdk-16.11.1.
+1. build dpdk, shuke is only tested on dpdk-16.11.1.
 2. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
 
 # run
 just run `build/shuke-server -c conf/shuke.conf`, 
 you may need to change the config in the config file.
 
-# redis data schema
-redis should contain four type of map: origin map, zone map,
-SOA map and rrset map.
-
-## origin map
-this map is used to track all the zone origins
-
-1. `key` is `redis_origins_key`, you can change its value using `redis_origins_key` option in config file.
-2. `value` is a **set** of origin names. origin name is in
-    `<label dot>` format and should be absolute domain name.
-
-## zone map
-this map is used to track the subdomains of every zone.
-
-1. `key` is `redis_zone_prefix:origin`, origin should in `<label dot>`
-    format and should be an absolute domain name(ends with dot),
-    `redis_zone_prefix` is used to avoid duplication, you
-    can specify its value using `redis_zone_prefix` option in
-    configure file.
-2. `value` should be a **set** of absolute or relative domain
-    names belong to this zone.
-
-## SOA map
-in order to quickly check if a zone needs reload, redis should store
-a special k/v pair for every zone.
-
-1. `key` is `redis_soa_prefix:origin`. you can change the value of `redis_soa_prefix`
-   using `redis_soa_prefix` option in configure file.
-2. `value` is the SOA record of zone.
-
-## RRSet map
-this map is used to track the resource records associated with domain names.
-
-1. `key` should be the domain name, must be absolute domain name,
-    it also should in <label dot> format and should be a absolute name.
-2. `value` should be an array of bulk string,
-    every bulk string should has the format like following:
-
-         ttl class type rdata
-
-    the format is same with the zone file. **ttl is required, class is optional**.
-
-**NOTICE: since data consistency is very important, so it is recommended to use redis transaction to update these maps**
-
 # mongo data schema
-every zone should have a collection in mongodb.
+every zone should have a collection in mongodb. you can use 
+`tools/zone2mongo.py` to convert zone data from zone file to mongodb
 
 ## zone collection
 this collection used to track the RR of a zone, 
