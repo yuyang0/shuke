@@ -11,14 +11,14 @@ OPTIMIZATION?=-O0
 endif
 
 SHUKE_BUILD_DIR ?= build
-OPTIMIZATION?=-O2
+OPTIMIZATION?=-O3
 
 # PROJECT_ROOT:=$(abspath .)
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
 
 SHUKE_SRC_DIR:=src
 # Default settings
-STD=-std=gnu99 -pedantic
+STD=-std=gnu99
 WARN=-Wall -W
 OPT=$(OPTIMIZATION)
 DEBUG=-g -ggdb
