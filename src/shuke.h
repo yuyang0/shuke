@@ -23,7 +23,6 @@
 #include "list.h"
 #include "log.h"
 #include "ds.h"
-#include "replicate.h"
 #include "dpdk_module.h"
 
 #include "himongo/async.h"
@@ -56,8 +55,6 @@ typedef struct numaNode_s {
     int main_lcore_id;
     int nr_lcore_ids;           // enabled lcores belong this numa node;
     zoneDict *zd;
-    struct rte_ring *tq;            // task queue, used for async tasks
-    struct rte_timer timer;
 } numaNode_t;
 
 typedef struct _tcpServer {

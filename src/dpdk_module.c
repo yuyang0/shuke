@@ -680,18 +680,12 @@ static void handle_packets(int nb_rx, struct rte_mbuf **pkts_burst,
         __handle_packet(pkts_burst[j], portid, qconf);
 }
 
-static void
-numa_timer_cb(struct rte_timer *tim __rte_unused, void *arg __rte_unused) {
-    processReplicateLog(arg);
-}
-
 int
 launch_one_lcore(__attribute__((unused)) void *dummy)
 {
     struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
     unsigned lcore_id = rte_lcore_id();
     lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
-    numaNode_t *node = qconf->node;
     uint64_t prev_tsc, diff_tsc, cur_tsc, prev_print_tsc =0;
     int i, nb_rx;
     uint8_t portid, queueid;
@@ -705,17 +699,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     if (qconf->n_rx_queue == 0) {
         LOG_INFO(DPDK, "lcore %u has nothing to do.", lcore_id);
         return 0;
-    }
-    if (node->numa_id != sk.master_numa_id && lcore_id == node->main_lcore_id) {
-        rte_timer_init(&node->timer);
-        LOG_INFO(DPDK, "setup timer for numa node %d.", node->numa_id);
-        /* load timer0, every 1/2 seconds, on Display lcore, reloaded automatically */
-        rte_timer_reset(&node->timer,
-                        NUMA_TIMER_TICK_RATE,
-                        PERIODICAL,
-                        lcore_id,
-                        numa_timer_cb,
-                        node);
     }
 
     LOG_INFO(DPDK, "entering main loop on lcore %u.", lcore_id);

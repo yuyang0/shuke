@@ -162,19 +162,19 @@ int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn) {
 void deleteZoneOtherNuma(char *origin) {
     for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
+        numaNode_t *node = sk.nodes[numa_id];
         if (numa_id == sk.master_numa_id) continue;
-        replicateLog *l = replicateLogCreate(REPLICATE_DEL, origin, NULL);
-        rte_ring_sp_enqueue(sk.nodes[numa_id]->tq, (void *)l);
+        zoneDictDelete(node->zd, origin);
     }
 }
 
 void reloadZoneOtherNuma(zone *z) {
     for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
+        numaNode_t *node = sk.nodes[numa_id];
         if (numa_id == sk.master_numa_id) continue;
         zone *new_z = zoneCopy(z, numa_id);
-        replicateLog *l = replicateLogCreate(REPLICATE_ADD, NULL, new_z);
-        rte_ring_sp_enqueue(sk.nodes[numa_id]->tq, (void *)l);
+        zoneDictReplace(node->zd, new_z);
     }
 }
 
@@ -950,7 +950,6 @@ static void initShuke() {
         // FIXME: should allocate memory belongs to numa node
         sk.nodes[numa_id]->zd = zoneDictCopy(sk.zd, numa_id);
         snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
-        sk.nodes[numa_id]->tq = rte_ring_create(ring_name, 1024, rte_socket_id(), RING_F_SC_DEQ|RING_F_SP_ENQ);
     }
 
     sk.last_all_reload_ts = sk.unixtime;
