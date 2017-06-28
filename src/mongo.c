@@ -294,7 +294,7 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
     zone *z = zoneCreate(dotOrigin, SOCKET_ID_ANY);
 #endif
 
-    replies = mongoFindAll(c, db, col, NULL, NULL, 0);
+    replies = (mongoReply **)mongoFindAll(c, db, col, NULL, NULL, 0);
 
     for (int i = 0; replies[i] != NULL; ++i) {
         reply = replies[i];
