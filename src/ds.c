@@ -701,6 +701,13 @@ void zoneDictDestroy(zoneDict *zd) {
     socket_free(zd->socket_id, zd);
 }
 
+// fetch zone from zone dict(doesn't increment reference count).
+zone *zoneDictFetchValNoRef(zoneDict *zd, char *key) {
+    zoneDictRLock(zd);
+    zone *z = dictFetchValue(zd->d, key);
+    zoneDictRUnlock(zd);
+    return z;
+}
 /*
  * fetch zone from zone dict
  *

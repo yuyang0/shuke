@@ -103,11 +103,8 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
     if (old_zn == NULL) {
         char origin[MAX_DOMAIN_LEN+2];
         dot2lenlabel(dotOrigin, origin);
-        old_zn = zoneDictFetchVal(sk.zd, origin);
-    } else {
-        zoneIncRef(old_zn);
+        old_zn = zoneDictFetchValNoRef(sk.zd, origin);
     }
-    //TODO: incr the reference count of zone object.
     if (old_zn != NULL) {
         sn = old_zn->sn;
     }
@@ -128,35 +125,37 @@ void zoneReloadContextReset(zoneReloadContext *t) {
 
 void zoneReloadContextDestroy(zoneReloadContext *t) {
     zfree(t->dotOrigin);
-    if (t->old_zn){
-        zoneDecRef(t->old_zn);
-    }
     if (t->new_zn) zoneDestroy(t->new_zn);
     if (t->psr) RRParserDestroy(t->psr);
     zfree(t);
 }
 
 /*!
- * just enqueue the zoneReloadTask object,
- * pls note: when call this function, the dotOrigin must already in server.tq_origins,
- * so this function is mainly used to reput the task to queue when the task encounter an error and need retry.
+ * re-reload the zoneReloadContext object,
+ * this function is mainly used to retry the failed zone reload task.
  * @param t
  * @return
  */
-int enqueueZoneReloadTask(zoneReloadContext *t) {
-    int errcode = OK_CODE;
+int asyncRereloadZone(zoneReloadContext *t) {
+    if (t->old_zn) {
+        zone *z = t->old_zn;
+        long last_reload_ts = z->refresh_ts - z->refresh;
+        // the zone is expired, remove it.
+        if (last_reload_ts+z->expiry < sk.unixtime) {
+            masterZoneDictDelete(z->origin);
+            t->old_zn = NULL;
+            return ERR_CODE;
+        }
+    }
+
     zoneReloadContextReset(t);
-    sk.asyncReloadZone(t);
-    return errcode;
+    return sk.asyncReloadZone(t);
 }
 
 int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn) {
-    int errcode = OK_CODE;
     zoneReloadContext *t = zoneReloadContextCreate(dotOrigin, old_zn);
     if (t == NULL) return ERR_CODE;
-
-    sk.asyncReloadZone(t);
-    return errcode;
+    return sk.asyncReloadZone(t);
 }
 
 void deleteZoneOtherNuma(char *origin) {
@@ -497,12 +496,6 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         dumpDnsRefusedErr(ctx);
         return ctx->cur;
     }
-
-    // now = (int64_t )rte_tsc_time();
-    // if (ts + z->expiry < now) {
-    //     dumpDnsNameErr(ctx);
-    //     goto end;
-    // }
 
     dv = zoneFetchValue(z, ctx->name);
     if (dv == NULL) {

@@ -207,6 +207,7 @@ zoneDict *zoneDictCreate(int socket_id);
 zoneDict *zoneDictCopy(zoneDict *zd, int socket_id);
 void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
+zone *zoneDictFetchValNoRef(zoneDict *zd, char *key);
 zone *zoneDictGetZone(zoneDict *zd, char *name);
 int zoneDictReplace(zoneDict *zd, zone *z);
 

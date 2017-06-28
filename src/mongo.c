@@ -140,12 +140,12 @@ ok:
     if (!reply || reply->cursorID == 0) {
         if (t->status == TASK_ERROR) {
             LOG_ERROR(USER1, "failed to reload zone %s asynchronously.", t->dotOrigin);
-            if (enqueueZoneReloadTask(t) == ERR_CODE) {
+            if (asyncRereloadZone(t) == ERR_CODE) {
                 zoneReloadContextDestroy(t);
             }
         } else if (t->new_zn->soa == NULL) {
             LOG_ERROR(USER1, "zone %s must contain a SOA record.", t->dotOrigin);
-            if (enqueueZoneReloadTask(t) == ERR_CODE) {
+            if (asyncRereloadZone(t) == ERR_CODE) {
                 zoneReloadContextDestroy(t);
             }
         } else {
@@ -210,7 +210,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     }
     goto ok;
 error:
-    if (enqueueZoneReloadTask(t) == ERR_CODE) {
+    if (asyncRereloadZone(t) == ERR_CODE) {
         zoneReloadContextDestroy(t);
     }
 ok:
@@ -399,7 +399,7 @@ int mongoAsyncReloadZone(zoneReloadContext *t) {
     }
     goto ok;
 error:
-    if (enqueueZoneReloadTask(t) == ERR_CODE) {
+    if (asyncRereloadZone(t) == ERR_CODE) {
         zoneReloadContextDestroy(t);
     }
     retcode = ERR_CODE;

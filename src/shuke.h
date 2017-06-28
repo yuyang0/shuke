@@ -115,6 +115,7 @@ typedef struct {
 
     RRParser *psr;
     size_t nr_names;  // number of pending names.
+    // never free or decrement reference count of old_zn, it will handle by zoneDict automatically.
     zone *old_zn;
     zone *new_zn;
 }zoneReloadContext;
@@ -277,7 +278,7 @@ void zoneReloadContextReset(zoneReloadContext *t);
 void zoneReloadContextDestroy(zoneReloadContext *t);
 
 int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn);
-int enqueueZoneReloadTask(zoneReloadContext *t);
+int asyncRereloadZone(zoneReloadContext *t);
 
 /*----------------------------------------------
  *     admin server
