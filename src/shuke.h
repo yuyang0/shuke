@@ -156,12 +156,6 @@ struct shuke {
     char *zone_files_root;
     dict *zone_files_dict;
 
-    char *redis_host;
-    int redis_port;
-    char *redis_zone_prefix;
-    char *redis_soa_prefix;
-    char *redis_origins_key;
-
     char *mongo_host;
     int mongo_port;
     char *mongo_dbname;
@@ -220,10 +214,6 @@ struct shuke {
      */
     int (*asyncReloadAllZone)(void);
     int (*asyncReloadZone)(zoneReloadContext *t);
-
-    // redis context
-    // it will be NULL when shuke is disconnected with redis,
-    // redisAsyncContext *redis_ctx;
 
     // mongo context
     // it will be NULL when shuke is disconnected with mongodb

@@ -746,7 +746,6 @@ static void initConfigFromFile(int argc, char **argv) {
     sk.tcp_idle_timeout = 120;
     sk.max_tcp_connections = 1024;
 
-    sk.redis_port = 6379;
     sk.retry_interval = 120;
     sk.mongo_port = 27017;
 
@@ -843,22 +842,6 @@ static void initConfigFromFile(int argc, char **argv) {
             fprintf(stderr, "Config Error: %s.\n", sk.errstr);
             exit(1);
         }
-    } else if (strcasecmp(sk.data_store, "redis") == 0) {
-        sk.redis_host = getStrVal(cbuf, "redis_host", NULL);
-        conf_err = getIntVal(sk.errstr, cbuf, "redis_port", &sk.redis_port);
-        CHECK_CONF_ERR(conf_err, sk.errstr);
-
-        sk.redis_zone_prefix = getStrVal(cbuf, "redis_zone_prefix", NULL);
-        sk.redis_soa_prefix = getStrVal(cbuf, "redis_soa_prefix", NULL);
-        sk.redis_origins_key = getStrVal(cbuf, "redis_origins_key", NULL);
-        conf_err = getLongVal(sk.errstr, cbuf, "retry_interval", &sk.retry_interval);
-        CHECK_CONF_ERR(conf_err, sk.errstr);
-
-        CHECK_CONFIG("redis_host", sk.redis_host != NULL, "redis_host can't be empty");
-        CHECK_CONFIG("redis_zone_prefix", sk.redis_zone_prefix != NULL, "redis_zone_prefix can't be empty");
-        CHECK_CONFIG("redis_soa_prefix", sk.redis_soa_prefix != NULL, "redis_soa_prefix can't be empty");
-        CHECK_CONFIG("redis_origins_key", sk.redis_origins_key != NULL, "redis_origins_key can't be empty");
-
     } else if (strcasecmp(sk.data_store, "mongo") == 0) {
         sk.mongo_host = getStrVal(cbuf, "mongo_host", NULL);
         sk.mongo_dbname = getStrVal(cbuf, "mongo_dbname", NULL);
