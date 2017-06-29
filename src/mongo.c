@@ -236,6 +236,7 @@ ok:
 static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
     ((void) c); ((void) privdata);
     char dotOrigin[MAX_DOMAIN_LEN];
+    char origin[MAX_DOMAIN_LEN+2];
     mongoReply *reply = r;
     char **namev;
     char **p;
@@ -248,7 +249,11 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
             LOG_WARN(MONGO, "%s is too long, ignore it.", dotOrigin);
             continue;
         }
-        asyncReloadZoneRaw(dotOrigin, NULL);
+        // only reload the zone doesn't exist in zone dict
+        dot2lenlabel(dotOrigin, origin);
+        if (!zoneDictExistZone(sk.zd, origin)) {
+            asyncReloadZoneRaw(dotOrigin, NULL);
+        }
     }
     sk.last_all_reload_ts = sk.unixtime;
     freev((void **)namev);
