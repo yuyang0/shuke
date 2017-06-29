@@ -109,7 +109,6 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
         sn = old_zn->sn;
     }
     zoneReloadContext *t = zcalloc(sizeof(*t));
-    t->type = TASK_RELOAD_ZONE;
     t->dotOrigin = zstrdup(dotOrigin);
     t->sn = sn;
     t->status = TASK_PENDING;

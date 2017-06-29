@@ -30,9 +30,6 @@
 #define CONFIG_BINDADDR_MAX 16
 #define TIME_INTERVAL 1000
 
-#define TASK_RELOAD_ZONE     1
-#define TASK_RELOAD_ALL      2
-
 #define CONN_READ_N     0     /**< reading in a fixed number of bytes */
 #define CONN_READ_LEN   1     /**< reading length bytes */
 #define CONN_SWALLOW    2     /**< swallowing unnecessary bytes w/o storing */
@@ -104,11 +101,9 @@ struct tcpContext {
 };
 
 typedef struct {
-    int type;
-
     int status;
 
-    char *dotOrigin;  // origin in <label dot> format
+    char *dotOrigin;  // origin in <label dot> format, must be an absolute domain name
     uint32_t sn;      // serial number in current cache.
     // last reload timestamp, if it is -1 then dotOrigin is a new zone.
     long ts;
