@@ -243,18 +243,18 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
 
 static void connectCallback(const mongoAsyncContext *c, int status) {
     if (status != OK_CODE) {
-        LOG_ERROR(MONGO, "Failed to connect to redis: %s", c->errstr);
+        LOG_ERROR(MONGO, "Failed to connect to mongodb: %s", c->errstr);
         sk.mongo_ctx = NULL;
         return;
     }
     sk.mongo_ctx = (mongoAsyncContext *) c;
-    LOG_INFO(MONGO, "redis connected..");
+    LOG_INFO(MONGO, "mongodb connected..");
 }
 
 static void disconnectCallback(const mongoAsyncContext *c, int status) {
     sk.mongo_ctx = NULL;
     if (status != MONGO_OK) {
-        LOG_ERROR(MONGO, "Redis in disconnected state: %s", c->errstr);
+        LOG_ERROR(MONGO, "Mongodb in disconnected state: %s", c->errstr);
         // do reconnect
         initMongo();
         return;

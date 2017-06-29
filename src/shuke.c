@@ -131,12 +131,13 @@ void zoneReloadContextDestroy(zoneReloadContext *t) {
 }
 
 /*!
- * re-reload the zoneReloadContext object,
+ * re-reload the zone,
  * this function is mainly used to retry the failed zone reload task.
  * @param t
  * @return
  */
 int asyncRereloadZone(zoneReloadContext *t) {
+    // this is a good place to check if the zone is expired.
     if (t->old_zn) {
         zone *z = t->old_zn;
         long last_reload_ts = z->refresh_ts - z->refresh;
@@ -570,7 +571,7 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         sk.initAsyncContext();
     }
     if (sk.checkAsyncContext() == OK_CODE) {
-        //TODO reload the oldest zones
+        // reload the oldest zones
         while((z = getOldestZone()) != NULL) {
             if (z->refresh_ts > sk.unixtime) break;
             rbtreeDeleteZone(z);
@@ -582,7 +583,6 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
             sk.asyncReloadAllZone();
         }
     }
-    //TODO remove the removed zone in zoneDict.
     // run tcp dns server cron
     tcpServerCron(el, id, (void *)sk.tcp_srv);
     return TIME_INTERVAL;
@@ -930,7 +930,7 @@ static void initShuke() {
 
     sk.last_all_reload_ts = sk.unixtime;
 
-    if (sk.initAsyncContext && sk.initAsyncContext() == ERR_CODE) {
+    if (sk.initAsyncContext() == ERR_CODE) {
         LOG_FATAL(USER1, "init %s async context error.", sk.data_store);
     }
     // process task queue
