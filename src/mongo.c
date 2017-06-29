@@ -105,6 +105,16 @@ static int mongoAeAttach(aeEventLoop *loop, mongoAsyncContext *ac) {
 /*----------------------------------------------
  *     mongo fetcher implementation
  *---------------------------------------------*/
+static int prepareColName(char *dotOrigin, char *colName) {
+    char *end;
+    snprintf(colName, MAX_DOMAIN_LEN, "%s", dotOrigin);
+    end = colName + strlen(colName) - 1;
+    if (*end == '.') {
+        *end = '\0';
+    }
+    return MONGO_OK;
+}
+
 static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     ((void) c);
     mongoReply *reply = r;
@@ -168,8 +178,10 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     char origin[MAX_DOMAIN_LEN+2];
     mongoReply *reply = r;
     char *type, *rdata;
-
     zoneReloadContext *t = privdata;
+    char col_name[MAX_DOMAIN_LEN];
+
+    assert(t->old_zn != NULL);
 
     if (reply == NULL) goto error;
     if (reply->numberReturned == 0) {
@@ -190,7 +202,6 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     }
     LOG_DEBUG(MONGO, "sn cb: %d %d", sn, t->sn);
 
-    assert(t->old_zn != NULL);
 
     if (t->sn >= sn) {
         // update zone's ts field
@@ -203,8 +214,11 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin, SOCKET_ID_ANY);
         if (t->psr == NULL) t->psr = RRParserCreate("@", 0, t->dotOrigin);
 
+        // remove last dot
+        prepareColName(t->dotOrigin, col_name);
+
         errcode = mongoAsyncFindAll(c, RRSetGetCallback, t, sk.mongo_dbname,
-                                    t->dotOrigin, NULL, NULL, 0);
+                                    col_name, NULL, NULL, 0);
         if (errcode != MONGO_OK) {
             LOG_ERROR(MONGO, "MONGO ERROR: %s", c->errstr);
             goto error;
@@ -378,6 +392,10 @@ int mongoGetAllZone() {
 int mongoAsyncReloadZone(zoneReloadContext *t) {
     int errcode;
     int retcode = OK_CODE;
+    char col_name[MAX_DOMAIN_LEN];
+
+    // remove last dot
+    prepareColName(t->dotOrigin, col_name);
 
     t->status = TASK_RUNNING;
     LOG_INFO(MONGO, "asynchronous reload zone %s.", t->dotOrigin);
@@ -386,14 +404,14 @@ int mongoAsyncReloadZone(zoneReloadContext *t) {
     if (t->old_zn != NULL) {
         bson_t *q = BCON_NEW("type", BCON_UTF8("SOA"));
         errcode = mongoAsyncFindOne(sk.mongo_ctx, zoneSOAGetCallback, t,
-                                    sk.mongo_dbname, t->dotOrigin, q, NULL);
+                                    sk.mongo_dbname, col_name, q, NULL);
     } else {
         /*
          * new zone.
          * skip checking sn.
          */
         errcode = mongoAsyncFindAll(sk.mongo_ctx, RRSetGetCallback, t, sk.mongo_dbname,
-                                    t->dotOrigin, NULL, NULL, 0);
+                                    col_name, NULL, NULL, 0);
     }
     if (errcode != MONGO_OK) {
         LOG_ERROR(MONGO, "MONGO ERROR: %s", sk.mongo_ctx->errstr);
