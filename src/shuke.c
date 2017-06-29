@@ -41,6 +41,8 @@ int rbtreeInsertZone(zone *z) {
 }
 
 void rbtreeDeleteZone(zone *z) {
+    // return if the zone is not in rbtree
+    if (RB_EMPTY_NODE(&z->node)) return;
     rb_erase(&z->node, &sk.rbroot);
     RB_CLEAR_NODE(&z->node);
 }
@@ -54,7 +56,8 @@ zone *getOldestZone() {
 }
 
 void refreshZone(zone* z) {
-    rbtreeDeleteZone(z);
+    // rbtreeDeleteZone(z);
+    assert(RB_EMPTY_NODE(&z->node));
     z->refresh_ts = sk.unixtime + z->refresh;
     rbtreeInsertZone(z);
 }
