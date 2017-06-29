@@ -780,6 +780,14 @@ int zoneDictEmpty(zoneDict *zd) {
     return DS_OK;
 }
 
+int zoneDictExistZone(zoneDict *zd, char *origin) {
+    int ret;
+    zoneDictRLock(zd);
+    ret = (dictFind(zd->d, origin) != NULL);
+    zoneDictRUnlock(zd);
+    return ret;
+}
+
 size_t zoneDictGetNumZones(zoneDict *zd, int lock) {
     size_t n;
     if (lock) zoneDictRLock(zd);

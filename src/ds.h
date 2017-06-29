@@ -214,7 +214,7 @@ int zoneDictReplace(zoneDict *zd, zone *z);
 int zoneDictDelete(zoneDict *zd, char *origin);
 int zoneDictEmpty(zoneDict *zd);
 size_t zoneDictGetNumZones(zoneDict *zd, int lock);
-
+int zoneDictExistZone(zoneDict *zd, char *origin);
 sds zoneDictToStr(zoneDict *zd);
 
 // parser
