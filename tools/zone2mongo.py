@@ -5,6 +5,7 @@
 
 """
 from __future__ import print_function, division, absolute_import
+import argparse
 import io
 from collections import defaultdict
 from pymongo import MongoClient
@@ -258,8 +259,17 @@ class ZoneMongo(object):
         return ss
 
 
+def parse_cmd_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-f', '--file', required=True, help="zone file")
+    parser.add_argument('-Mh', '--mongo_host', default="127.0.0.1", help='mongodb host(default: 127.0.0.1)')
+    parser.add_argument('-Mp', '--mongo_port', default=27017, type=int, help='mongodb port(default: 27017)')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    zm = ZoneMongo("127.0.0.1", 27017)
-    zm.file_to_mongo("../tests/assets/example.z")
-    print(zm.debug_zone_file("../tests/assets/example.z"))
+    parsed = parse_cmd_args()
+    zm = ZoneMongo(parsed.mongo_host, parsed.mongo_port)
+    zm.file_to_mongo(parsed.file)
+    print(zm.debug_zone_file(parsed.file))
     # zr.del_zone("example.com.")

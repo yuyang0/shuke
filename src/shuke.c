@@ -56,12 +56,16 @@ zone *getOldestZone() {
 }
 
 void refreshZone(zone* z) {
-    // rbtreeDeleteZone(z);
     assert(RB_EMPTY_NODE(&z->node));
     z->refresh_ts = sk.unixtime + z->refresh;
     rbtreeInsertZone(z);
 }
 
+/*!
+ * add or replace a zone to master zone dict, we need update new zone's offsets and  refresh_ts
+ * @param z
+ * @return
+ */
 int masterZoneDictReplace(zone *z) {
     zoneDict *zd = sk.zd;
     z->refresh_ts = sk.unixtime + z->refresh;
@@ -78,10 +82,19 @@ int masterZoneDictReplace(zone *z) {
     return err;
 }
 
-int masterZoneDictDelete(char *origin) {
+/*!
+ * delete zone on all numa node(include master nuam node).
+ * @param origin
+ * @return
+ */
+int deleteZoneAllNumaNode(char *origin) {
     int err;
     zoneDict *zd = sk.zd;
 
+    // delete the zone on non-master numa node
+    deleteZoneOtherNuma(origin);
+
+    // delete zone on master numa node.
     zoneDictWLock(zd);
     zone *old_z = dictFetchValue(zd->d, origin);
     if (old_z) {
@@ -110,6 +123,8 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
     }
     if (old_zn != NULL) {
         sn = old_zn->sn;
+        // the zone is reloading should not in rbtree.
+        rbtreeDeleteZone(old_zn);
     }
     zoneReloadContext *t = zcalloc(sizeof(*t));
     t->dotOrigin = zstrdup(dotOrigin);
@@ -145,7 +160,7 @@ int asyncRereloadZone(zoneReloadContext *t) {
         long last_reload_ts = z->refresh_ts - z->refresh;
         // the zone is expired, remove it.
         if (last_reload_ts+z->expiry < sk.unixtime) {
-            masterZoneDictDelete(z->origin);
+            deleteZoneAllNumaNode(z->origin);
             t->old_zn = NULL;
             return ERR_CODE;
         }
@@ -256,7 +271,7 @@ int reloadZoneFromFile(zoneReloadContext *t) {
     char *fname = dictFetchValue(sk.zone_files_dict, t->dotOrigin);
     if (fname == NULL) {
         dot2lenlabel(t->dotOrigin, origin);
-        masterZoneDictDelete(origin);
+        deleteZoneAllNumaNode(origin);
     } else {
         if (loadZoneFromFile(fname, &z) == DS_ERR) {
             return ERR_CODE;
@@ -457,6 +472,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     dnsHeader_load(buf, sz, &(ctx->hdr));
     ret = parseDnsQuestion(buf+DNS_HDR_SIZE, sz-DNS_HDR_SIZE, &(ctx->name), &(ctx->qType), &(ctx->qClass));
     if (ret == PROTO_ERR) {
+        LOG_DEBUG(USER1, "parse dns question error.");
         return ERR_CODE;
     }
     // skip dns header and dns question.
@@ -576,7 +592,6 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         // reload the oldest zones
         while((z = getOldestZone()) != NULL) {
             if (z->refresh_ts > sk.unixtime) break;
-            rbtreeDeleteZone(z);
             asyncReloadZoneRaw(NULL, z);
         }
         // check if need to do all reload
@@ -648,16 +663,7 @@ dictType commandTableDictType = {
         NULL,                         /* val destructor */
 };
 
-dictType tqOriginsDictType = {
-        _dictStringCaseHash,  /* hash function */
-        NULL,              /* key dup */
-        NULL,                           /* val dup */
-        _dictStringKeyCaseCompare,          /* key compare */
-        NULL,         /* key destructor */
-        NULL,         /* val destructor */
-};
-
-static int handleZoneFileConf(char *errstr, int argc, char *argv[], void *privdata) {
+static int addZoneFileToConf(char *errstr, int argc, char **argv, void *privdata) {
     int err = CONF_OK;
     dict *d = privdata;
     char *k = NULL, *v = NULL;
@@ -840,7 +846,7 @@ static void initConfigFromFile(int argc, char **argv) {
             exit(1);
         }
         sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_HEAP);
-        if (getBlockVal(sk.errstr, cbuf, "zone_files", &handleZoneFileConf, sk.zone_files_dict) != CONF_OK) {
+        if (getBlockVal(sk.errstr, cbuf, "zone_files", &addZoneFileToConf, sk.zone_files_dict) != CONF_OK) {
             fprintf(stderr, "Config Error: %s.\n", sk.errstr);
             exit(1);
         }

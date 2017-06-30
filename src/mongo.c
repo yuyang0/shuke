@@ -6,7 +6,7 @@
 #include "shuke.h"
 #include "utils.h"
 
-#define RTE_LOGTYPE_MONGO RTE_LOGTYPE_MONGO
+#define RTE_LOGTYPE_MONGO RTE_LOGTYPE_USER1
 
 /* ======================= himongo ae.c adapters =============================
  * Note: this implementation is taken from himongo/adapters/ae.h, however
@@ -187,8 +187,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (reply->numberReturned == 0) {
         // remove the zone
         dot2lenlabel(t->dotOrigin, origin);
-        masterZoneDictDelete(origin);
-        deleteZoneOtherNuma(origin);
+        deleteZoneAllNumaNode(origin);
         zoneReloadContextDestroy(t);
         goto ok;
     }

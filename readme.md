@@ -39,12 +39,9 @@ SHUKE has admin tcp server used to execute admin operations
 1. `zone`: this command used to manipulate the zone data in memory, it has many subcommands.
     1. `get`: get a zone
     2. `getall`: get all zones
-    3. `set`: set a zone
-    4. `delete`: delete a zone
-    5. `flushall`: delete all zone
-    6. `reload`: reload  multiple zone
-    7. `reloadall`: reload all zone
-    8. `get_numzones`: return the number of zones in memory cache.
+    3. `reload`: reload  multiple zone
+    4. `reloadall`: reload all zone
+    5. `get_numzones`: return the number of zones in memory cache.
 2. `config`: this command is used to manipulate the config of server.
 3. `version`: return version of shuke
 4. `debug`: mainly for debug

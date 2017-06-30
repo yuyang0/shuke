@@ -296,7 +296,7 @@ void deleteZoneOtherNuma(char *origin);
 void reloadZoneOtherNuma(zone *z);
 
 int masterZoneDictReplace(zone *z);
-int masterZoneDictDelete(char *origin);
+int deleteZoneAllNumaNode(char *origin);
 void refreshZone(zone* z);
 
 #ifdef SK_TEST

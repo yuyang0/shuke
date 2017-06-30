@@ -115,8 +115,13 @@ RRSet *RRSetCreate(uint16_t type, int socket_id) {
 RRSet *RRSetDup(RRSet *rs, int socket_id) {
     size_t sz = sizeof(*rs) + rs->len + rs->free;
     RRSet *new = socket_malloc(socket_id, sz);
-    memcpy(new, rs, sz);
+    rte_memcpy(new, rs, sz);
     new->socket_id = socket_id;
+    new->offsets = NULL;
+
+    if (rs->offsets) {
+        new->offsets = socket_memdup(socket_id, rs->offsets, rs->num*sizeof(size_t));
+    }
     return new;
 }
 
@@ -128,11 +133,9 @@ void RRSetUpdateOffsets(RRSet *rs) {
     uint16_t rdlength;
     char *ptr = rs->data;
 
-    if (rs->offsets == NULL) {
-        rs->offsets = socket_malloc(rs->socket_id, rs->num * sizeof(size_t));
-    } else {
-        rs->offsets = socket_realloc(rs->socket_id, rs->offsets, rs->num * sizeof(size_t));
-    }
+    assert(rs->offsets == NULL);
+    rs->offsets = socket_malloc(rs->socket_id, rs->num * sizeof(size_t));
+
     for (i = 0; i < rs->num; ++i) {
         rs->offsets[i] = offset;
         rdlength = load16be(ptr);
@@ -499,7 +502,7 @@ sds RRSetToStr(RRSet *rs) {
 zone *zoneCreate(char *ss, int socket_id) {
     char domain[256];
     char *origin, *dotOrigin;
-    zone *zn = socket_zmalloc(socket_id, sizeof(*zn));
+    zone *zn = socket_calloc(socket_id, 1, sizeof(*zn));
     // convert len label format if necessary.
     if (strchr(ss, '.') != NULL) {
         dot2lenlabel(ss, domain);
@@ -671,7 +674,7 @@ void zoneUpdateRRSetOffsets(zone *z) {
  *     zone dict definition
  *---------------------------------------------*/
 zoneDict *zoneDictCreate(int socket_id) {
-    zoneDict *zd = socket_zmalloc(socket_id, sizeof(*zd));
+    zoneDict *zd = socket_calloc(socket_id, 1, sizeof(*zd));
     zoneDictInitLock(zd);
     zd->d = dictCreate(&zoneDictType, NULL, socket_id);
     zd->socket_id = socket_id;
@@ -755,9 +758,6 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
  * element with such key and dictReplace() just performed a value update
  * operation. */
 int zoneDictReplace(zoneDict *zd, zone *z) {
-    z->refresh_ts = time(NULL) + z->refresh;
-    zoneUpdateRRSetOffsets(z);
-
     zoneDictWLock(zd);
     int err = dictReplace(zd->d, z->origin, z);
     zoneDictWUnlock(zd);

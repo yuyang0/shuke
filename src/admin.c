@@ -3,6 +3,7 @@
 //
 
 #include "shuke.h"
+#include "utils.h"
 
 #include <assert.h>
 #include <sys/resource.h>
@@ -565,8 +566,33 @@ end:
     return;
 }
 
+static int setZoneFileInConf(char *errstr, char *dotOrigin, char *fname) {
+    int err = OK_CODE;
+    char *k = NULL, *v = NULL;
+    k = strip(dotOrigin, "\"");
+    v = strip(fname, "\"");
+    if (isAbsDotDomain(k) == false) {
+        snprintf(errstr, ERR_STR_LEN, "%s is not absolute domain name.", k);
+        goto error;
+    }
+    v = toAbsPath(v, sk.zone_files_root);
+    if (access(v, F_OK) == -1) {
+        snprintf(errstr, ERR_STR_LEN, "%s doesn't exist.", v);
+        goto error;
+    }
+    dictReplace(sk.zone_files_dict, k, v);
+    goto ok;
+error:
+    err = ERR_CODE;
+ok:
+    // don't use zfree.
+    free(v);
+    return err;
+}
+
 static void configCommand(int argc, char *argv[], adminConn *c) {
     adminReply *rep;
+    char errstr[ERR_STR_LEN];
     sds s = NULL;
 
     if (argc < 2) {
@@ -575,12 +601,35 @@ static void configCommand(int argc, char *argv[], adminConn *c) {
     }
     if (strcasecmp(argv[1], "GET") == 0) {
         ;
-    } else if (strcasecmp(argv[1], "GETALL")) {
+    } else if (strcasecmp(argv[1], "SET") == 0) {
         ;
-    } else if (strcasecmp(argv[1], "SET")) {
-        ;
+    } else if (strcasecmp(argv[1], "ZONEFILE") == 0) {
+        if (strcasecmp(sk.data_store, "file") != 0) {
+            s = sdsnewprintf("data_store if %s, so you can't manipulate zone files.", sk.data_store);
+            goto end;
+        }
+        if (strcasecmp(argv[2], "SET") == 0) {
+            if (argc - 3 != 2) {
+                s = sdsnewprintf("need 2 argument for CONFIG ZONFILE SET.");
+                goto end;
+            }
+            if (setZoneFileInConf(errstr, argv[3], argv[4]) != OK_CODE) {
+                s = sdsnew(errstr);
+            }
+        } else if (strcasecmp(argv[2], "GET") == 0) {
+            if (argc - 3 != 1) {
+                s = sdsnewprintf("need 1 argument for CONFIG ZONFILE GET.");
+                goto end;
+            }
+            char *fname = dictFetchValue(sk.zone_files_dict, argv[3]);
+            s = sdsnew(fname);
+            goto end;
+        }
+    } else {
+        s = sdsnewprintf("unknown subcommand(%s) for CONFIG command.", argv[1]);
     }
 end:
+    if (s == NULL) s = sdsnew("OK");
     rep = adminReplyCreate(s);
     adminConnAppendW(c, rep);
 }
@@ -591,7 +640,6 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
     sds s = NULL;
     char origin[MAX_DOMAIN_LEN+2];
     char dotOrigin[MAX_DOMAIN_LEN+2];
-    char errstr[ERR_STR_LEN];
 
     if (argc < 2) {
         s = sdsnewprintf("ZONE command needs at least 1 arguments, but gives %d", argc-1);
@@ -661,49 +709,52 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         }
         // just reset last_all_reload_ts, then it will trigger reload all immediately.
         sk.last_all_reload_ts -= sk.all_reload_interval;
-    } else if (strcasecmp(argv[1], "DELETE") == 0) {
-        if (argc != 3) {
-            s = sdsnewprintf("ZONE DELETE needs 1 argument, but gives %d.", argc-2);
-            goto end;
-        }
-        strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
-        if (isAbsDotDomain(dotOrigin) == false) {
-            strcat(dotOrigin, ".");
-        }
-        dot2lenlabel(dotOrigin, origin);
-        masterZoneDictDelete(origin);
-    } else if (strcasecmp(argv[1], "FLUSHALL") == 0) {
-        if (argc != 2) {
-            s = sdsnewprintf("ZONE FLUSHALL needs no arguments, but gives %d.", argc-2);
-            goto end;
-        }
-        // delete all zone
-        zoneDictEmpty(sk.zd);
-    } else if (strcasecmp(argv[1], "SET") == 0) {
-        if (argc != 4) {
-            s = sdsnewprintf("ZONE SET needs 2 argument, but gives %d.", argc-2);
-            goto end;
-        }
-        strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
-        if (isAbsDotDomain(dotOrigin) == false) {
-            strcat(dotOrigin, ".");
-        }
-        // set zone
-        if (loadZoneFromStr(errstr, argv[3], &z) == DS_ERR) {
-            s = sdsnewprintf("Error: %s", errstr);
-        } else {
-            if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
-                zoneDestroy(z);
-                s = sdsnewprintf("the origin of the zone loading from string is not %s.", dotOrigin);
-                goto end;
-            }
-            masterZoneDictReplace(z);
-            s = sdsnew("ok");
-        }
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
         size_t n = zoneDictGetNumZones(sk.zd, 1);
         s = sdsnewprintf("%lu", n);
+    } else {
+        s = sdsnewprintf("unknown subcommand %s for ZONE.", argv[1]);
     }
+    // else if (strcasecmp(argv[1], "DELETE") == 0) {
+    //     if (argc != 3) {
+    //         s = sdsnewprintf("ZONE DELETE needs 1 argument, but gives %d.", argc-2);
+    //         goto end;
+    //     }
+    //     strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
+    //     if (isAbsDotDomain(dotOrigin) == false) {
+    //         strcat(dotOrigin, ".");
+    //     }
+    //     dot2lenlabel(dotOrigin, origin);
+    //     deleteZoneAllNumaNode(origin);
+    // } else if (strcasecmp(argv[1], "FLUSHALL") == 0) {
+    //     if (argc != 2) {
+    //         s = sdsnewprintf("ZONE FLUSHALL needs no arguments, but gives %d.", argc-2);
+    //         goto end;
+    //     }
+    //     // delete all zone
+    //     zoneDictEmpty(sk.zd);
+    // } else if (strcasecmp(argv[1], "SET") == 0) {
+    //     if (argc != 4) {
+    //         s = sdsnewprintf("ZONE SET needs 2 argument, but gives %d.", argc-2);
+    //         goto end;
+    //     }
+    //     strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
+    //     if (isAbsDotDomain(dotOrigin) == false) {
+    //         strcat(dotOrigin, ".");
+    //     }
+    //     // set zone
+    //     if (loadZoneFromStr(errstr, argv[3], &z) == DS_ERR) {
+    //         s = sdsnewprintf("Error: %s", errstr);
+    //     } else {
+    //         if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
+    //             zoneDestroy(z);
+    //             s = sdsnewprintf("the origin of the zone loading from string is not %s.", dotOrigin);
+    //             goto end;
+    //         }
+    //         masterZoneDictReplace(z);
+    //         s = sdsnew("ok");
+    //     }
+    // }
 end:
     if (s == NULL) s = sdsnew("OK");
     rep = adminReplyCreate(s);

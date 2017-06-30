@@ -37,6 +37,12 @@ void *socket_malloc(int socket_id, size_t size) {
     return ptr;
 }
 
+/*!
+ * unlike other functions, socket_zmalloc allocates memory from heap(not huge-page memory)
+ * @param socket_id
+ * @param size
+ * @return
+ */
 void *socket_zmalloc(int socket_id, size_t size) {
     void *ptr;
     if (socket_id < SOCKET_ID_ANY) {
@@ -50,18 +56,31 @@ void *socket_zmalloc(int socket_id, size_t size) {
 }
 
 void *socket_calloc(int socket_id, size_t nmemb, size_t size) {
-    return socket_zmalloc(socket_id, nmemb*size);
+    void *ptr;
+    if (socket_id < SOCKET_ID_ANY) {
+        ptr = calloc(nmemb, size);
+        if (!ptr) malloc_oom_handler(size);
+    } else {
+        ptr = rte_calloc_socket(NULL, nmemb, size, 0, socket_id);
+        if (!ptr) socket_malloc_oom_handler(size);
+    }
+    return ptr;
 }
 
+/*!
+ * the new pointer always stays on the same NUMA node as the old pointer.
+ * @param socket_id
+ * @param ptr
+ * @param size
+ * @return
+ */
 void *socket_realloc(int socket_id, void *ptr, size_t size) {
     if (socket_id < SOCKET_ID_ANY) {
         ptr = realloc(ptr, size);
         if (!ptr) malloc_oom_handler(size);
     } else {
-        void *src = ptr;
-        ptr = rte_zmalloc_socket(NULL, size, 0, socket_id);
-        if (!ptr) socket_malloc_oom_handler(size);
-        rte_memcpy(ptr, src, size);
+        ptr = rte_realloc(ptr, size, 0);
+        if (!ptr) malloc_oom_handler(size);
     }
     return ptr;
 }
