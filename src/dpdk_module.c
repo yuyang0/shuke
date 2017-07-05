@@ -90,7 +90,7 @@ struct rte_eth_conf default_port_conf = {
         .hw_ip_checksum = 1, /**< IP checksum offload enabled */
         .hw_vlan_filter = 0, /**< VLAN filtering disabled */
         .jumbo_frame    = 0, /**< Jumbo Frame Support disabled */
-        .hw_strip_crc   = 0, /**< CRC stripped by hardware */
+        .hw_strip_crc   = 1, /**< CRC stripped by hardware */
     },
     .rx_adv_conf = {
         .rss_conf = {
@@ -571,7 +571,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     l3_h = (char *)(eth_h+1);
     l2_len = sizeof(*eth_h);
 
-    if (ether_type == ETHER_TYPE_VLAN) {
+    //TODO: maybe need  remove VLAN support
+    if (unlikely(ether_type == ETHER_TYPE_VLAN)) {
         struct vlan_hdr *vlan_h = (struct vlan_hdr *) ((char *) eth_h + l2_len);
         ether_type = rte_be_to_cpu_16(vlan_h->eth_proto);
         l3_h += sizeof(*vlan_h);
@@ -579,6 +580,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
     switch (ether_type) {
         case ETHER_TYPE_ARP:
+            LOG_DEBUG(DPDK, "%d got a arp packet.", portid);
             __send_to_kni(qconf, m, portid);
             return;
         case ETHER_TYPE_IPv4:
@@ -620,7 +622,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     }
 
     m->l2_len = sizeof(struct ether_hdr);
-    m->l4_len = 8;
+    m->l4_len = sizeof(struct udp_hdr);
 
     udp_data = (void *) (udp_h + 1);
     udp_data_len = (size_t )(rte_be_to_cpu_16(udp_h->dgram_len) - 8);
@@ -628,10 +630,9 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
-                           is_ipv4, qconf->node);
+    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m),
+                           src_addr, udp_h->src_port, is_ipv4, qconf->node);
     if(n == ERR_CODE) goto invalid;
-
 
     if (++qconf->nr_req >= STAT_ATOMIC_WRITE_BATCH) {
         rte_atomic64_add(&(sk.nr_req), qconf->nr_req);
@@ -894,7 +895,6 @@ initDpdkModule() {
     /* initialize all ports */
     for (int i = 0; i < sk.nr_ports; i++) {
         portid = (uint8_t )sk.port_ids[i];
-
         /* init port */
         LOG_INFO(DPDK, "Initializing port %d ... ", portid );
         fflush(stdout);

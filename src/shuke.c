@@ -2,6 +2,9 @@
 // Created by Yu Yang <yyangplus@NOSPAM.gmail.com> on 2017-05-05
 //
 #include <sys/time.h>
+#include <getopt.h>
+#include <arpa/inet.h>
+
 #include "dpdk_module.h"
 
 #include <assert.h>
@@ -12,9 +15,6 @@
 #include "zmalloc.h"
 
 #include "shuke.h"
-
-#include <getopt.h>
-#include <arpa/inet.h>
 #include "asciilogo.h"
 
 struct shuke sk;
