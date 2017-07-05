@@ -299,6 +299,8 @@ int masterZoneDictReplace(zone *z);
 int deleteZoneAllNumaNode(char *origin);
 void refreshZone(zone* z);
 
+void config_log();
+
 #ifdef SK_TEST
 int mongoTest(int argc, char *argv[]);
 #endif

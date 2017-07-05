@@ -801,45 +801,13 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     return 0;
 }
 
-static void
-config_log() {
-    if (strcasecmp(sk.logLevelStr, "debug") == 0) {
-        rte_set_log_level(RTE_LOG_DEBUG);
-    } else if (strcasecmp(sk.logLevelStr, "info") == 0) {
-        rte_set_log_level(RTE_LOG_INFO);
-    } else if (strcasecmp(sk.logLevelStr, "notice") == 0) {
-        rte_set_log_level(RTE_LOG_NOTICE);
-    } else if (strcasecmp(sk.logLevelStr, "warn") == 0) {
-        rte_set_log_level(RTE_LOG_WARNING);
-    } else if (strcasecmp(sk.logLevelStr, "error") == 0) {
-        rte_set_log_level(RTE_LOG_ERR);
-    } else if (strcasecmp(sk.logLevelStr, "critical") == 0) {
-        rte_set_log_level(RTE_LOG_CRIT);
-    } else {
-        rte_exit(EXIT_FAILURE, "unkown log level %s\n", sk.logLevelStr);
-    }
-    char *logfile = sk.logfile;
-    if (logfile != NULL && logfile[0] != 0) {
-        FILE *fp;
-        if (strcasecmp(logfile, "stdout") == 0) {
-            fp = stdout;
-        } else if (strcasecmp(logfile, "stderr") == 0) {
-            fp = stderr;
-        } else {
-            fp = fopen(sk.logfile, "wb");
-            if (fp == NULL)
-                rte_exit(EXIT_FAILURE, "can't open log file %s\n", sk.logfile);
-        }
-        if(rte_openlog_stream(fp) < 0)
-            rte_exit(EXIT_FAILURE, "can't openstream\n");
-    }
-}
-
 void
 initDpdkEal() {
     int ret;
-    char buf[MAXLINE];
-    snprintf(buf, MAXLINE, "--master-lcore=%d", sk.master_lcore_id);
+    char master_lcore_cmd[128];
+    char log_cmd[128];
+    snprintf(master_lcore_cmd, 128, "--master-lcore=%d", sk.master_lcore_id);
+    snprintf(log_cmd, 128, "--log-level=%d", str2loglevel(sk.logLevelStr));
     /* initialize the rte env first*/
     char *argv[] = {
             "",
@@ -847,11 +815,12 @@ initDpdkEal() {
             sk.total_lcore_list,
             "-n",
             sk.mem_channels,
-            buf,
+            master_lcore_cmd,
+            log_cmd,
             "--proc-type=auto",
             "--"
     };
-    const int argc = 8;
+    const int argc = 9;
     /*
      * reset optind, because rte_eal_init uses getopt.
      */

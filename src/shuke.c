@@ -196,6 +196,30 @@ void reloadZoneOtherNuma(zone *z) {
     }
 }
 
+void config_log() {
+    static FILE *fp = NULL;
+
+    uint32_t level = str2loglevel(sk.logLevelStr);
+    rte_set_log_level(level);
+
+    if (fp == NULL) {
+        fp = stdout;
+        char *logfile = sk.logfile;
+        if (logfile != NULL && logfile[0] != 0) {
+            if (strcasecmp(logfile, "stdout") == 0) {
+                fp = stdout;
+            } else if (strcasecmp(logfile, "stderr") == 0) {
+                fp = stderr;
+            } else {
+                fp = fopen(sk.logfile, "wb");
+                if (fp == NULL)
+                    rte_exit(EXIT_FAILURE, "can't open log file %s\n", sk.logfile);
+            }
+        }
+    }
+    if(rte_openlog_stream(fp) < 0)
+        rte_exit(EXIT_FAILURE, "can't openstream\n");
+}
 
 static void printAsciiLogo() {
     LOG_RAW(INFO, USER1, "SHUKE %s\n\n%s\n", SHUKE_VERSION, shuke_ascii_logo);
@@ -1324,12 +1348,13 @@ int main(int argc, char *argv[]) {
     rte_atomic64_init(&(sk.nr_dropped));
 
     initConfigFromFile(argc, argv);
-    initOtherConfig();
-
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
+    config_log();
 
     printAsciiLogo();
+
+    initOtherConfig();
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
