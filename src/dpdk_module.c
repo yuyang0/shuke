@@ -139,6 +139,20 @@ init_per_lcore() {
     qconf->start_tsc = rte_rdtsc();
 }
 
+static int check_cksum_offload(int portid) {
+    struct rte_eth_dev_info dev_info;
+    rte_eth_dev_info_get((uint8_t )portid, &dev_info);
+    if ((dev_info.tx_offload_capa & DEV_TX_OFFLOAD_IPV4_CKSUM) == 0) {
+        LOG_WARN(DPDK, "port %d doesn't support ipv4 cksum offload.");
+        return -1;
+    }
+    if ((dev_info.tx_offload_capa & DEV_TX_OFFLOAD_UDP_CKSUM) == 0) {
+        LOG_WARN(DPDK, "port %d doesn't support udp cksum offload.");
+        return -1;
+    }
+    return 0;
+}
+
 static int
 check_lcore_params(void)
 {
@@ -465,6 +479,18 @@ kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port)
     return ret;
 }
 
+#ifdef SOFT_CKSUM
+
+static uint16_t
+get_udptcp_checksum(void *l3_hdr, void *l4_hdr, bool is_ipv4)
+{
+    if (is_ipv4)
+        return rte_ipv4_udptcp_cksum(l3_hdr, l4_hdr);
+    else /* assume ethertype == ETHER_TYPE_IPv6 */
+        return rte_ipv6_udptcp_cksum(l3_hdr, l4_hdr);
+}
+#else
+
 static uint16_t
 get_psd_sum(void *l3_hdr, bool is_ipv4, uint64_t ol_flags)
 {
@@ -473,6 +499,7 @@ get_psd_sum(void *l3_hdr, bool is_ipv4, uint64_t ol_flags)
     else /* assume ethertype == ETHER_TYPE_IPv6 */
         return rte_ipv6_phdr_cksum(l3_hdr, ol_flags);
 }
+#endif
 
 // return 1 if the cksum is correct, otherwise return 0
 static int
@@ -618,10 +645,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         ipv4_addr = ipv4_h->src_addr;
         ipv4_h->src_addr = ipv4_h->dst_addr;
         ipv4_h->dst_addr = ipv4_addr;
-
-        ipv4_h->hdr_checksum = 0;
-        m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
         ipv4_h->total_length = rte_cpu_to_be_16(m->l3_len+m->l4_len+n);
+        ipv4_h->hdr_checksum = 0;
+#ifdef SOFT_CKSUM
+        ipv4_h->hdr_checksum = rte_ipv4_cksum(ipv4_h);
+#else
+        m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
+#endif
     } else {
         rte_memcpy(ipv6_addr, ipv6_h->dst_addr, 16);
         rte_memcpy(ipv6_h->dst_addr, ipv6_h->src_addr, 16);
@@ -632,12 +662,16 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     udp_port = udp_h->src_port;
     udp_h->src_port = udp_h->dst_port;
     udp_h->dst_port = udp_port;
+    udp_h->dgram_len = rte_cpu_to_be_16(m->l4_len + n);
     /* set checksum parameters for HW offload */
     udp_h->dgram_cksum = 0;
+#ifdef SOFT_CKSUM
+    udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
+#else
     m->ol_flags |= PKT_TX_UDP_CKSUM;
-    udp_h->dgram_len = rte_cpu_to_be_16(m->l4_len + n);
     udp_h->dgram_cksum = get_psd_sum(l3_h, is_ipv4, m->ol_flags);
-
+#endif
+    LOG_DEBUG(DPDK, "udp psd checksum: 0x%x.", udp_h->dgram_cksum);
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
     if (n + total_h_len < 60) n = 60 - total_h_len;
@@ -912,6 +946,10 @@ initDpdkModule() {
             rte_exit(EXIT_FAILURE,
                      "Cannot configure device: err=%d, port=%d\n",
                      ret, portid);
+
+        if (check_cksum_offload(portid) < 0) {
+            rte_exit(EXIT_FAILURE, "port %d doesn't support cksum offload\n", portid);
+        }
 
         rte_eth_macaddr_get(portid, &ports_eth_addr[portid]);
         ether_format_addr(sk.kni_conf[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &ports_eth_addr[portid]);
