@@ -15,6 +15,7 @@
 
 #include <getopt.h>
 #include <arpa/inet.h>
+#include "asciilogo.h"
 
 struct shuke sk;
 
@@ -193,6 +194,11 @@ void reloadZoneOtherNuma(zone *z) {
         zone *new_z = zoneCopy(z, numa_id);
         zoneDictReplace(node->zd, new_z);
     }
+}
+
+
+static void printAsciiLogo() {
+    LOG_RAW(INFO, USER1, "SHUKE %s\n\n%s\n", SHUKE_VERSION, shuke_ascii_logo);
 }
 
 void createPidFile(void) {
@@ -1322,6 +1328,8 @@ int main(int argc, char *argv[]) {
 
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
+
+    printAsciiLogo();
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
