@@ -1,0 +1,2 @@
+1. increment rehash, do rehash in dict write operation and time cb in main
+   thread(since we use rwlock, so don't rehash in dict read operations)
