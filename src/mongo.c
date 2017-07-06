@@ -2,9 +2,9 @@
 // Created by yangyu on 17-3-20.
 //
 
-#include <assert.h>
 #include "shuke.h"
 #include "utils.h"
+#include "shukeassert.h"
 
 #define RTE_LOGTYPE_MONGO RTE_LOGTYPE_USER1
 

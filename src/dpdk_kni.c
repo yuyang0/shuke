@@ -2,13 +2,13 @@
 // Created by yangyu on 17-6-15.
 //
 
-#include <assert.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include "shuke.h"
+#include "shukeassert.h"
 
 /* Macros for printing using RTE_LOG */
 // #define RTE_LOGTYPE_KNI RTE_LOGTYPE_USER1

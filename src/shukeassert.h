@@ -6,6 +6,7 @@
 #define SHUKE_SHUKEASSERT_H
 
 #include <unistd.h>  // for _exit
+#include "rte_branch_prediction.h"
 
 #define assert(_e)                              \
     do{                                         \

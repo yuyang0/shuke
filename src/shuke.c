@@ -7,7 +7,6 @@
 
 #include "dpdk_module.h"
 
-#include <assert.h>
 #include "conf.h"
 #include "utils.h"
 #include "version.h"
@@ -16,6 +15,7 @@
 
 #include "shuke.h"
 #include "asciilogo.h"
+#include "shukeassert.h"
 
 struct shuke sk;
 
@@ -197,7 +197,7 @@ void reloadZoneOtherNuma(zone *z) {
 }
 
 void config_log() {
-    static FILE *fp = NULL;
+    FILE *fp = sk.log_fp;
 
     uint32_t level = str2loglevel(sk.logLevelStr);
     rte_set_log_level(level);
@@ -216,6 +216,7 @@ void config_log() {
                     rte_exit(EXIT_FAILURE, "can't open log file %s\n", sk.logfile);
             }
         }
+        sk.log_fp = fp;
     }
     if(rte_openlog_stream(fp) < 0)
         rte_exit(EXIT_FAILURE, "can't openstream\n");
@@ -892,7 +893,7 @@ static void initConfigFromFile(int argc, char **argv) {
 
     sk.pidfile = getStrVal(cbuf, "pidfile", "/var/run/cdns.pid");
     sk.query_log_file = getStrVal(cbuf, "query_log_file", NULL);
-    sk.logfile = getStrVal(cbuf, "logfile", "");
+    sk.logfile = getStrVal(cbuf, "logfile", NULL);
 
     conf_err = getBoolVal(sk.errstr, cbuf, "log_verbose", &sk.logVerbose);
     CHECK_CONF_ERR(conf_err, sk.errstr);
@@ -1380,6 +1381,7 @@ int main(int argc, char *argv[]) {
     initConfigFromFile(argc, argv);
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
+    // configure log as early as possible
     config_log();
 
     printAsciiLogo();

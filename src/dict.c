@@ -35,10 +35,11 @@
 
 #include "fmacros.h"
 #include <stdlib.h>
-#include <assert.h>
 #include <limits.h>
+
 #include "dict.h"
 #include "zmalloc.h"
+#include "shukeassert.h"
 
 /* -------------------------- private prototypes ---------------------------- */
 

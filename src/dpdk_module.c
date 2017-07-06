@@ -2,10 +2,10 @@
 // Created by Yu Yang <yyangplus@NOSPAM.gmail.com> on 2017-05-02
 //
 
-#include <assert.h>
 #include "dpdk_module.h"
 #include "shuke.h"
 #include "utils.h"
+#include "shukeassert.h"
 
 #define STAT_ATOMIC_WRITE_BATCH   100
 

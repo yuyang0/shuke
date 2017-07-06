@@ -33,7 +33,7 @@ struct context {
     // information parsed from dns query packet.
     dnsHeader_t hdr;
     // information of question.
-    // name just points to the buffer in tcpConn or fdInfo, so never free this pointer
+    // name just points to the recv buffer, so never free this pointer
     char *name;
     size_t nameLen;
     uint16_t qType;
@@ -209,6 +209,7 @@ void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
 zone *zoneDictFetchValNoRef(zoneDict *zd, char *key);
 zone *zoneDictGetZone(zoneDict *zd, char *name);
+zone *zoneDictGetZoneNoRef(zoneDict *zd, char *name);
 int zoneDictReplace(zoneDict *zd, zone *z);
 
 int zoneDictDelete(zoneDict *zd, char *origin);

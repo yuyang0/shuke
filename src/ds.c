@@ -2,7 +2,6 @@
 // Created by yangyu on 17-2-16.
 //
 #include <string.h>
-#include <assert.h>
 #include <arpa/inet.h>
 
 #include "endianconv.h"
@@ -14,6 +13,7 @@
 #include "log.h"
 #include "utils.h"
 #include "ds.h"
+#include "shukeassert.h"
 
 #define RRSET_MAX_PREALLOC (1024*1024)
 
@@ -733,9 +733,10 @@ zone *zoneDictFetchVal(zoneDict *zd, char *key) {
  *
  * @param zd : zoneDict instance
  * @param name : nane in len label format
+ * @param inc_ref : increment the refcnt of the returned zone
  * @return
  */
-zone *zoneDictGetZone(zoneDict *zd, char *name) {
+static zone *_zoneDictGetZone(zoneDict *zd, char *name, bool inc_ref) {
     zone *z = NULL;
     int nLabel = 0;
     char *start = name;
@@ -748,9 +749,17 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
         if (z != NULL) break;
         start += (*start + 1);
     }
-    if (z != NULL) zoneIncRef(z);
+    if (inc_ref && z != NULL) zoneIncRef(z);
     zoneDictRUnlock(zd);
     return z;
+}
+
+zone *zoneDictGetZone(zoneDict *zd, char *name) {
+    return _zoneDictGetZone(zd, name, true);
+}
+
+zone *zoneDictGetZoneNoRef(zoneDict *zd, char *name) {
+    return _zoneDictGetZone(zd, name, false);
 }
 
 /* Add a zone, discarding the old if the key already exists.

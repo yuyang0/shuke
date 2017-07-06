@@ -1,9 +1,8 @@
 //
 // Created by Yu Yang on 2017-01-12
 //
-#include <assert.h>
-
 #include "shuke.h"
+#include "shukeassert.h"
 
 static void tcpReadHandler(struct aeEventLoop *el, int fd, void *privdata, int mask);
 static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, int mask);
@@ -328,7 +327,7 @@ static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, 
             ++sk.rejected_tcp_conn;
             continue;
         }
-        LOG_INFO(USER1, "tcp server accepted %s:%d", cip, cport);
+        LOG_DEBUG(USER1, "tcp server accepted %s:%d", cip, cport);
         anetNonBlock(NULL, cfd);
         anetEnableTcpNoDelay(NULL, cfd);
         if (sk.tcp_keepalive) {

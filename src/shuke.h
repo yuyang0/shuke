@@ -41,6 +41,15 @@
 
 #define MAX_NUMA_NODES  32
 
+#define shukeAssert(_e)                              \
+    do{                                         \
+        if (unlikely(!(_e))) {                  \
+            _shukeAssert(#_e,__FILE__,__LINE__); \
+            _exit(1);                           \
+        }                                       \
+    } while(0)
+#define shukePanic(_e) _shukePanic(#_e,__FILE__,__LINE__),_exit(1)
+
 enum taskStates {
     TASK_PENDING = 0,
     TASK_RUNNING = 1,
@@ -196,6 +205,7 @@ struct shuke {
 
     volatile bool force_quit;
     FILE *query_log_fp;
+    FILE *log_fp;
 
     int (*syncGetAllZone)(void);
     int (*initAsyncContext)(void);
@@ -300,6 +310,13 @@ int deleteZoneAllNumaNode(char *origin);
 void refreshZone(zone* z);
 
 void config_log();
+
+/*----------------------------------------------
+ *     debug utils
+ *---------------------------------------------*/
+void sigsegvHandler(int sig, siginfo_t *info, void *secret);
+void _shukeAssert(char *estr, char *file, int line);
+void _shukePanic(char *msg, char *file, int line);
 
 #ifdef SK_TEST
 int mongoTest(int argc, char *argv[]);
