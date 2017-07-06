@@ -261,6 +261,47 @@ static void usage() {
 static void version() {
     printf("shuke version: %s\n", SHUKE_VERSION);
 }
+
+static void sigShutdownHandler(int sig) {
+    char *msg;
+
+    switch (sig) {
+        case SIGINT:
+            msg = "Received SIGINT scheduling shutdown...";
+            break;
+        case SIGTERM:
+            msg = "Received SIGTERM scheduling shutdown...";
+            break;
+        default:
+            msg = "Received shutdown signal, scheduling shutdown...";
+    };
+
+    LOG_WARN(USER1, msg);
+    sk.force_quit = true;
+    aeStop(sk.el);
+}
+
+void setupSignalHandlers(void) {
+    struct sigaction act;
+
+    /* When the SA_SIGINFO flag is set in sa_flags then sa_sigaction is used.
+     * Otherwise, sa_handler is used. */
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+    act.sa_handler = sigShutdownHandler;
+    sigaction(SIGTERM, &act, NULL);
+    sigaction(SIGINT, &act, NULL);
+
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = SA_NODEFER | SA_RESETHAND | SA_SIGINFO;
+    act.sa_sigaction = sigsegvHandler;
+    sigaction(SIGSEGV, &act, NULL);
+    sigaction(SIGBUS, &act, NULL);
+    sigaction(SIGFPE, &act, NULL);
+    sigaction(SIGILL, &act, NULL);
+    return;
+}
+
 /*----------------------------------------------
  *     file data store
  *---------------------------------------------*/
@@ -897,17 +938,6 @@ static void initConfigFromFile(int argc, char **argv) {
     free(cbuf);
 }
 
-static void
-signal_handler(int signum)
-{
-    if (signum == SIGINT || signum == SIGTERM) {
-        printf("\n\nSignal %d received, preparing to exit...\n",
-               signum);
-        sk.force_quit = true;
-        aeStop(sk.el);
-    }
-}
-
 static void initShuke() {
     char ring_name[MAXLINE];
     numaNode_t *master_node = sk.nodes[sk.master_numa_id];
@@ -1356,8 +1386,8 @@ int main(int argc, char *argv[]) {
 
     initOtherConfig();
 
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    setupSignalHandlers();
+
     sk.force_quit = false;
     initDpdkModule();
     init_kni_module();
