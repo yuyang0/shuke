@@ -106,6 +106,32 @@ int deleteZoneAllNumaNode(char *origin) {
     return err;
 }
 
+static int __pushZoneReloadContext(zoneReloadContext *ctx) {
+    zoneReloadContextList *list = &sk.failed_tasks;
+    assert(ctx != NULL);
+
+    /* Store callback in list */
+    if (list->head == NULL)
+        list->head = ctx;
+    if (list->tail != NULL)
+        list->tail->next = ctx;
+    list->tail = ctx;
+    return OK_CODE;
+}
+
+static zoneReloadContext* __shiftZoneReloadContext() {
+    zoneReloadContextList *list = &sk.failed_tasks;
+    zoneReloadContext *ctx = list->head;
+
+    if (ctx != NULL) {
+        list->head = ctx->next;
+        if (ctx == list->tail)
+            list->tail = NULL;
+        ctx->next = NULL;
+    }
+    return ctx;
+}
+
 /*!
  * create a zone reload Context
  *

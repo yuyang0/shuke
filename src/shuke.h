@@ -109,7 +109,7 @@ struct tcpContext {
     char reply[];
 };
 
-typedef struct {
+typedef struct _zoneReloadContext {
     int status;
 
     char *dotOrigin;  // origin in <label dot> format, must be an absolute domain name
@@ -122,7 +122,14 @@ typedef struct {
     // never free or decrement reference count of old_zn, it will handle by zoneDict automatically.
     zone *old_zn;
     zone *new_zn;
+
+    struct _zoneReloadContext *next;
 }zoneReloadContext;
+
+typedef struct {
+    zoneReloadContext *head;
+    zoneReloadContext *tail;
+} zoneReloadContextList;
 
 struct shuke {
     char errstr[ERR_STR_LEN];
@@ -220,6 +227,8 @@ struct shuke {
     int (*asyncReloadAllZone)(void);
     int (*asyncReloadZone)(zoneReloadContext *t);
 
+    // mainly for zone reload task
+    zoneReloadContextList failed_tasks;
     // mongo context
     // it will be NULL when shuke is disconnected with mongodb
     mongoAsyncContext *mongo_ctx;
