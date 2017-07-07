@@ -346,7 +346,7 @@ check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
     uint8_t portid, count, all_ports_up, print_flag = 0;
     struct rte_eth_link link;
 
-    printf("\nChecking link status");
+    LOG_RAW(INFO, DPDK, "\nChecking link status");
     fflush(stdout);
     for (count = 0; count <= MAX_CHECK_TIME; count++) {
         if (sk.force_quit)
@@ -362,14 +362,14 @@ check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
             /* print link status if flag set */
             if (print_flag == 1) {
                 if (link.link_status)
-                    printf("Port %d Link Up - speed %u "
-                           "Mbps - %s\n", (uint8_t)portid,
-                           (unsigned)link.link_speed,
-                           (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
-                           ("full-duplex") : ("half-duplex\n"));
+                    LOG_RAW(INFO, DPDK,
+                            "Port %d Link Up - speed %u "
+                            "Mbps - %s\n", (uint8_t)portid,
+                            (unsigned)link.link_speed,
+                            (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
+                            ("full-duplex") : ("half-duplex\n"));
                 else
-                    printf("Port %d Link Down\n",
-                           (uint8_t)portid);
+                    LOG_RAW(INFO, DPDK, "Port %d Link Down\n", (uint8_t)portid);
                 continue;
             }
             /* clear all_ports_up flag if any link down */
@@ -383,15 +383,15 @@ check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
             break;
 
         if (all_ports_up == 0) {
-            printf(".");
-            fflush(stdout);
+            LOG_RAW(INFO, DPDK, ".");
+            fflush(sk.log_fp);
             rte_delay_ms(CHECK_INTERVAL);
         }
 
         /* set the print_flag if all ports up or timeout */
         if (all_ports_up == 1 || count == (MAX_CHECK_TIME - 1)) {
             print_flag = 1;
-            printf("done\n");
+            LOG_RAW(INFO, DPDK, "done\n");
         }
     }
 }

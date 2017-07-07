@@ -286,7 +286,7 @@ kni_config_network_interface(uint8_t port_id, uint8_t if_up)
         return -EINVAL;
     }
 
-    LOG_INFO(KNI, "Configure network interface of %d %s\n",
+    LOG_INFO(KNI, "Configure network interface of %d %s.",
             port_id, if_up ? "up" : "down");
 
     return ret;
