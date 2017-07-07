@@ -283,7 +283,7 @@ void zoneReloadContextDestroy(zoneReloadContext *t);
 
 int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn);
 int asyncRereloadZone(zoneReloadContext *t);
-
+int triggerReloadAllZone();
 /*----------------------------------------------
  *     admin server
  *---------------------------------------------*/

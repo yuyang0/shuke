@@ -708,8 +708,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             s = sdsnewprintf("ZONE RELOADALL command needs 0 argument, but gives %d.", argc-2);
             goto end;
         }
-        // just reset last_all_reload_ts, then it will trigger reload all immediately.
-        sk.last_all_reload_ts -= sk.all_reload_interval;
+        triggerReloadAllZone();
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
         size_t n = zoneDictGetNumZones(sk.zd, 1);
         s = sdsnewprintf("%lu", n);

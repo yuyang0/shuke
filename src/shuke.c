@@ -192,15 +192,22 @@ int asyncRereloadZone(zoneReloadContext *t) {
             return ERR_CODE;
         }
     }
-
     zoneReloadContextReset(t);
-    return sk.asyncReloadZone(t);
+    __pushZoneReloadContext(t);
+    return OK_CODE;
 }
 
 int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn) {
+    if (sk.checkAsyncContext() != OK_CODE) return ERR_CODE;
     zoneReloadContext *t = zoneReloadContextCreate(dotOrigin, old_zn);
     if (t == NULL) return ERR_CODE;
     return sk.asyncReloadZone(t);
+}
+
+int triggerReloadAllZone() {
+    // just reset last_all_reload_ts, then it will trigger reload all immediately.
+    sk.last_all_reload_ts -= sk.all_reload_interval;
+    return OK_CODE;
 }
 
 void deleteZoneOtherNuma(char *origin) {
@@ -680,13 +687,16 @@ static void updateCachedTime() {
 static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData) {
     UNUSED3(el, id, clientData);
     zone *z;
+    zoneReloadContext *ctx;
 
     updateCachedTime();
     if (sk.checkAsyncContext() == ERR_CODE) {
         // we don't care the return value.
         sk.initAsyncContext();
-    }
-    if (sk.checkAsyncContext() == OK_CODE) {
+    } else {
+        while ((ctx = __shiftZoneReloadContext()) != NULL) {
+            sk.asyncReloadZone(ctx);
+        }
         // reload the oldest zones
         while((z = getOldestZone()) != NULL) {
             if (z->refresh_ts > sk.unixtime) break;

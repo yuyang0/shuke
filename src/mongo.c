@@ -240,7 +240,7 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
     char **namev;
     char **p;
 
-    if (reply == NULL) return;
+    if (reply == NULL) goto error;
     namev = bson_extract_collection_names(reply->docs[0]);
     for (p = namev; *p != NULL; ++p) {
         snprintf(dotOrigin, MAX_DOMAIN_LEN, "%s.", *p);
@@ -257,6 +257,8 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
     sk.last_all_reload_ts = sk.unixtime;
     freev((void **)namev);
     return;
+error:
+    triggerReloadAllZone();
 }
 
 static void connectCallback(const mongoAsyncContext *c, int status) {
@@ -272,12 +274,11 @@ static void connectCallback(const mongoAsyncContext *c, int status) {
 static void disconnectCallback(const mongoAsyncContext *c, int status) {
     sk.mongo_ctx = NULL;
     if (status != MONGO_OK) {
-        LOG_ERROR(MONGO, "Mongodb in disconnected state: %s", c->errstr);
-        // do reconnect
-        initMongo();
-        return;
+        LOG_ERROR(MONGO, "Error: %s", c->errstr);
     }
     LOG_WARN(MONGO, "Disconnected...");
+    // only reconnect in cron callback in main thread
+    return;
 }
 
 int checkMongo() {
@@ -299,6 +300,7 @@ int initMongo() {
     mongoAeAttach(sk.el, ac);
     mongoAsyncSetConnectCallback(ac,connectCallback);
     mongoAsyncSetDisconnectCallback(ac,disconnectCallback);
+    sk.mongo_ctx = ac;
     return OK_CODE;
 }
 
@@ -394,6 +396,7 @@ int mongoGetAllZone() {
 }
 
 int mongoAsyncReloadZone(zoneReloadContext *t) {
+    if (sk.mongo_ctx == NULL) return ERR_CODE;
     int errcode;
     int retcode = OK_CODE;
     char col_name[MAX_DOMAIN_LEN];
@@ -432,6 +435,7 @@ ok:
 }
 
 int mongoAsyncReloadAllZone() {
+    if (sk.mongo_ctx == NULL) return ERR_CODE;
     LOG_INFO(MONGO, "Asynchronous get all zones from mongodb");
     int errcode;
     errcode = mongoAsyncGetCollectionNames(sk.mongo_ctx, reloadAllCallback, NULL, sk.mongo_dbname);
@@ -439,6 +443,7 @@ int mongoAsyncReloadAllZone() {
         LOG_ERROR(MONGO, "Mongo ERROR: %s", sk.mongo_ctx->errstr);
         return ERR_CODE;
     }
+    // we need set last_all_reload_ts here, otherwise it will trigger many reloadAll task in cron callback
     sk.last_all_reload_ts = sk.unixtime;
     return OK_CODE;
 }
