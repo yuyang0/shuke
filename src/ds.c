@@ -546,7 +546,7 @@ zone *zoneCopy(zone *z, int socket_id) {
 
 void zoneDestroy(zone *zn) {
     if (zn == NULL) return;
-    LOG_DEBUG(USER1, "zone %s is destroyed", zn->dotOrigin);
+    LOG_DEBUG(USER1, "zone %s is destroyed(socket_id %d)", zn->dotOrigin, zn->socket_id);
     dictRelease(zn->d);
     socket_free(zn->socket_id, zn->origin);
     socket_free(zn->socket_id, zn->dotOrigin);
@@ -769,6 +769,13 @@ zone *zoneDictGetZoneNoRef(zoneDict *zd, char *name) {
 int zoneDictReplace(zoneDict *zd, zone *z) {
     zoneDictWLock(zd);
     int err = dictReplace(zd->d, z->origin, z);
+    zoneDictWUnlock(zd);
+    return err;
+}
+
+int zoneDictAdd(zoneDict *zd, zone *z) {
+    zoneDictWLock(zd);
+    int err = dictAdd(zd->d, z->origin, z);
     zoneDictWUnlock(zd);
     return err;
 }

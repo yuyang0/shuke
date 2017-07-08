@@ -211,6 +211,7 @@ zone *zoneDictFetchValNoRef(zoneDict *zd, char *key);
 zone *zoneDictGetZone(zoneDict *zd, char *name);
 zone *zoneDictGetZoneNoRef(zoneDict *zd, char *name);
 int zoneDictReplace(zoneDict *zd, zone *z);
+int zoneDictAdd(zoneDict *zd, zone *z);
 
 int zoneDictDelete(zoneDict *zd, char *origin);
 int zoneDictEmpty(zoneDict *zd);

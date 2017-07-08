@@ -701,7 +701,9 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         for (int i = 2; i < argc; ++i) {
             strncpy(dotOrigin, argv[i], MAX_DOMAIN_LEN);
             if (!isAbsDotDomain(dotOrigin)) strcat(dotOrigin, ".");
-            asyncReloadZoneRaw(dotOrigin, NULL);
+            if (asyncReloadZoneRaw(dotOrigin, NULL) != OK_CODE) {
+                s = sdsnew("Error");
+            }
         }
     } else if (strcasecmp(argv[1], "RELOADALL") == 0) {
         if (argc != 2) {

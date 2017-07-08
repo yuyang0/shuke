@@ -2,8 +2,8 @@
 // Created by yangyu on 2/18/17.
 //
 
-#ifndef CDNS_LIST_H
-#define CDNS_LIST_H
+#ifndef SHUKE_LIST_H
+#define SHUKE_LIST_H
 
 #include "defines.h"
 
@@ -129,4 +129,4 @@ static inline void list_del(struct list_head *entry)
     for (pos = (head)->next, n = pos->next; pos != (head);  \
          pos = n, n = pos->next)
 
-#endif //CDNS_LIST_H
+#endif //SHUKE_LIST_H

@@ -227,8 +227,8 @@ struct shuke {
     int (*asyncReloadAllZone)(void);
     int (*asyncReloadZone)(zoneReloadContext *t);
 
-    // mainly for zone reload task
-    zoneReloadContextList failed_tasks;
+    // pending zone reload task
+    zoneReloadContextList tasks;
     // mongo context
     // it will be NULL when shuke is disconnected with mongodb
     mongoAsyncContext *mongo_ctx;
@@ -282,7 +282,7 @@ void zoneReloadContextReset(zoneReloadContext *t);
 void zoneReloadContextDestroy(zoneReloadContext *t);
 
 int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn);
-int asyncRereloadZone(zoneReloadContext *t);
+int asyncRereloadZone(zoneReloadContext *ctx);
 int triggerReloadAllZone();
 /*----------------------------------------------
  *     admin server
@@ -311,10 +311,12 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *s
 
 int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz);
 
+void addZoneOtherNuma(zone *z);
 void deleteZoneOtherNuma(char *origin);
-void reloadZoneOtherNuma(zone *z);
+void replaceZoneOtherNuma(zone *z);
 
 int masterZoneDictReplace(zone *z);
+int masterZoneDictAdd(zone *z);
 int deleteZoneAllNumaNode(char *origin);
 void refreshZone(zone* z);
 

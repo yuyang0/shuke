@@ -72,6 +72,8 @@ int masterZoneDictReplace(zone *z) {
     z->refresh_ts = sk.unixtime + z->refresh;
     zoneUpdateRRSetOffsets(z);
 
+    replaceZoneOtherNuma(z);
+
     zoneDictWLock(zd);
     zone *old_z = dictFetchValue(zd->d, z->origin);
     if (old_z) {
@@ -83,6 +85,20 @@ int masterZoneDictReplace(zone *z) {
     return err;
 }
 
+int masterZoneDictAdd(zone *z) {
+    zoneDict *zd = sk.zd;
+    z->refresh_ts = sk.unixtime + z->refresh;
+    zoneUpdateRRSetOffsets(z);
+
+    addZoneOtherNuma(z);
+
+    zoneDictWLock(zd);
+    int err = dictAdd(zd->d, z->origin, z);
+    assert(err == DICT_OK);
+    rbtreeInsertZone(z);
+    zoneDictWUnlock(zd);
+    return err;
+}
 /*!
  * delete zone on all numa node(include master nuam node).
  * @param origin
@@ -107,7 +123,7 @@ int deleteZoneAllNumaNode(char *origin) {
 }
 
 static int __pushZoneReloadContext(zoneReloadContext *ctx) {
-    zoneReloadContextList *list = &sk.failed_tasks;
+    zoneReloadContextList *list = &sk.tasks;
     assert(ctx != NULL);
 
     /* Store callback in list */
@@ -120,7 +136,7 @@ static int __pushZoneReloadContext(zoneReloadContext *ctx) {
 }
 
 static zoneReloadContext* __shiftZoneReloadContext() {
-    zoneReloadContextList *list = &sk.failed_tasks;
+    zoneReloadContextList *list = &sk.tasks;
     zoneReloadContext *ctx = list->head;
 
     if (ctx != NULL) {
@@ -177,31 +193,32 @@ void zoneReloadContextDestroy(zoneReloadContext *t) {
 /*!
  * re-reload the zone,
  * this function is mainly used to retry the failed zone reload task.
- * @param t
+ * @param ctx
  * @return
  */
-int asyncRereloadZone(zoneReloadContext *t) {
+int asyncRereloadZone(zoneReloadContext *ctx) {
     // this is a good place to check if the zone is expired.
-    if (t->old_zn) {
-        zone *z = t->old_zn;
+    if (ctx->old_zn) {
+        zone *z = ctx->old_zn;
         long last_reload_ts = z->refresh_ts - z->refresh;
         // the zone is expired, remove it.
         if (last_reload_ts+z->expiry < sk.unixtime) {
             deleteZoneAllNumaNode(z->origin);
-            t->old_zn = NULL;
+            ctx->old_zn = NULL;
             return ERR_CODE;
         }
     }
-    zoneReloadContextReset(t);
-    __pushZoneReloadContext(t);
+    zoneReloadContextReset(ctx);
+    __pushZoneReloadContext(ctx);
     return OK_CODE;
 }
 
 int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn) {
     if (sk.checkAsyncContext() != OK_CODE) return ERR_CODE;
-    zoneReloadContext *t = zoneReloadContextCreate(dotOrigin, old_zn);
-    if (t == NULL) return ERR_CODE;
-    return sk.asyncReloadZone(t);
+    zoneReloadContext *ctx = zoneReloadContextCreate(dotOrigin, old_zn);
+    if (ctx == NULL) return ERR_CODE;
+    __pushZoneReloadContext(ctx);
+    return OK_CODE;
 }
 
 int triggerReloadAllZone() {
@@ -219,13 +236,25 @@ void deleteZoneOtherNuma(char *origin) {
     }
 }
 
-void reloadZoneOtherNuma(zone *z) {
+void replaceZoneOtherNuma(zone *z) {
     for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
         numaNode_t *node = sk.nodes[numa_id];
         if (numa_id == sk.master_numa_id) continue;
         zone *new_z = zoneCopy(z, numa_id);
         zoneDictReplace(node->zd, new_z);
+    }
+}
+
+void addZoneOtherNuma(zone *z) {
+    int err;
+    for (int i = 0; i < sk.nr_numa_id; ++i) {
+        int numa_id = sk.numa_ids[i];
+        numaNode_t *node = sk.nodes[numa_id];
+        if (numa_id == sk.master_numa_id) continue;
+        zone *new_z = zoneCopy(z, numa_id);
+        err = zoneDictAdd(node->zd, new_z);
+        assert(err == DICT_OK);
     }
 }
 
@@ -347,7 +376,7 @@ int initFileStore() {
     return OK_CODE;
 }
 
-int getAllZoneFromFile() {
+static int _getAllZoneFromFile(bool is_first) {
     dictIterator *it = dictGetIterator(sk.zone_files_dict);
     dictEntry *de;
     zone *z;
@@ -362,12 +391,21 @@ int getAllZoneFromFile() {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            masterZoneDictReplace(z);
+            if (is_first) masterZoneDictAdd(z);
+            else masterZoneDictReplace(z);
         }
     }
     dictReleaseIterator(it);
     sk.last_all_reload_ts = sk.unixtime;
     return OK_CODE;
+}
+
+int getAllZoneFromFile() {
+    return _getAllZoneFromFile(false);
+}
+
+int initialGetAllZoneFromFile() {
+    return _getAllZoneFromFile(true);
 }
 
 int reloadZoneFromFile(zoneReloadContext *t) {
@@ -694,9 +732,6 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         // we don't care the return value.
         sk.initAsyncContext();
     } else {
-        while ((ctx = __shiftZoneReloadContext()) != NULL) {
-            sk.asyncReloadZone(ctx);
-        }
         // reload the oldest zones
         while((z = getOldestZone()) != NULL) {
             if (z->refresh_ts > sk.unixtime) break;
@@ -706,6 +741,9 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         if (sk.unixtime - sk.last_all_reload_ts > sk.all_reload_interval) {
             LOG_INFO(USER1, "start reloading all zone asynchronously.");
             sk.asyncReloadAllZone();
+        }
+        while ((ctx = __shiftZoneReloadContext()) != NULL) {
+            sk.asyncReloadZone(ctx);
         }
     }
     // run tcp dns server cron
@@ -1007,7 +1045,7 @@ static void initShuke() {
     } else if (strcasecmp(sk.data_store, "file") == 0) {
         sk.initAsyncContext = &initFileStore;
         sk.checkAsyncContext = &checkFileStore;
-        sk.syncGetAllZone = &getAllZoneFromFile;
+        sk.syncGetAllZone = &initialGetAllZoneFromFile;
         sk.asyncReloadAllZone = &getAllZoneFromFile;
         sk.asyncReloadZone = &reloadZoneFromFile;
     } else {

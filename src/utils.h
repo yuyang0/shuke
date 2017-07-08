@@ -2,8 +2,8 @@
 // Created by yangyu on 17-3-29.
 //
 
-#ifndef CDNS_UTILS_H
-#define CDNS_UTILS_H
+#ifndef SHUKE_UTILS_H
+#define SHUKE_UTILS_H
 
 #include <stdbool.h>
 
@@ -28,4 +28,4 @@ static inline bool isEmptyStr(char *ss) {
 
 int snpack(char *buf, int offset, size_t size, char const *fmt, ...);
 
-#endif //CDNS_UTILS_H
+#endif //SHUKE_UTILS_H

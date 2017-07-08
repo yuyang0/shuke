@@ -163,7 +163,6 @@ ok:
         } else {
             LOG_INFO(MONGO, "reload zone %s successfully. ", t->dotOrigin);
             masterZoneDictReplace(t->new_zn);
-            reloadZoneOtherNuma(t->new_zn);
             t->new_zn = NULL;
             zoneReloadContextDestroy(t);
         }
@@ -377,7 +376,7 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
             zoneDestroy(z);
             goto error;
         }
-        masterZoneDictReplace(z);
+        masterZoneDictAdd(z);
     }
     goto ok;
 error:
