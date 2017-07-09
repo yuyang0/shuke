@@ -727,7 +727,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
     //         strcat(dotOrigin, ".");
     //     }
     //     dot2lenlabel(dotOrigin, origin);
-    //     deleteZoneAllNumaNode(origin);
+    //     deleteZoneAllNumaNodes(origin);
     // } else if (strcasecmp(argv[1], "FLUSHALL") == 0) {
     //     if (argc != 2) {
     //         s = sdsnewprintf("ZONE FLUSHALL needs no arguments, but gives %d.", argc-2);
@@ -753,7 +753,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
     //             s = sdsnewprintf("the origin of the zone loading from string is not %s.", dotOrigin);
     //             goto end;
     //         }
-    //         masterZoneDictReplace(z);
+    //         replaceZoneAllNumaNodes(z);
     //         s = sdsnew("ok");
     //     }
     // }

@@ -315,9 +315,9 @@ void addZoneOtherNuma(zone *z);
 void deleteZoneOtherNuma(char *origin);
 void replaceZoneOtherNuma(zone *z);
 
-int masterZoneDictReplace(zone *z);
-int masterZoneDictAdd(zone *z);
-int deleteZoneAllNumaNode(char *origin);
+int replaceZoneAllNumaNodes(zone *z);
+int addZoneAllNumaNodes(zone *z);
+int deleteZoneAllNumaNodes(char *origin);
 void refreshZone(zone* z);
 
 void config_log();

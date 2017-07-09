@@ -63,11 +63,11 @@ void refreshZone(zone* z) {
 }
 
 /*!
- * add or replace a zone to master zone dict, we need update new zone's offsets and  refresh_ts
+ * add or replace a zone to all numa node's zone dict, we need update new zone's offsets and refresh_ts
  * @param z
  * @return
  */
-int masterZoneDictReplace(zone *z) {
+int replaceZoneAllNumaNodes(zone *z) {
     zoneDict *zd = sk.zd;
     z->refresh_ts = sk.unixtime + z->refresh;
     zoneUpdateRRSetOffsets(z);
@@ -85,7 +85,7 @@ int masterZoneDictReplace(zone *z) {
     return err;
 }
 
-int masterZoneDictAdd(zone *z) {
+int addZoneAllNumaNodes(zone *z) {
     zoneDict *zd = sk.zd;
     z->refresh_ts = sk.unixtime + z->refresh;
     zoneUpdateRRSetOffsets(z);
@@ -104,7 +104,7 @@ int masterZoneDictAdd(zone *z) {
  * @param origin
  * @return
  */
-int deleteZoneAllNumaNode(char *origin) {
+int deleteZoneAllNumaNodes(char *origin) {
     int err;
     zoneDict *zd = sk.zd;
 
@@ -203,7 +203,7 @@ int asyncRereloadZone(zoneReloadContext *ctx) {
         long last_reload_ts = z->refresh_ts - z->refresh;
         // the zone is expired, remove it.
         if (last_reload_ts+z->expiry < sk.unixtime) {
-            deleteZoneAllNumaNode(z->origin);
+            deleteZoneAllNumaNodes(z->origin);
             ctx->old_zn = NULL;
             return ERR_CODE;
         }
@@ -391,8 +391,8 @@ static int _getAllZoneFromFile(bool is_first) {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            if (is_first) masterZoneDictAdd(z);
-            else masterZoneDictReplace(z);
+            if (is_first) addZoneAllNumaNodes(z);
+            else replaceZoneAllNumaNodes(z);
         }
     }
     dictReleaseIterator(it);
@@ -414,7 +414,7 @@ int reloadZoneFromFile(zoneReloadContext *t) {
     char *fname = dictFetchValue(sk.zone_files_dict, t->dotOrigin);
     if (fname == NULL) {
         dot2lenlabel(t->dotOrigin, origin);
-        deleteZoneAllNumaNode(origin);
+        deleteZoneAllNumaNodes(origin);
     } else {
         if (loadZoneFromFile(fname, &z) == DS_ERR) {
             return ERR_CODE;
@@ -424,7 +424,7 @@ int reloadZoneFromFile(zoneReloadContext *t) {
                 zoneDestroy(z);
                 return ERR_CODE;
             }
-            masterZoneDictReplace(z);
+            replaceZoneAllNumaNodes(z);
         }
     }
     return OK_CODE;
@@ -1014,7 +1014,6 @@ static void initConfigFromFile(int argc, char **argv) {
 }
 
 static void initShuke() {
-    char ring_name[MAXLINE];
     numaNode_t *master_node = sk.nodes[sk.master_numa_id];
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
     sk.starttime = time(NULL);
@@ -1053,24 +1052,20 @@ static void initShuke() {
     }
 
     sk.rbroot = RB_ROOT;
-    master_node->zd = zoneDictCreate(SOCKET_ID_ANY);
+    // create zoneDict for all numa nodes
+    for (int i = 0; i < sk.nr_numa_id; ++i) {
+        int numa_id = sk.numa_ids[i];
+        sk.nodes[numa_id]->zd = zoneDictCreate(numa_id);
+    }
+    assert(master_node->zd);
     sk.zd = master_node->zd;
+
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
         LOG_FATAL(USER1, "can't load all zone data from %s", sk.data_store);
     }
     sk.zone_load_time = mstime() - reload_all_start;
     LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
-    // replicate zone data to other numa node
-    for (int i = 0; i < sk.nr_numa_id; ++i) {
-        int numa_id = sk.numa_ids[i];
-        if (numa_id == sk.master_numa_id) continue;
-
-        // FIXME: should allocate memory belongs to numa node
-        sk.nodes[numa_id]->zd = zoneDictCopy(sk.zd, numa_id);
-        snprintf(ring_name, MAXLINE, "NUMA_%d_RING", i);
-    }
-
     sk.last_all_reload_ts = sk.unixtime;
 
     if (sk.initAsyncContext() == ERR_CODE) {
@@ -1317,7 +1312,7 @@ int initNumaConfig() {
         int lcore_id = sk.lcore_ids[i];
         int numa_id = rte_lcore_to_socket_id((unsigned)lcore_id);
         if (sk.nodes[numa_id] == NULL) {
-            sk.nodes[numa_id] = malloc(sizeof(numaNode_t));
+            sk.nodes[numa_id] = calloc(1, sizeof(numaNode_t));
             sk.nodes[numa_id]->numa_id = numa_id;
             sk.nodes[numa_id]->main_lcore_id = lcore_id;
             sk.nodes[numa_id]->nr_lcore_ids = 1;

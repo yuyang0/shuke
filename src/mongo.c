@@ -162,7 +162,7 @@ ok:
             }
         } else {
             LOG_INFO(MONGO, "reload zone %s successfully. ", t->dotOrigin);
-            masterZoneDictReplace(t->new_zn);
+            replaceZoneAllNumaNodes(t->new_zn);
             t->new_zn = NULL;
             zoneReloadContextDestroy(t);
         }
@@ -186,7 +186,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (reply->numberReturned == 0) {
         // remove the zone
         dot2lenlabel(t->dotOrigin, origin);
-        deleteZoneAllNumaNode(origin);
+        deleteZoneAllNumaNodes(origin);
         zoneReloadContextDestroy(t);
         goto ok;
     }
@@ -376,7 +376,7 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
             zoneDestroy(z);
             goto error;
         }
-        masterZoneDictAdd(z);
+        addZoneAllNumaNodes(z);
     }
     goto ok;
 error:
