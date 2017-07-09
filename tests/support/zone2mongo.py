@@ -5,9 +5,10 @@
 
 """
 from __future__ import print_function, division, absolute_import
+import argparse
 import io
 from collections import defaultdict
-import redis
+from pymongo import MongoClient
 
 
 def tokenize(ss):
@@ -168,9 +169,7 @@ def to_relative_domain(domain, origin):
 
 def parse_zone_str(ss):
     dot_origin = None
-    sub_domains = set()
-    rr_map = defaultdict(set)
-    soa = None
+    rr_list = []
 
     with io.StringIO(ss) as fp:
         dot_origin, default_ttl, record = read_directives(fp)
@@ -191,23 +190,24 @@ def parse_zone_str(ss):
                 domain = tokens.pop(0)
             domain = domain.lower()
             domain = to_relative_domain(domain, dot_origin)
-            sub_domains.add(domain)
 
             ttl, dns_type, tokens = parse_ttl_cls_type(tokens, prev_ttl)
             if not ttl:
                 raise Exception("ttl is None")
-            tokens[:0] = [str(ttl), "IN", dns_type]
-            redis_txt = ' '.join(tokens)
-            if dns_type == "SOA":
-                soa = redis_txt
-            else:
-                abs_domain = to_abs_domain(domain, dot_origin)
-                rr_map[abs_domain].add(redis_txt)
+            rdata_txt = ' '.join(tokens)
+            v = {
+                "name": domain,
+                "ttl": ttl,
+                "type": dns_type,
+                "rdata": rdata_txt,
+            }
+            rr_list.append(v)
+            abs_domain = to_abs_domain(domain, dot_origin)
 
             prev_domain = domain
             prev_ttl = ttl
             record = read_record(fp)
-    return dot_origin, soa, sub_domains, rr_map
+    return dot_origin, rr_list
 
 
 def parse_zone_file(fname):
@@ -215,53 +215,40 @@ def parse_zone_file(fname):
         return parse_zone_str(fp.read())
 
 
-class ZoneRedis(object):
-    def __init__(self, host, port, origins_key="*origins*",
-                 soa_prefix="s", zone_prefix="z"):
-        self.r = redis.Redis(host=host, port=port, decode_responses=True)
-        self.origins_key = origins_key
-        self.soa_prefix = soa_prefix
-        self.zone_prefix = zone_prefix
+class ZoneMongo(object):
+    def __init__(self, host, port, dbname="zone"):
+        self.r = MongoClient(host=host, port=port)
+        self.dbname = dbname
 
     def __getattr__(self, name):
         try:
             return getattr(self.r, name)
         except AttributeError:
-            raise AttributeError("ZoneRedis instance has no %s attribute." % name)
+            raise AttributeError("ZoneMongo instance has no %s attribute." % name)
 
-    def file_to_redis(self, fname):
-        dot_origin, soa, sub_domains, rr_map = parse_zone_file(fname)
-        self.write_to_redis(dot_origin, soa, sub_domains, rr_map)
+    def file_to_mongo(self, fname):
+        dot_origin, rr_list = parse_zone_file(fname)
+        self.write_to_mongo(dot_origin, rr_list)
 
-    def str_to_redis(self, ss):
-        dot_origin, soa, sub_domains, rr_map = parse_zone_str(ss)
-        self.write_to_redis(dot_origin, soa, sub_domains, rr_map)
+    def str_to_mongo(self, ss):
+        dot_origin, rr_list = parse_zone_str(ss)
+        self.write_to_mongo(dot_origin, rr_list)
 
-    def write_to_redis(self, dot_origin, soa, sub_domains, rr_map):
-        pipe = self.r.pipeline()
-        pipe.sadd(self.origins_key, dot_origin)
-        pipe.sadd("%s:%s" % (self.zone_prefix, dot_origin), *sub_domains)
-        pipe.set("%s:%s" % (self.soa_prefix, dot_origin), soa)
-        for k, v in rr_map.items():
-            pipe.sadd(k, *v)
-        pipe.execute()
+    def write_to_mongo(self, dot_origin, rr_list):
+        db = self.r[self.dbname]
+        col = db[dot_origin[:-1]]
+        col.insert_many(rr_list)
 
     def del_zone(self, dot_origin):
-        sub_domains = self.r.smembers("%s:%s" % (self.zone_prefix, dot_origin))
-        pipe = self.r.pipeline()
-        pipe.srem(self.origins_key, dot_origin)
-        pipe.delete("%s:%s" % (self.soa_prefix, dot_origin))
-        pipe.delete("%s:%s" % (self.zone_prefix, dot_origin))
-        for domain in sub_domains:
-            abs_domain = to_abs_domain(domain, dot_origin)
-            pipe.delete(abs_domain)
-        pipe.execute()
+        db = self.r[self.dbname]
+        db.remove_collection(dot_origin)
 
     def debug_zone_file(self, fname):
-        dot_origin, soa, sub_domains, rr_map = parse_zone_file(fname)
-        ss = "dotOrigin: {}\nsoa: {}\n{}\n".format(dot_origin, soa, sub_domains)
-        for k, v in rr_map.items():
-            ss += "{} ==> {}\n".format(k, v)
+        dot_origin, rr_list = parse_zone_file(fname)
+        ss = "dotOrigin: {}\n".format(dot_origin)
+        for ele in rr_list:
+            # ss += " ".join(ele.values())
+            ss += ' '.join([ele['name'], str(ele['ttl']), ele['type'], ele['rdata']]) + '\n'
         return ss
 
     def debug_zone_str(self, ss):
@@ -272,23 +259,16 @@ class ZoneRedis(object):
         return ss
 
 
-
 if __name__ == '__main__':
-    zone_init_str  = """
-$origin example.com.
-$ttl 18600
-@	SOA	dns1.example.com.	hostmaster.example.com. (
-		2001062501 ; serial
-		21600      ; refresh after 6 hours
-		3600       ; retry after 1 hour
-		604800     ; expire after 1 week
-		86400 )    ; minimum TTL of 1 day
-www1 4800 IN A 133.2.3.4
-     4800 IN A 134.4.5.6
-    """
-    zr = ZoneRedis("127.0.0.1", 6379)
-    zr.flushall()
-    zr.sadd(zr.origins_key, "aa")
-    zr.str_to_redis(zone_init_str)
-    print(zr.debug_zone_str(zone_init_str))
-    zr.del_zone("example.com.")
+    def parse_cmd_args():
+        parser = argparse.ArgumentParser()
+        parser.add_argument('-f', '--file', required=True, help="zone file")
+        parser.add_argument('-Mh', '--mongo_host', default="127.0.0.1", help='mongodb host(default: 127.0.0.1)')
+        parser.add_argument('-Mp', '--mongo_port', default=27017, type=int, help='mongodb port(default: 27017)')
+        return parser.parse_args()
+
+    parsed = parse_cmd_args()
+    zm = ZoneMongo(parsed.mongo_host, parsed.mongo_port)
+    zm.file_to_mongo(parsed.file)
+    print(zm.debug_zone_file(parsed.file))
+    # zr.del_zone("example.com.")

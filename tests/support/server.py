@@ -14,10 +14,10 @@ import tempfile
 
 import dns.message
 import dns.query
-import redis
+import pymongo
 
-from . import settings, zone2redis, utils
-from .zone2redis import ZoneRedis
+from . import settings, zone2mongo, utils
+from .zone2mongo import ZoneMongo
 
 
 def start_srv(cmd, stdin=None, stdout=None, stderr=None):
@@ -110,14 +110,11 @@ class DNSServer(object):
         self.cf = read_conf(conf)
         if overrides:
             self.cf.update(overrides)
-        # override redis host and redis port
-        if self.cf["data_store"].lower() == "redis":
-            self.cf["redis_host"] = settings.REDIS_HOST
-            self.cf["redis_port"] = settings.REDIS_PORT
-            self.zr = ZoneRedis(settings.REDIS_HOST, settings.REDIS_PORT,
-                                origins_key=self.cf["redis_origins_key"],
-                                soa_prefix=self.cf["redis_soa_prefix"],
-                                zone_prefix=self.cf["redis_zone_prefix"])
+        # override mongo host and mongo port
+        if self.cf["data_store"].lower() == "mongo":
+            self.cf["mongo_host"] = settings.MONGO_HOST
+            self.cf["mongo_port"] = settings.MONGO_PORT
+            self.zm = ZoneMongo(settings.MONGO_HOST, settings.MONGO_PORT, self.cf["mongo_dbname"])
         self.valgrind = valgrind
         self.stderr = tempfile.TemporaryFile(mode="w+", encoding="utf8")
 
@@ -178,14 +175,11 @@ class DNSServer(object):
     def isalive(self):
         return self.popen.poll() is not None
 
-    def redis_clear(self):
-        self.zr.flushall()
+    def mongo_clear(self):
+        self.zm.flushall()
 
-    def write_zone_to_redis(self, zone_ss):
-        self.zr.str_to_redis(zone_ss)
+    def write_zone_to_mongo(self, zone_ss):
+        self.zm.str_to_mongo(zone_ss)
 
-    def redis_set_soa(self, soa, dot_origin):
-        self.zr.set("%s:%s" % (self.cf["redis_soa_prefix"], dot_origin), soa)
-
-    def redis_delete_zone(self, dot_origin):
-        self.zr.del_zone(dot_origin)
+    def mongo_delete_zone(self, dot_origin):
+        self.zm.del_zone(dot_origin)

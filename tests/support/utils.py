@@ -39,6 +39,13 @@ def redis_srv(request):
     srv.stop()
 
 
+@pytest.fixture(scope="session")
+def mongo_srv(request):
+    srv = server.MongoServer()
+    yield srv
+    srv.stop()
+
+
 def find_available_port():
     """
     find available port, dirty but it works

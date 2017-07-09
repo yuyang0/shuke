@@ -15,7 +15,7 @@ sys.path.insert(0, dirname(dirname(abspath(__file__))))
 from support import dns_srv, settings, utils
 
 overrides = {
-    "data_store": "redis",
+    "data_store": "mongo",
     "admin_port": utils.find_available_port(),
     "port": utils.find_available_port(),
 }
@@ -41,7 +41,7 @@ def cmp_rrset(ss1, ss2):
     set2 = {ele.strip(" ") for ele in set2}
     return set1 == set2
 
-def test_redis_init(dns_srv):
+def test_mongo_init(dns_srv):
     rrset_ss = dns_srv.admin_cmd("zone get_rrset example.com SOA")
     # print(rrset_ss)
     assert cmp_rrset(rrset_ss, " 86400 IN SOA dns1.example.com. hostmaster.example.com. 2001062501 21600 3600 604800 86400\n")
@@ -50,7 +50,7 @@ def test_redis_init(dns_srv):
     assert cmp_rrset(rrset_ss, " 4800 IN A 133.2.3.4\n 4800 IN A 134.4.5.6\n")
 
 
-def test_redis_add(dns_srv):
+def test_mongo_add(dns_srv):
     zone_str = """
 $origin 111.com.
 $ttl 86400
@@ -63,7 +63,7 @@ $ttl 86400
 www1 4800 IN A 133.2.3.4
      4800 IN A 134.4.5.6
     """
-    dns_srv.write_zone_to_redis(zone_str)
+    dns_srv.write_zone_to_mongo(zone_str)
     print(dns_srv.admin_cmd("zone reload 111.com."))
     time.sleep(5)
     rrset_ss = dns_srv.admin_cmd("zone get_rrset 111.com SOA")
@@ -88,7 +88,7 @@ www1 4800 IN A 133.2.3.4
 www2 4800 IN A 133.2.3.7
      4800 IN A 134.4.5.8
     """
-    dns_srv.write_zone_to_redis(zone_str)
+    dns_srv.write_zone_to_mongo(zone_str)
     print(dns_srv.admin_cmd("zone reload 111.com."))
     time.sleep(5)
     rrset_ss = dns_srv.admin_cmd("zone get_rrset 111.com SOA")
@@ -98,7 +98,7 @@ www2 4800 IN A 133.2.3.7
     # print(rrset_ss)
     assert cmp_rrset(rrset_ss, " 4800 IN A 133.2.3.7\n 4800 IN A 134.4.5.8\n")
 
-def test_redis_del(dns_srv):
+def test_mongo_del(dns_srv):
     zone_str = """
 $origin 222.com.
 $ttl 86400
@@ -111,7 +111,7 @@ $ttl 86400
 www1 4800 IN A 133.2.3.4
      4800 IN A 134.4.5.6
     """
-    dns_srv.write_zone_to_redis(zone_str)
+    dns_srv.write_zone_to_mongo(zone_str)
     print(dns_srv.admin_cmd("zone reload 222.com."))
     time.sleep(5)
     rrset_ss = dns_srv.admin_cmd("zone get_rrset 222.com SOA")
@@ -121,14 +121,14 @@ www1 4800 IN A 133.2.3.4
     # print(rrset_ss)
     assert cmp_rrset(rrset_ss, " 4800 IN A 133.2.3.4\n 4800 IN A 134.4.5.6\n")
 
-    dns_srv.redis_delete_zone("222.com.")
+    dns_srv.mongo_delete_zone("222.com.")
     print(dns_srv.admin_cmd("zone reload 222.com."))
     time.sleep(5)
     zone_ss = dns_srv.admin_cmd("zone get 222.com")
     assert zone_ss == "zone 222.com. not found"
 
 
-def test_redis_reloadall(dns_srv):
+def test_mongo_reloadall(dns_srv):
     zone_str = """
 $origin 333.com.
 $ttl 86400
@@ -141,7 +141,7 @@ $ttl 86400
 www1 4800 IN A 133.2.3.4
      4800 IN A 134.4.5.6
     """
-    dns_srv.write_zone_to_redis(zone_str)
+    dns_srv.write_zone_to_mongo(zone_str)
     print(dns_srv.admin_cmd("zone reloadall"))
     time.sleep(5)
     rrset_ss = dns_srv.admin_cmd("zone get_rrset 333.com SOA")
