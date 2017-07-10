@@ -525,6 +525,7 @@ zone *zoneCreate(char *ss, int socket_id) {
     zn->d = dictCreate(&dnsDictType, NULL, socket_id);
     rte_atomic32_set(&(zn->refcnt), 1);
     rb_init_node(&zn->node);
+    LOG_DEBUG(USER1, "create zone (dotOrigin=>%s, sid=> %d)", zn->dotOrigin, socket_id);
     return zn;
 }
 

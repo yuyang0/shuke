@@ -152,9 +152,7 @@ static zoneReloadContext* __shiftZoneReloadContext() {
  * create a zone reload Context
  *
  * @param dotOrigin : the origin in <label dot> format
- * @param sn : the serial number of the zone(the sn field in SOA record)
- * @param ts : the timestamp of last update of this zone,
- *             -1 means this function needs to check if this zone is in memory cache.
+ * @param old_zn : the old zone needs to reload.
  * @return obj if everything is ok otherwise return NULL
  */
 zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {

@@ -118,53 +118,53 @@ static int prepareColName(char *dotOrigin, char *colName) {
 static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     ((void) c);
     mongoReply *reply = r;
-    zoneReloadContext *t = privdata;
+    zoneReloadContext *ctx = privdata;
     char *name, *type, *rdata;
     uint32_t ttl;
     if (reply == NULL) {
         goto error;
     }
-    if (t->status == TASK_ERROR) {
+    if (ctx->status == TASK_ERROR) {
         goto error;
     }
 
-    if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin, SOCKET_ID_ANY);
-    zone *z = t->new_zn;
+    if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, SOCKET_ID_ANY);
+    zone *z = ctx->new_zn;
 
-    LOG_DEBUG(MONGO, "RRSET cb %s %d", t->dotOrigin, reply->numberReturned);
+    LOG_DEBUG(MONGO, "RRSET cb %s %d", ctx->dotOrigin, reply->numberReturned);
 
-    if (t->psr == NULL) t->psr = RRParserCreate("@", 0, t->dotOrigin);
+    if (ctx->psr == NULL) ctx->psr = RRParserCreate("@", 0, ctx->dotOrigin);
     for (int i = 0; i < reply->numberReturned; ++i) {
         bson_t *b = reply->docs[i];
         name = bson_extract_string(b, "name");
         ttl = (uint32_t)bson_extract_int32(b, "ttl");
         type = bson_extract_string(b, "type");
         rdata = bson_extract_string(b, "rdata");
-        if (RRParserFeedRdata(t->psr, rdata, name, ttl, type, z) == DS_ERR) {
+        if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, z) == DS_ERR) {
             goto error;
         }
     }
     goto ok;
 
 error:
-    t->status = TASK_ERROR;
+    ctx->status = TASK_ERROR;
 ok:
     if (!reply || reply->cursorID == 0) {
-        if (t->status == TASK_ERROR) {
-            LOG_ERROR(MONGO, "failed to reload zone %s asynchronously.", t->dotOrigin);
-            if (asyncRereloadZone(t) == ERR_CODE) {
-                zoneReloadContextDestroy(t);
+        if (ctx->status == TASK_ERROR) {
+            LOG_ERROR(MONGO, "failed to reload zone %s asynchronously.", ctx->dotOrigin);
+            if (asyncRereloadZone(ctx) == ERR_CODE) {
+                zoneReloadContextDestroy(ctx);
             }
-        } else if (t->new_zn->soa == NULL) {
-            LOG_ERROR(MONGO, "zone %s must contain a SOA record.", t->dotOrigin);
-            if (asyncRereloadZone(t) == ERR_CODE) {
-                zoneReloadContextDestroy(t);
+        } else if (ctx->new_zn->soa == NULL) {
+            LOG_ERROR(MONGO, "zone %s must contain a SOA record.", ctx->dotOrigin);
+            if (asyncRereloadZone(ctx) == ERR_CODE) {
+                zoneReloadContextDestroy(ctx);
             }
         } else {
-            LOG_INFO(MONGO, "reload zone %s successfully. ", t->dotOrigin);
-            replaceZoneAllNumaNodes(t->new_zn);
-            t->new_zn = NULL;
-            zoneReloadContextDestroy(t);
+            LOG_INFO(MONGO, "reload zone %s successfully. ", ctx->dotOrigin);
+            replaceZoneAllNumaNodes(ctx->new_zn);
+            ctx->new_zn = NULL;
+            zoneReloadContextDestroy(ctx);
         }
     }
     return;
@@ -177,17 +177,17 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     char origin[MAX_DOMAIN_LEN+2];
     mongoReply *reply = r;
     char *type, *rdata;
-    zoneReloadContext *t = privdata;
+    zoneReloadContext *ctx = privdata;
     char col_name[MAX_DOMAIN_LEN];
 
-    assert(t->old_zn != NULL);
+    assert(ctx->old_zn != NULL);
 
     if (reply == NULL) goto error;
     if (reply->numberReturned == 0) {
         // remove the zone
-        dot2lenlabel(t->dotOrigin, origin);
+        dot2lenlabel(ctx->dotOrigin, origin);
         deleteZoneAllNumaNodes(origin);
-        zoneReloadContextDestroy(t);
+        zoneReloadContextDestroy(ctx);
         goto ok;
     }
     rdata = bson_extract_string(reply->docs[0], "rdata");
@@ -198,24 +198,26 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         LOG_WARN(MONGO, "Error SOA record: %s.", errstr);
         goto error;
     }
-    LOG_DEBUG(MONGO, "sn cb: %d %d", sn, t->sn);
+    LOG_DEBUG(MONGO, "sn cb: %d %d", sn, ctx->sn);
 
 
-    if (t->sn >= sn) {
+    if (ctx->sn >= sn) {
         // update zone's ts field
-        zone *z = t->old_zn;
+        zone *z = ctx->old_zn;
+
+        LOG_DEBUG(MONGO, "sn is not change.");
         refreshZone(z);
 
-        zoneReloadContextDestroy(t);
+        zoneReloadContextDestroy(ctx);
         goto ok;
     } else {
-        if (t->new_zn == NULL) t->new_zn = zoneCreate(t->dotOrigin, SOCKET_ID_ANY);
-        if (t->psr == NULL) t->psr = RRParserCreate("@", 0, t->dotOrigin);
+        if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, SOCKET_ID_ANY);
+        if (ctx->psr == NULL) ctx->psr = RRParserCreate("@", 0, ctx->dotOrigin);
 
         // remove last dot
-        prepareColName(t->dotOrigin, col_name);
+        prepareColName(ctx->dotOrigin, col_name);
 
-        errcode = mongoAsyncFindAll(c, RRSetGetCallback, t, sk.mongo_dbname,
+        errcode = mongoAsyncFindAll(c, RRSetGetCallback, ctx, sk.mongo_dbname,
                                     col_name, NULL, NULL, 0);
         if (errcode != MONGO_OK) {
             LOG_ERROR(MONGO, "MONGO ERROR: %s", c->errstr);
@@ -224,8 +226,8 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     }
     goto ok;
 error:
-    if (asyncRereloadZone(t) == ERR_CODE) {
-        zoneReloadContextDestroy(t);
+    if (asyncRereloadZone(ctx) == ERR_CODE) {
+        zoneReloadContextDestroy(ctx);
     }
 ok:
     return;
