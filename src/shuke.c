@@ -166,6 +166,7 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
     }
     if (old_zn != NULL) {
         sn = old_zn->sn;
+        dotOrigin = old_zn->dotOrigin;
         // the zone is reloading should not in rbtree.
         rbtreeDeleteZone(old_zn);
     }
