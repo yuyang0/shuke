@@ -475,6 +475,16 @@ static sds genInfoString(char *section) {
                           (long long unsigned)(nr_req/uptime),
                           zoneDictGetNumZones(sk.zd, 1));
 
+        s = sdscat(s, "\r\n");
+        s = sdscatprintf(s,
+                         "# Tcp stats\r\n"
+                         "num_tcp_conn: %llu\r\n"
+                         "total_tcp_conn: %llu\r\n"
+                         "rejected_tcp_conn: %llu\r\n",
+                         (long long unsigned)sk.num_tcp_conn,
+                         (long long unsigned)sk.total_tcp_conn,
+                         (long long unsigned)sk.rejected_tcp_conn);
+
         struct rte_eth_stats eth_stats;
         for (int i = 0; i < sk.nr_ports; i++) {
             uint8_t portid = (uint8_t )sk.port_ids[i];
@@ -762,3 +772,11 @@ end:
     rep = adminReplyCreate(s);
     adminConnAppendW(c, rep);
 }
+
+// sds genDebugInfo() {
+//     sds s = sdsempty();
+//     s = sdscatpack(s,
+//                    "master_numa_id: %d\r\n"
+//                    "numa_ids: "
+//     );
+// }

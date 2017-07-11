@@ -268,7 +268,7 @@ static void connectCallback(const mongoAsyncContext *c, int status) {
         sk.mongo_ctx = NULL;
         return;
     }
-    sk.mongo_ctx = (mongoAsyncContext *) c;
+    assert(sk.mongo_ctx == c);
     LOG_INFO(MONGO, "mongodb connected..");
 }
 
