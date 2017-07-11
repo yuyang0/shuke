@@ -56,16 +56,26 @@ def parse_cmd_args():
     return parser.parse_args()
 
 
-def main():
-    parsed = parse_cmd_args()
-    PROMPT = 'cdns %s > ' % parsed.address
-    ip, port = parsed.address.split(':')
+def create_cli_socket(ip, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, int(port)))
+    print("connect to %s:%s\n" % (ip, port))
+    return s
+
+
+def main():
+    parsed = parse_cmd_args()
+    PROMPT = 'shuke %s > ' % parsed.address
+    ip, port = parsed.address.split(':')
+    s = create_cli_socket(ip, port)
     while True:
         data = input(PROMPT)
         send_msg(s, data)
         data = recv_msg(s)
+        if data is None:
+            # reconnect to server
+            s = create_cli_socket(ip, port)
+            continue
         print(data)
 
 
