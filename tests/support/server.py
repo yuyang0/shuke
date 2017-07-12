@@ -5,11 +5,14 @@
 
 """
 from __future__ import print_function, division, absolute_import
+import os
+import signal
 import socket
 import struct
 import subprocess
 import shlex
 import time
+import copy
 import tempfile
 
 import dns.message
@@ -17,14 +20,16 @@ import dns.query
 import pymongo
 
 from . import settings, zone2mongo, utils
+from .config import default_cfg
 from .zone2mongo import ZoneMongo
 
 
-def start_srv(cmd, stdin=None, stdout=None, stderr=None):
+def start_srv(cmd, stdin=None, stdout=None, stderr=None, timeout=10):
     print("start", cmd)
     args = cmd if isinstance(cmd, (tuple, list,)) else shlex.split(cmd)
     p = subprocess.Popen(args, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True)
-    time.sleep(1)
+    time.sleep(timeout)
+    print("poll : %s\n" % p.poll())
     if p.poll() is not None:
         raise Exception("cannot start %s" % (cmd))
     return p
@@ -39,11 +44,11 @@ def stop_srv(popen):
 
 def to_conf(d):
     def list_to_conf(l):
-        return ' [\n' + ' '.join(l) + '\n]\n'
+        return ' [\n' + ' '.join(l) + '\n]'
 
     def dict_to_conf(d):
         l = [" %s %s \n" % (k, v) for k, v in d.items()]
-        return ' {\n' + ''.join(l) + '}\n'
+        return ' {\n' + ''.join(l) + '}'
 
     ret_list = []
     for k, v in d.items():
@@ -51,16 +56,12 @@ def to_conf(d):
             v_ss = list_to_conf(v)
         elif isinstance(v, dict):
             v_ss = dict_to_conf(v)
+        elif isinstance(v, bool):
+            v_ss = "yes" if v else "no"
         else:
-            v_ss = str(v) + '\n'
+            v_ss = str(v)
         ret_list.append("%s %s" % (k, v_ss))
-    return ''.join(ret_list)
-
-
-def read_conf(fname):
-    with open(fname, "rb") as fp:
-        ss = fp.read()
-        return eval(ss)
+    return '\n'.join(ret_list)
 
 
 def recvall(sock, n):
@@ -103,17 +104,18 @@ class AdminClient(object):
 
 
 class DNSServer(object):
-    def __init__(self, conf=None, overrides=None, valgrind=False):
+    def __init__(self, overrides=None, valgrind=False):
+        self.pid = None
         self.popen = None
-        if conf is None:
-            conf = settings.DEFAULT_CONF
-        self.cf = read_conf(conf)
+        self.cf = copy.deepcopy(default_cfg)
         if overrides:
             self.cf.update(overrides)
         # override mongo host and mongo port
         if self.cf["data_store"].lower() == "mongo":
-            self.cf["mongo_host"] = settings.MONGO_HOST
-            self.cf["mongo_port"] = settings.MONGO_PORT
+            if "mongo_host" not in self.cf:
+                self.cf["mongo_host"] = settings.MONGO_HOST
+            if "mongo_port" not in self.cf:
+                self.cf["mongo_port"] = settings.MONGO_PORT
             self.zm = ZoneMongo(settings.MONGO_HOST, settings.MONGO_PORT, self.cf["mongo_dbname"])
         self.valgrind = valgrind
         self.stderr = tempfile.TemporaryFile(mode="w+", encoding="utf8")
@@ -134,16 +136,52 @@ class DNSServer(object):
     def start(self):
         assert self.popen is None
         try:
-            self.popen = start_srv(self.cmd, stderr=self.stderr)
+            self.popen = self._start_srv(self.cmd, stderr=self.stderr)
         except Exception as e:
             raise Exception("%s, stderr: %s" % (str(e), self.get_stderr()))
         self.admin_cli = AdminClient(self.cf["admin_host"], self.cf["admin_port"])
+
+    def _start_srv(self, cmd, stdin=None, stdout=None, stderr=None, timeout=10):
+        print("start", cmd)
+        args = cmd if isinstance(cmd, (tuple, list,)) else shlex.split(cmd)
+        p = subprocess.Popen(args, stdin=stdin, stdout=stdout,
+                             stderr=stderr, close_fds=True)
+        time.sleep(timeout)
+        # when run daemon mode, p.pid doesn't return the right pid
+        if self.cf['daemonize'].lower() in ("no", "off", "false"):
+            if p.poll() is not None:
+                raise Exception("cannot start %s" % (cmd))
+        else:
+            # when run daemon mode, p.pid doesn't return the right pid
+            # so we need get pid from pidfile
+            pidfile = self.cf["pidfile"]
+            if not os.path.isfile(pidfile):
+                raise Exception("cannot start %s" % (cmd))
+            with open(pidfile, "r") as fp:
+                self.pid = int(fp.read())
+            if not utils.check_pid(self.pid):
+                raise Exception("cannot start %s" % (cmd))
+        print("poll : %s, pid1: %s, pid2: %s\n" % (p.poll(), p.pid, self.pid))
+        return p
+
+    def _stop_srv(self):
+        if self.cf['daemonize'].lower() in ("no", "off", "false"):
+            if self.popen.poll() is not None:
+                return
+            self.popen.terminate()
+            self.popen.wait()
+        else:
+            os.kill(self.pid, signal.SIGTERM)
+            # wait util process exit
+            while True:
+                if utils.check_pid(self.pid) is False:
+                    break
 
     def stop(self):
         self.admin_cli.close()
         self.fp.close()
         if self.popen:
-            stop_srv(self.popen)
+            self._stop_srv()
             self.popen = None
 
     def get_stderr(self):
@@ -159,7 +197,7 @@ class DNSServer(object):
     def admin_cmd(self, cmd):
         return self.admin_cli.exec_cmd(cmd)
 
-    def dns_query(self, name, ty, use_tcp=False):
+    def dns_query(self, name, ty, use_tcp=True):
         dns_hosts = self.cf["bind"]
         dns_port = self.cf["port"]
         if len(dns_hosts) > 0:
@@ -176,7 +214,7 @@ class DNSServer(object):
         return self.popen.poll() is not None
 
     def mongo_clear(self):
-        self.zm.flushall()
+        self.zm.del_all_zones()
 
     def write_zone_to_mongo(self, zone_ss):
         self.zm.str_to_mongo(zone_ss)

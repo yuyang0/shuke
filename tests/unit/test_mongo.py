@@ -19,7 +19,7 @@ overrides = {
     "admin_port": utils.find_available_port(),
     "port": utils.find_available_port(),
 }
-valgrind = True
+valgrind = False
 
 zone_init_str  = """
 $origin example.com.
@@ -149,4 +149,44 @@ www1 4800 IN A 133.2.3.4
     assert cmp_rrset(rrset_ss, " 86400 IN SOA dns1.333.com. hostmaster.333.com. 2001062501 21600 3600 604800 86400\n")
     rrset_ss = dns_srv.admin_cmd("zone get_rrset www1.333.com A")
     # print(rrset_ss)
+    assert cmp_rrset(rrset_ss, " 4800 IN A 133.2.3.4\n 4800 IN A 134.4.5.6\n")
+
+
+def test_mongo_auto_reload(dns_srv):
+    zone_str = """
+$origin 555.com.
+$ttl 86400
+@	SOA	dns1.555.com.	hostmaster.555.com. (
+		2001062501 ; serial
+		2          ; refresh after 2 seconds
+		3600       ; retry after 1 hour
+		604800     ; expire after 1 week
+		86400 )    ; minimum TTL of 1 day
+    """
+    dns_srv.write_zone_to_mongo(zone_str)
+    print(dns_srv.admin_cmd("zone reload 555.com."))
+    time.sleep(5)
+    rrset_ss = dns_srv.admin_cmd("zone get_rrset 555.com SOA")
+    # print(rrset_ss)
+    assert cmp_rrset(rrset_ss, " 86400 IN SOA dns1.555.com. hostmaster.555.com. 2001062501 2 3600 604800 86400\n")
+
+    zone_str = """
+$origin 555.com.
+$ttl 86400
+@	SOA	dns1.555.com.	hostmaster.555.com. (
+		2001062502 ; serial
+		2      ; refresh after 6 hours
+		3600       ; retry after 1 hour
+		604800     ; expire after 1 week
+		86400 )    ; minimum TTL of 1 day
+www1 4800 IN A 133.2.3.4
+     4800 IN A 134.4.5.6
+    """
+    dns_srv.write_zone_to_mongo(zone_str)
+    time.sleep(5)
+    rrset_ss = dns_srv.admin_cmd("zone get_rrset 555.com SOA")
+    # print(rrset_ss)
+    assert cmp_rrset(rrset_ss, " 86400 IN SOA dns1.555.com. hostmaster.555.com. 2001062502 2 3600 604800 86400\n")
+
+    rrset_ss = dns_srv.admin_cmd("zone get_rrset www1.555.com A")
     assert cmp_rrset(rrset_ss, " 4800 IN A 133.2.3.4\n 4800 IN A 134.4.5.6\n")

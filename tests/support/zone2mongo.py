@@ -219,6 +219,7 @@ class ZoneMongo(object):
     def __init__(self, host, port, dbname="zone"):
         self.r = MongoClient(host=host, port=port)
         self.dbname = dbname
+        self.db = self.r[dbname]
 
     def __getattr__(self, name):
         try:
@@ -228,10 +229,13 @@ class ZoneMongo(object):
 
     def file_to_mongo(self, fname):
         dot_origin, rr_list = parse_zone_file(fname)
+        # first delete the already exist zone
+        self.del_zone(dot_origin.strip("."))
         self.write_to_mongo(dot_origin, rr_list)
 
     def str_to_mongo(self, ss):
         dot_origin, rr_list = parse_zone_str(ss)
+        self.del_zone(dot_origin.strip("."))
         self.write_to_mongo(dot_origin, rr_list)
 
     def write_to_mongo(self, dot_origin, rr_list):
@@ -240,8 +244,14 @@ class ZoneMongo(object):
         col.insert_many(rr_list)
 
     def del_zone(self, dot_origin):
+        dot_origin = dot_origin.strip(".")
         db = self.r[self.dbname]
-        db.remove_collection(dot_origin)
+        db.drop_collection(dot_origin)
+
+    def del_all_zones(self):
+        db = self.r[self.dbname]
+        for name in db.collection_names():
+            db.drop_collection(name)
 
     def debug_zone_file(self, fname):
         dot_origin, rr_list = parse_zone_file(fname)
