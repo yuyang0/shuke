@@ -341,6 +341,8 @@ static void sigShutdownHandler(int sig) {
     LOG_WARN(USER1, msg);
     sk.force_quit = true;
     aeStop(sk.el);
+    if (sk.daemonize)
+        unlink(sk.pidfile);
 }
 
 void setupSignalHandlers(void) {
