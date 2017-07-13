@@ -52,12 +52,6 @@
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
-
-/* ethernet addresses of ports */
-struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
-
-xmm_t val_eth[RTE_MAX_ETHPORTS];
-
 struct lcore_params {
     uint8_t port_id;
     uint8_t queue_id;
@@ -920,14 +914,9 @@ initDpdkModule() {
             rte_exit(EXIT_FAILURE, "port %d doesn't support cksum offload\n", portid);
         }
 
-        rte_eth_macaddr_get(portid, &ports_eth_addr[portid]);
-        ether_format_addr(sk.kni_conf[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &ports_eth_addr[portid]);
+        rte_eth_macaddr_get(portid, &sk.kni_conf[portid]->eth_addr);
+        ether_format_addr(sk.kni_conf[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &sk.kni_conf[portid]->eth_addr);
         LOG_INFO(DPDK, "port %d mac address: %s.", portid, sk.kni_conf[portid]->eth_addr_s);
-        /*
-         * prepare src MACs for each port.
-         */
-        ether_addr_copy(&ports_eth_addr[portid],
-                        (struct ether_addr *)(val_eth + portid) + 1);
 
         /* init memory */
         ret = init_mem(NB_MBUF);

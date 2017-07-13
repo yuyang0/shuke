@@ -138,6 +138,9 @@ typedef struct lcore_conf {
 } __rte_cache_aligned lcore_conf_t;
 
 typedef struct port_kni_conf {
+    // ethernet address for this port
+    struct ether_addr eth_addr;
+    // ethernet address(string format)
     char eth_addr_s[ETHER_ADDR_FMT_SIZE];
 
     char name[RTE_KNI_NAMESIZE];
@@ -149,10 +152,6 @@ typedef struct port_kni_conf {
 } __rte_cache_aligned port_kni_conf_t;
 
 extern struct rte_eth_conf default_port_conf;
-/* ethernet addresses of ports */
-extern struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
-
-extern xmm_t val_eth[RTE_MAX_ETHPORTS];
 
 void initDpdkEal();
 int initDpdkModule(void);
