@@ -172,6 +172,7 @@ typedef struct dnsQuestion_s {
     uint16_t qType;
     uint16_t qClass;
 
+    size_t nameLen;
     char *humanName;
 } dnsQuestion_t;
 

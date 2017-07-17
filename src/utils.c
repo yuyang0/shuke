@@ -194,7 +194,7 @@ char *toAbsPath(char *p, char *rootp) {
 }
 
 /*!
- * get length of the domain in <len label> format
+ * get length of the domain in <len label> format(excluding the terminating null byte)
  * @param domain : the domain name in <len label> format.
  * @return the length of the domain
  */

@@ -150,10 +150,11 @@ int dumpDNSHeader(char *buf, size_t size, uint16_t xid, uint16_t flag,
 
 int parseDnsQuestion(char *buf, size_t size, char **name, uint16_t *qType, uint16_t *qClass) {
     char *p = buf;
-    if (checkLenLabel(buf, size) == PROTO_ERR) {
+    int err;
+    if ((err = checkLenLabel(buf, size)) == PROTO_ERR) {
         return PROTO_ERR;
     }
-    size_t nameLen = strlen(buf) + 1;
+    size_t nameLen = (size_t)err;
     if (size < nameLen+4) {
         return PROTO_ERR;
     }
@@ -234,7 +235,7 @@ int dumpDnsRRInfo(char *buf, size_t sz, char *name, uint16_t type,
  *
  * @param name : the name <len label format>
  * @param max : the max size of name(include terminate null), mainly used to detect the name which doesn't endswith 0.
- * @return
+ * @return -1 if the format is incorrect, otherwise return the length of the len label string.
  */
 int checkLenLabel(char *name, size_t max) {
     static unsigned char DnsValidCharTable[256] = {
@@ -268,7 +269,7 @@ int checkLenLabel(char *name, size_t max) {
             }
         }
     }
-    return PROTO_OK;
+    return (int)(name-start);
 }
 
 #if defined(CDNS_TEST)

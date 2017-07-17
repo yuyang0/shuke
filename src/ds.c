@@ -520,6 +520,7 @@ zone *zoneCreate(char *ss, int socket_id) {
         socket_free(socket_id, zn);
         return NULL;
     }
+    zn->originLen = strlen(zn->origin);
     zn->dotOrigin = socket_strdup(socket_id, dotOrigin);
     zn->socket_id = socket_id;
     zn->d = dictCreate(&dnsDictType, NULL, socket_id);
@@ -554,33 +555,51 @@ void zoneDestroy(zone *zn) {
     socket_free(zn->socket_id, zn);
 }
 
-dnsDictValue *zoneFetchValue(zone *z, void *key) {
-    // support absolute domain name.
+/*!
+ * fetch dns dict value from zone
+ * @param z
+ * @param key: must be absolute domain name in len label format.
+ * @param keyLen: the length of the key
+ * @return
+ */
+dnsDictValue *zoneFetchValueAbs(zone *z, void *key, size_t keyLen) {
     // TODO: avoid check if the domain belongs to zone
-    if (endscasewith(key, z->origin)) {
-        char buf[255] = {0};
-        size_t remain = strlen(key) - strlen(z->origin);
-        if (remain == 0) strcpy(buf, "@");
-        else memcpy(buf, key, remain);
-        return dictFetchValue(z->d, buf);
-    }
+    size_t originLen = z->originLen;
+    size_t remain = keyLen - originLen;
+    // the key ends with origin(absolute domain name).
+    assert (keyLen >= originLen && strcasecmp(key+remain, z->origin) == 0);
+
+    char buf[255] = {0};
+    if (remain == 0) strcpy(buf, "@");
+    else memcpy(buf, key, remain);
+    return dictFetchValue(z->d, buf);
+}
+
+/*
+ * same with zoneFetchValueAbs except key should be a relative domain name in len label format
+ */
+dnsDictValue *zoneFetchValueRelative(zone *z, void *key) {
     return dictFetchValue(z->d, key);
 }
 
 // fetch the RRSet from zone, support relative and absolute name
 RRSet *zoneFetchTypeVal(zone *z, void *key, uint16_t type) {
     dnsDictValue *dv = NULL;
+    size_t keyLen = strlen(key);
+    size_t originLen = z->originLen;
+    size_t remain = keyLen - originLen;
+
     // TODO: avoid check if the domain belongs to zone
-    if (endscasewith(key, z->origin) == true) {
-        char label[MAX_LABEL_LEN+1] = "@";
-        size_t remain = strlen(key) - strlen(z->origin);
+    // the key ends with origin(absolute domain name).
+    if (keyLen >= originLen && strcasecmp(key+remain, z->origin) == 0) {
+        char label[MAX_DOMAIN_LEN+2] = "@";
         if (remain > 0) {
             memcpy(label, key, remain);
             label[remain] = 0;
         }
-        dv = zoneFetchValue(z, label);
+        dv = dictFetchValue(z->d, label);
     } else {
-        dv = zoneFetchValue(z, key);
+        dv = dictFetchValue(z->d, key);
     }
     return dv? dnsDictValueGet(dv, type): NULL;
 }

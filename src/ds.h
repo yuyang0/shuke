@@ -132,6 +132,7 @@ typedef struct _zone {
     int socket_id;
     char *origin;          // in <len label> format
     char *dotOrigin;       // in <label dot> format
+    size_t originLen;
     uint32_t default_ttl;  // $TTL directive
     // the key is the relative name(len label),
     // if the key is origin, then use @
@@ -197,7 +198,8 @@ zone *zoneCreate(char *origin, int socket_id);
 zone *zoneCopy(zone *z, int socket_id);
 void zoneDestroy(zone *zn);
 void zoneUpdateRRSetOffsets(zone *z);
-dnsDictValue *zoneFetchValue(zone *z, void *key);
+dnsDictValue *zoneFetchValueAbs(zone *z, void *key, size_t keyLen);
+dnsDictValue *zoneFetchValueRelative(zone *z, void *key);
 RRSet *zoneFetchTypeVal(zone *z, void *key, uint16_t type);
 int zoneReplace(zone *z, void *key, dnsDictValue *val);
 int zoneReplaceTypeVal(zone *z, char *key, RRSet *rs);

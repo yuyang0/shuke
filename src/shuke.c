@@ -660,7 +660,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         return ctx->cur;
     }
 
-    dv = zoneFetchValue(z, ctx->name);
+    dv = zoneFetchValueAbs(z, ctx->name, ctx->nameLen);
     if (dv == NULL) {
         dumpDnsNameErr(ctx);
         goto end;
