@@ -39,14 +39,14 @@
  * RTE_MAX is used to ensure that NB_MBUF never goes below a minimum
  * value of 8192
  */
-/* #define NB_MBUF RTE_MAX(                                  \ */
-/*         (nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +	\ */
-/*          nb_ports*nb_lcores*MAX_PKT_BURST +               \ */
-/*          nb_ports*n_tx_queue*RTE_TEST_TX_DESC_DEFAULT +		\ */
-/*          nb_lcores*MEMPOOL_CACHE_SIZE),                   \ */
-/*         (unsigned)8192) */
+#define NB_MBUF RTE_MAX(                                  \
+        (nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +	\
+         nb_ports*nb_lcores*MAX_PKT_BURST +               \
+         nb_ports*n_tx_queue*RTE_TEST_TX_DESC_DEFAULT +		\
+         nb_lcores*MEMPOOL_CACHE_SIZE),                   \
+        (unsigned)8192)
 
-#define NB_MBUF 8192
+/* #define NB_MBUF 8192 */
 
 /* Static global variables used within this file. */
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;

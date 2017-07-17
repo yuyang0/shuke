@@ -82,9 +82,6 @@
 #define MAX_TX_QUEUE_PER_PORT RTE_MAX_ETHPORTS
 #define MAX_RX_QUEUE_PER_PORT 128
 
-#define NUMA_TIMER_TICK_RATE sk.hz  // one second.
-
-
 #define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
 
 #define MAX_PKT_BURST     32
