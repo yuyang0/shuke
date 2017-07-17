@@ -180,7 +180,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     zoneReloadContext *ctx = privdata;
     char col_name[MAX_DOMAIN_LEN];
 
-    assert(ctx->old_zn != NULL);
+    assert(ctx->zone_exist);
 
     if (reply == NULL) goto error;
     if (reply->numberReturned == 0) {
@@ -203,10 +203,9 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
 
     if (ctx->sn >= sn) {
         // update zone's ts field
-        zone *z = ctx->old_zn;
-
         LOG_DEBUG(MONGO, "sn is not change.");
-        refreshZone(z);
+        dot2lenlabel(ctx->dotOrigin, origin);
+        masterRefreshZone(origin);
 
         zoneReloadContextDestroy(ctx);
         goto ok;
@@ -409,7 +408,7 @@ int mongoAsyncReloadZone(zoneReloadContext *t) {
     LOG_INFO(MONGO, "asynchronous reload zone %s.", t->dotOrigin);
 
     LOG_DEBUG(MONGO, "async sn: %d.", t->sn);
-    if (t->old_zn != NULL) {
+    if (t->zone_exist) {
         bson_t *q = BCON_NEW("type", BCON_UTF8("SOA"));
         errcode = mongoAsyncFindOne(sk.mongo_ctx, zoneSOAGetCallback, t,
                                     sk.mongo_dbname, col_name, q, NULL);

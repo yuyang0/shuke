@@ -56,7 +56,13 @@ zone *getOldestZone() {
     return NULL;
 }
 
-void refreshZone(zone* z) {
+/*!
+ * adjust the position of zone in rbtree
+ * @param origin: must be absolute domain name in len label format.
+ */
+void masterRefreshZone(char *origin) {
+    zone *z = zoneDictFetchVal(sk.zd, origin);
+    if (z == NULL) return;
     assert(RB_EMPTY_NODE(&z->node));
     z->refresh_ts = sk.unixtime + z->refresh;
     rbtreeInsertZone(z);
@@ -157,6 +163,9 @@ static zoneReloadContext* __shiftZoneReloadContext() {
  */
 zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
     uint32_t sn = 0;
+    int32_t refresh=0, expiry=0;
+    long refresh_ts = 0;
+    bool zone_exist = false;
     if (old_zn == NULL) {
         char origin[MAX_DOMAIN_LEN+2];
         dot2lenlabel(dotOrigin, origin);
@@ -165,14 +174,21 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
     if (old_zn != NULL) {
         sn = old_zn->sn;
         dotOrigin = old_zn->dotOrigin;
+        refresh = old_zn->refresh;
+        expiry = old_zn->expiry;
+        refresh_ts = old_zn->refresh_ts;
+        zone_exist = true;
         // the zone is reloading should not in rbtree.
         rbtreeDeleteZone(old_zn);
     }
     zoneReloadContext *t = zcalloc(sizeof(*t));
     t->dotOrigin = zstrdup(dotOrigin);
     t->sn = sn;
+    t->refresh = refresh;
+    t->expiry = expiry;
+    t->refresh_ts = refresh_ts;
+    t->zone_exist = zone_exist;
     t->status = TASK_PENDING;
-    t->old_zn = old_zn;
     return t;
 }
 
@@ -197,13 +213,13 @@ void zoneReloadContextDestroy(zoneReloadContext *t) {
  */
 int asyncRereloadZone(zoneReloadContext *ctx) {
     // this is a good place to check if the zone is expired.
-    if (ctx->old_zn) {
-        zone *z = ctx->old_zn;
-        long last_reload_ts = z->refresh_ts - z->refresh;
+    if (ctx->zone_exist) {
+        char origin[MAX_DOMAIN_LEN+2];
+        long last_reload_ts = ctx->refresh_ts - ctx->refresh;
+        dot2lenlabel(ctx->dotOrigin, origin);
         // the zone is expired, remove it.
-        if (last_reload_ts+z->expiry < sk.unixtime) {
-            deleteZoneAllNumaNodes(z->origin);
-            ctx->old_zn = NULL;
+        if (last_reload_ts+ctx->expiry < sk.unixtime) {
+            deleteZoneAllNumaNodes(origin);
             return ERR_CODE;
         }
     }

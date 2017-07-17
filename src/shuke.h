@@ -114,14 +114,14 @@ typedef struct _zoneReloadContext {
 
     char *dotOrigin;  // origin in <label dot> format, must be an absolute domain name
     uint32_t sn;      // serial number in current cache.
-    // last reload timestamp, if it is -1 then dotOrigin is a new zone.
-    long ts;
+    int32_t refresh;
+    int32_t expiry;
+    // if refresh_ts is -1, then this a new zone.
+    long refresh_ts;
 
     RRParser *psr;
-    size_t nr_names;  // number of pending names.
-    // never free or decrement reference count of old_zn, it will handle by zoneDict automatically.
-    zone *old_zn;
     zone *new_zn;
+    bool zone_exist;
 
     struct _zoneReloadContext *next;
 }zoneReloadContext;
@@ -318,7 +318,7 @@ void replaceZoneOtherNuma(zone *z);
 int replaceZoneAllNumaNodes(zone *z);
 int addZoneAllNumaNodes(zone *z);
 int deleteZoneAllNumaNodes(char *origin);
-void refreshZone(zone* z);
+void masterRefreshZone(char *origin);
 
 void config_log();
 
