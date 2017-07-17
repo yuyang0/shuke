@@ -128,20 +128,21 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         goto error;
     }
 
-    if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, SOCKET_ID_ANY);
-    zone *z = ctx->new_zn;
-
     LOG_DEBUG(MONGO, "RRSET cb %s %d", ctx->dotOrigin, reply->numberReturned);
 
-    if (ctx->psr == NULL) ctx->psr = RRParserCreate("@", 0, ctx->dotOrigin);
-    for (int i = 0; i < reply->numberReturned; ++i) {
-        bson_t *b = reply->docs[i];
-        name = bson_extract_string(b, "name");
-        ttl = (uint32_t)bson_extract_int32(b, "ttl");
-        type = bson_extract_string(b, "type");
-        rdata = bson_extract_string(b, "rdata");
-        if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, z) == DS_ERR) {
-            goto error;
+    if (reply->numberReturned > 0) {
+        if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, SOCKET_ID_ANY);
+        if (ctx->psr == NULL) ctx->psr = RRParserCreate("@", 0, ctx->dotOrigin);
+
+        for (int i = 0; i < reply->numberReturned; ++i) {
+            bson_t *b = reply->docs[i];
+            name = bson_extract_string(b, "name");
+            ttl = (uint32_t)bson_extract_int32(b, "ttl");
+            type = bson_extract_string(b, "type");
+            rdata = bson_extract_string(b, "rdata");
+            if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, ctx->new_zn) == DS_ERR) {
+                goto error;
+            }
         }
     }
     goto ok;
@@ -155,6 +156,9 @@ ok:
             if (asyncRereloadZone(ctx) == ERR_CODE) {
                 zoneReloadContextDestroy(ctx);
             }
+        } else if (ctx->new_zn == NULL) {
+            LOG_WARN(MONGO, "zone %s is not in mongodb.", ctx->dotOrigin);
+            zoneReloadContextDestroy(ctx);
         } else if (ctx->new_zn->soa == NULL) {
             LOG_ERROR(MONGO, "zone %s must contain a SOA record.", ctx->dotOrigin);
             if (asyncRereloadZone(ctx) == ERR_CODE) {
@@ -210,9 +214,6 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         zoneReloadContextDestroy(ctx);
         goto ok;
     } else {
-        if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, SOCKET_ID_ANY);
-        if (ctx->psr == NULL) ctx->psr = RRParserCreate("@", 0, ctx->dotOrigin);
-
         // remove last dot
         prepareColName(ctx->dotOrigin, col_name);
 
