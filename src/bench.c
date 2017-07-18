@@ -2,7 +2,6 @@
 // Created by yangyu on 17-3-13.
 //
 #include "fmacros.h"
-#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

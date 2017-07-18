@@ -6,11 +6,10 @@
  *       Compiler:  gcc
  *
  *         Author:  Yu Yang
- *    			Email:  yy2012cn@NOSPAM.gmail.com
+ *      	Email:  yyangplus@NOSPAM.gmail.com
  * =======================================================================
  */
 #include "fmacros.h"
-#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
