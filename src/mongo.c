@@ -252,7 +252,7 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
         // only reload the zone doesn't exist in zone dict
         dot2lenlabel(dotOrigin, origin);
         if (!zoneDictExistZone(sk.zd, origin)) {
-            asyncReloadZoneRaw(dotOrigin, NULL);
+            asyncReloadZoneRaw(dotOrigin);
         }
     }
     sk.last_all_reload_ts = sk.unixtime;

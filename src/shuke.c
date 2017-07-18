@@ -61,7 +61,10 @@ zone *getOldestZone() {
  * @param origin: must be absolute domain name in len label format.
  */
 void masterRefreshZone(char *origin) {
+    zoneDictRLock(sk.zd);
     zone *z = zoneDictFetchVal(sk.zd, origin);
+    zoneDictRUnlock(sk.zd);
+
     if (z == NULL) return;
     assert(RB_EMPTY_NODE(&z->node));
     z->refresh_ts = sk.unixtime + z->refresh;
@@ -158,19 +161,21 @@ static zoneReloadContext* __shiftZoneReloadContext() {
  * create a zone reload Context
  *
  * @param dotOrigin : the origin in <label dot> format
- * @param old_zn : the old zone needs to reload.
  * @return obj if everything is ok otherwise return NULL
  */
-zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
+zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
+    zone *old_zn;
     uint32_t sn = 0;
     int32_t refresh=0, expiry=0;
     long refresh_ts = 0;
     bool zone_exist = false;
-    if (old_zn == NULL) {
-        char origin[MAX_DOMAIN_LEN+2];
-        dot2lenlabel(dotOrigin, origin);
-        old_zn = zoneDictFetchValNoRef(sk.zd, origin);
-    }
+
+    char origin[MAX_DOMAIN_LEN+2];
+    dot2lenlabel(dotOrigin, origin);
+
+    zoneDictRLock(sk.zd);
+    old_zn = zoneDictFetchVal(sk.zd, origin);
+
     if (old_zn != NULL) {
         sn = old_zn->sn;
         dotOrigin = old_zn->dotOrigin;
@@ -181,6 +186,8 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn) {
         // the zone is reloading should not in rbtree.
         rbtreeDeleteZone(old_zn);
     }
+    zoneDictRUnlock(sk.zd);
+
     zoneReloadContext *t = zcalloc(sizeof(*t));
     t->dotOrigin = zstrdup(dotOrigin);
     t->sn = sn;
@@ -228,9 +235,9 @@ int asyncRereloadZone(zoneReloadContext *ctx) {
     return OK_CODE;
 }
 
-int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn) {
+int asyncReloadZoneRaw(char *dotOrigin) {
     if (sk.checkAsyncContext() != OK_CODE) return ERR_CODE;
-    zoneReloadContext *ctx = zoneReloadContextCreate(dotOrigin, old_zn);
+    zoneReloadContext *ctx = zoneReloadContextCreate(dotOrigin);
     if (ctx == NULL) return ERR_CODE;
     __pushZoneReloadContext(ctx);
     return OK_CODE;
@@ -516,11 +523,9 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
                     size_t nameOffset = offset + strlen(name) - strlen(ns_z->origin);
                     errcode = RRSetCompressPack(ctx, ns_z->ns, nameOffset, cps, &cps_sz, CPS_INFO_SIZE, ari, &ar_sz, AR_INFO_SIZE);
                     if (errcode == DS_ERR) {
-                        zoneDecRef(ns_z);
                         return ERR_CODE;
                     }
                 }
-                zoneDecRef(ns_z);
             }
         }
     } else {
@@ -560,7 +565,6 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             hdr.nArRR += ar_a->num;
             errcode = RRSetCompressPack(ctx, ar_a, offset, NULL, NULL, 0, NULL, NULL, 0);
             if (errcode == DS_ERR) {
-                zoneDecRef(ar_z);
                 return ERR_CODE;
             }
         }
@@ -569,11 +573,9 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             hdr.nArRR += ar_aaaa->num;
             errcode = RRSetCompressPack(ctx, ar_aaaa, offset, NULL, NULL, 0, NULL, NULL, 0);
             if (errcode == DS_ERR) {
-                zoneDecRef(ar_z);
                 return ERR_CODE;
             }
         }
-        zoneDecRef(ar_z);
     }
     // update the header. don't update `cur` in ctx
     cur = snpack(ctx->resp, 0, ctx->totallen, "h>hhhhh", hdr.xid, hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
@@ -667,13 +669,15 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         // ignore SRV proto
         name += (*name +1);
     }
+    zoneDictRLock(node->zd);
     z = zoneDictGetZone(node->zd, name);
 
     if (z == NULL) {
         // zone is not managed by this server
         LOG_DEBUG(USER1, "zone is NULL, name: %s", ctx->name);
         dumpDnsRefusedErr(ctx);
-        return ctx->cur;
+        //return ctx->cur;
+        goto end;
     }
 
     dv = zoneFetchValueAbs(z, ctx->name, ctx->nameLen);
@@ -685,7 +689,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         goto end;
     }
 end:
-    if (z != NULL) zoneDecRef(z);
+    zoneDictRUnlock(node->zd);
     return ctx->cur;
 }
 
@@ -752,7 +756,7 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         // reload the oldest zones
         while((z = getOldestZone()) != NULL) {
             if (z->refresh_ts > sk.unixtime) break;
-            asyncReloadZoneRaw(NULL, z);
+            asyncReloadZoneRaw(z->dotOrigin);
         }
         // check if need to do all reload
         if (sk.unixtime - sk.last_all_reload_ts > sk.all_reload_interval) {

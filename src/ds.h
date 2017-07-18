@@ -128,7 +128,6 @@ typedef struct _dnsDictValue {
 } dnsDictValue;
 
 typedef struct _zone {
-    rte_atomic32_t refcnt;
     int socket_id;
     char *origin;          // in <len label> format
     char *dotOrigin;       // in <label dot> format
@@ -155,11 +154,6 @@ typedef struct _zone {
     long refresh_ts;
     struct rb_node node;
 } zone;
-
-#define zoneIncRef(z) rte_atomic32_inc(&(z->refcnt))
-#define zoneDecRef(z) do {\
-if (rte_atomic32_dec_and_test(&(z->refcnt))) zoneDestroy(z); \
-} while(0)
 
 typedef struct _zoneDict {
     int socket_id;
@@ -209,9 +203,9 @@ zoneDict *zoneDictCreate(int socket_id);
 zoneDict *zoneDictCopy(zoneDict *zd, int socket_id);
 void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
-zone *zoneDictFetchValNoRef(zoneDict *zd, char *key);
+
 zone *zoneDictGetZone(zoneDict *zd, char *name);
-zone *zoneDictGetZoneNoRef(zoneDict *zd, char *name);
+
 int zoneDictReplace(zoneDict *zd, zone *z);
 int zoneDictAdd(zoneDict *zd, zone *z);
 

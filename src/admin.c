@@ -666,13 +666,15 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             strcat(dotOrigin, ".");
         }
         dot2lenlabel(dotOrigin, origin);
+        zoneDictRLock(sk.zd);
         z = zoneDictFetchVal(sk.zd, origin);
         if (z == NULL) {
             s = sdsnewprintf("zone %s not found", dotOrigin);
+            zoneDictRUnlock(sk.zd);
             goto end;
         }
         s = zoneToStr(z);
-        zoneDecRef(z);
+        zoneDictRUnlock(sk.zd);
     } else if (strcasecmp(argv[1], "GET_RRSET") == 0) {
         if (argc != 4) {
             s = sdsnewprintf("ZONE GET_RRSET needs 2 argument, but gives %d.", argc-2);
@@ -688,15 +690,17 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             strcat(dotOrigin, ".");
         }
         dot2lenlabel(dotOrigin, origin);
+        zoneDictRLock(sk.zd);
         z = zoneDictGetZone(sk.zd, origin);
         if (z == NULL) {
+            zoneDictRUnlock(sk.zd);
             s = sdsnewprintf("zone %s not found.", argv[2]);
             goto end;
         }
         RRSet *rs = zoneFetchTypeVal(z, origin, (uint16_t)type);
         if (rs == NULL) s = sdsnewprintf("RRSet <%s %s> not found.", argv[2], argv[3]);
         else s = RRSetToStr(rs);
-        zoneDecRef(z);
+        zoneDictRUnlock(sk.zd);
     } else if (strcasecmp(argv[1], "GETALL") == 0) {
         if (argc != 2) {
             s = sdsnewprintf("ZONE GETALL needs no arguments, but gives %d.", argc-2);
@@ -711,7 +715,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         for (int i = 2; i < argc; ++i) {
             strncpy(dotOrigin, argv[i], MAX_DOMAIN_LEN);
             if (!isAbsDotDomain(dotOrigin)) strcat(dotOrigin, ".");
-            if (asyncReloadZoneRaw(dotOrigin, NULL) != OK_CODE) {
+            if (asyncReloadZoneRaw(dotOrigin) != OK_CODE) {
                 s = sdsnew("Error");
             }
         }

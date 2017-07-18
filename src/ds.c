@@ -524,7 +524,6 @@ zone *zoneCreate(char *ss, int socket_id) {
     zn->dotOrigin = socket_strdup(socket_id, dotOrigin);
     zn->socket_id = socket_id;
     zn->d = dictCreate(&dnsDictType, NULL, socket_id);
-    rte_atomic32_set(&(zn->refcnt), 1);
     rb_init_node(&zn->node);
     LOG_DEBUG(USER1, "create zone (dotOrigin=>%s, sid=> %d)", zn->dotOrigin, socket_id);
     return zn;
@@ -724,26 +723,14 @@ void zoneDictDestroy(zoneDict *zd) {
     socket_free(zd->socket_id, zd);
 }
 
-// fetch zone from zone dict(doesn't increment reference count).
-zone *zoneDictFetchValNoRef(zoneDict *zd, char *key) {
-    zoneDictRLock(zd);
-    zone *z = dictFetchValue(zd->d, key);
-    zoneDictRUnlock(zd);
-    return z;
-}
 /*
  * fetch zone from zone dict
  *
- * Notice: since this zone instance can be deleted in other thread,
- *   to avoid this data race condition, this function will increment the
- *   reference count of zone instance, after finished using this instance,
- *   a reference count decrement is needed.
+ * Notice: since this function didn't acquire rlock,
+ *         so the rlock must be acquired in caller
  */
 zone *zoneDictFetchVal(zoneDict *zd, char *key) {
-    zoneDictRLock(zd);
     zone *z = dictFetchValue(zd->d, key);
-    if (z != NULL) zoneIncRef(z);
-    zoneDictRUnlock(zd);
     return z;
 }
 
@@ -751,35 +738,26 @@ zone *zoneDictFetchVal(zoneDict *zd, char *key) {
  * same as zoneDictFetchVal, but instead of fetch the zone whose origin is equal to name,
  * this function fetch the zone name belong to, so it will iterate parent domain.
  *
+ * Notice: since this function didn't acquire rlock,
+ *         so the rlock must be acquired in caller.
+ *
  * @param zd : zoneDict instance
  * @param name : nane in len label format
- * @param inc_ref : increment the refcnt of the returned zone
  * @return
  */
-static zone *_zoneDictGetZone(zoneDict *zd, char *name, bool inc_ref) {
+zone *zoneDictGetZone(zoneDict *zd, char *name) {
     zone *z = NULL;
     int nLabel = 0;
     char *start = name;
 
     nLabel = getNumLabels(start);
     if (nLabel < 2) return NULL;
-    zoneDictRLock(zd);
     for (int i = nLabel; i >= 2; --i) {
         z = dictFetchValue(zd->d, start);
         if (z != NULL) break;
         start += (*start + 1);
     }
-    if (inc_ref && z != NULL) zoneIncRef(z);
-    zoneDictRUnlock(zd);
     return z;
-}
-
-zone *zoneDictGetZone(zoneDict *zd, char *name) {
-    return _zoneDictGetZone(zd, name, true);
-}
-
-zone *zoneDictGetZoneNoRef(zoneDict *zd, char *name) {
-    return _zoneDictGetZone(zd, name, false);
 }
 
 /* Add a zone, discarding the old if the key already exists.
@@ -900,7 +878,7 @@ static void _zoneDictValDestructor(void *privdata, void *val)
 {
     DICT_NOTUSED(privdata);
     zone *z = val;
-    zoneDecRef(z);
+    zoneDestroy(z);
 }
 
 dictType zoneDictType = {

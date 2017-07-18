@@ -277,11 +277,11 @@ int snpack(char *buf, int offset, size_t size, char const *fmt, ...);
 /*----------------------------------------------
  *     zoneReloadContext
  *---------------------------------------------*/
-zoneReloadContext *zoneReloadContextCreate(char *dotOrigin, zone *old_zn);
+zoneReloadContext *zoneReloadContextCreate(char *dotOrigin);
 void zoneReloadContextReset(zoneReloadContext *t);
 void zoneReloadContextDestroy(zoneReloadContext *t);
 
-int asyncReloadZoneRaw(char *dotOrigin, zone *old_zn);
+int asyncReloadZoneRaw(char *dotOrigin);
 int asyncRereloadZone(zoneReloadContext *ctx);
 int triggerReloadAllZone();
 /*----------------------------------------------
