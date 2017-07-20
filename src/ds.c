@@ -691,7 +691,7 @@ void zoneUpdateRRSetOffsets(zone *z) {
 /*----------------------------------------------
  *     zone dict definition
  *---------------------------------------------*/
-int rcu_ht_match(struct cds_lfht_node *ht_node, const void *_key)
+int zoneDictHtMatch(struct cds_lfht_node *ht_node, const void *_key)
 {
     zone *z = caa_container_of(ht_node, struct _zone, htnode);
     const char *key = _key;
@@ -709,7 +709,7 @@ void *rcu_ht_fetch_value(struct cds_lfht *ht, void *key) {
     struct cds_lfht_iter iter;	/* For iteration on hash table */
     struct cds_lfht_node *ht_node;
     unsigned int hash = zoneDictHash(key, strlen(key));
-    cds_lfht_lookup(ht, hash, rcu_ht_match, key, &iter);
+    cds_lfht_lookup(ht, hash, zoneDictHtMatch, key, &iter);
     ht_node = cds_lfht_iter_get_node(&iter);
     if (!ht_node) {
         return NULL;
@@ -807,7 +807,7 @@ int zoneDictReplace(zoneDict *zd, zone *z) {
     struct cds_lfht_node *ht_node;
     unsigned int hash = zoneDictHash(z->origin, z->originLen);
     zoneDictWLock(zd);
-    ht_node = cds_lfht_add_replace(ht, hash, rcu_ht_match, z->origin,
+    ht_node = cds_lfht_add_replace(ht, hash, zoneDictHtMatch, z->origin,
                                    &z->htnode);
     if (ht_node) {
         old_z = caa_container_of(ht_node, zone, htnode);
@@ -824,7 +824,7 @@ int zoneDictAdd(zoneDict *zd, zone *z) {
     struct cds_lfht_node *htnode;
     unsigned int hash = zoneDictHash(key, strlen(key));
     zoneDictWLock(zd);
-    htnode = cds_lfht_add_unique(zd->ht, hash, rcu_ht_match, z->origin, &z->htnode);
+    htnode = cds_lfht_add_unique(zd->ht, hash, zoneDictHtMatch, z->origin, &z->htnode);
     if (htnode != &z->htnode) {
         err = DICT_ERR;
     }
@@ -841,7 +841,7 @@ int zoneDictDelete(zoneDict *zd, char *origin) {
     unsigned int hash = zoneDictHash(origin, strlen(origin));
 
     zoneDictWLock(zd);
-    cds_lfht_lookup(ht, hash, rcu_ht_match, origin, &iter);
+    cds_lfht_lookup(ht, hash, zoneDictHtMatch, origin, &iter);
     ht_node = cds_lfht_iter_get_node(&iter);
     if (ht_node) {
         ret = cds_lfht_del(ht, ht_node);

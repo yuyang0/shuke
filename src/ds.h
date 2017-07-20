@@ -205,7 +205,7 @@ sds zoneToStr(zone *z);
 /*----------------------------------------------
  *     zone dict declaration
  *---------------------------------------------*/
-int rcu_ht_match(struct cds_lfht_node *ht_node, const void *_key);
+int zoneDictHtMatch(struct cds_lfht_node *ht_node, const void *_key);
 void zoneDictFreeCallback(struct rcu_head *head);
 
 unsigned int zoneDictHash(char *buf, size_t len);

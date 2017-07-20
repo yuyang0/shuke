@@ -88,7 +88,7 @@ int replaceZoneAllNumaNodes(zone *z) {
     struct cds_lfht_node *ht_node;
     unsigned int hash = zoneDictHash(z->origin, z->originLen);
     rcu_read_lock();
-    ht_node = cds_lfht_add_replace(ht, hash, rcu_ht_match, z->origin,
+    ht_node = cds_lfht_add_replace(ht, hash, zoneDictHtMatch, z->origin,
                                    &z->htnode);
     if (ht_node) {
         old_z = caa_container_of(ht_node, zone, htnode);
@@ -130,7 +130,7 @@ int deleteZoneAllNumaNodes(char *origin) {
     unsigned int hash = zoneDictHash(origin, strlen(origin));
 
     zoneDictWLock(zd);
-    cds_lfht_lookup(ht, hash, rcu_ht_match, origin, &iter);
+    cds_lfht_lookup(ht, hash, zoneDictHtMatch, origin, &iter);
     ht_node = cds_lfht_iter_get_node(&iter);
     if (ht_node) {
         ret = cds_lfht_del(ht, ht_node);
