@@ -29,10 +29,11 @@ build/admin.o: src/admin.c src/shuke.h src/defines.h src/version.h src/ae.h \
  3rd/himongo/libbson/src/bson/bson-version.h \
  3rd/himongo/libbson/src/bson/bson-version-functions.h \
  3rd/himongo/libbson/src/bson/bson-writer.h \
- 3rd/himongo/libbson/src/bson/bcon.h src/utils.h src/shukeassert.h
+ 3rd/himongo/libbson/src/bson/bcon.h src/utils.h
 build/ae.o: src/ae.c src/ae.h src/zmalloc.h src/ae_epoll.c
 build/anet.o: src/anet.c src/fmacros.h src/anet.h
 build/conf.o: src/conf.c src/fmacros.h src/defines.h src/str.h src/conf.h
+build/dict.o: src/dict.c src/fmacros.h src/dict.h src/zmalloc.h
 build/dpdk_module.o: src/dpdk_module.c src/dpdk_module.h src/shuke.h \
  src/defines.h src/version.h src/ae.h src/anet.h src/zmalloc.h \
  src/endianconv.h src/list.h src/log.h src/ds.h src/sds.h src/dict.h \
@@ -64,7 +65,7 @@ build/dpdk_module.o: src/dpdk_module.c src/dpdk_module.h src/shuke.h \
  3rd/himongo/libbson/src/bson/bson-version.h \
  3rd/himongo/libbson/src/bson/bson-version-functions.h \
  3rd/himongo/libbson/src/bson/bson-writer.h \
- 3rd/himongo/libbson/src/bson/bcon.h src/utils.h src/shukeassert.h
+ 3rd/himongo/libbson/src/bson/bcon.h src/utils.h
 build/dpdk_kni.o: src/dpdk_kni.c src/shuke.h src/defines.h src/version.h \
  src/ae.h src/anet.h src/zmalloc.h src/endianconv.h src/list.h src/log.h \
  src/ds.h src/sds.h src/dict.h src/rbtree.h src/str.h src/protocol.h \
@@ -96,7 +97,10 @@ build/dpdk_kni.o: src/dpdk_kni.c src/shuke.h src/defines.h src/version.h \
  3rd/himongo/libbson/src/bson/bson-version.h \
  3rd/himongo/libbson/src/bson/bson-version-functions.h \
  3rd/himongo/libbson/src/bson/bson-writer.h \
- 3rd/himongo/libbson/src/bson/bcon.h src/shukeassert.h
+ 3rd/himongo/libbson/src/bson/bcon.h
+build/ds.o: src/ds.c src/endianconv.h src/zmalloc.h src/sds.h src/str.h \
+ src/dict.h src/protocol.h src/log.h src/utils.h src/ds.h src/rbtree.h \
+ src/defines.h
 build/debug.o: src/debug.c src/shuke.h src/defines.h src/version.h src/ae.h \
  src/anet.h src/zmalloc.h src/endianconv.h src/list.h src/log.h src/ds.h \
  src/sds.h src/dict.h src/rbtree.h src/str.h src/protocol.h \
@@ -160,7 +164,7 @@ build/mongo.o: src/mongo.c src/shuke.h src/defines.h src/version.h src/ae.h \
  3rd/himongo/libbson/src/bson/bson-version.h \
  3rd/himongo/libbson/src/bson/bson-version-functions.h \
  3rd/himongo/libbson/src/bson/bson-writer.h \
- 3rd/himongo/libbson/src/bson/bcon.h src/utils.h src/shukeassert.h
+ 3rd/himongo/libbson/src/bson/bcon.h src/utils.h
 build/protocol.o: src/protocol.c src/fmacros.h src/endianconv.h src/zmalloc.h \
  src/protocol.h
 build/rbtree.o: src/rbtree.c src/rbtree.h src/defines.h
@@ -196,7 +200,7 @@ build/shuke.o: src/shuke.c src/dpdk_module.h src/conf.h src/utils.h \
  3rd/himongo/libbson/src/bson/bson-version.h \
  3rd/himongo/libbson/src/bson/bson-version-functions.h \
  3rd/himongo/libbson/src/bson/bson-writer.h \
- 3rd/himongo/libbson/src/bson/bcon.h src/asciilogo.h src/shukeassert.h
+ 3rd/himongo/libbson/src/bson/bcon.h src/asciilogo.h
 build/str.o: src/str.c src/fmacros.h src/str.h
 build/utils.o: src/utils.c src/fmacros.h src/log.h src/utils.h src/zmalloc.h
 build/zone_parser.o: src/zone_parser.c src/fmacros.h src/str.h src/endianconv.h \
@@ -234,4 +238,4 @@ build/tcpserver.o: src/tcpserver.c src/shuke.h src/defines.h src/version.h \
  3rd/himongo/libbson/src/bson/bson-version.h \
  3rd/himongo/libbson/src/bson/bson-version-functions.h \
  3rd/himongo/libbson/src/bson/bson-writer.h \
- 3rd/himongo/libbson/src/bson/bcon.h src/shukeassert.h
+ 3rd/himongo/libbson/src/bson/bcon.h

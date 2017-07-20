@@ -2,6 +2,7 @@
 // Created by yangyu on 17-2-16.
 //
 #include <string.h>
+#include <assert.h>
 #include <arpa/inet.h>
 
 #include "endianconv.h"

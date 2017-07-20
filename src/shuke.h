@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <assert.h>
 
 #include "defines.h"
 #include "version.h"
