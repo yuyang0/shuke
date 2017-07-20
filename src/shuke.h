@@ -153,6 +153,7 @@ struct shuke {
     char *bindaddr[CONFIG_BINDADDR_MAX];
     int bindaddr_count;
     int port;
+    bool only_udp;
     char *pidfile;
     bool daemonize;
     char *query_log_file;

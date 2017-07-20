@@ -766,8 +766,10 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
             sk.asyncReloadZone(ctx);
         }
     }
-    // run tcp dns server cron
-    tcpServerCron(el, id, (void *)sk.tcp_srv);
+    if (! sk.only_udp) {
+        // run tcp dns server cron
+        tcpServerCron(el, id, (void *)sk.tcp_srv);
+    }
     return TIME_INTERVAL;
 }
 
@@ -911,6 +913,7 @@ static void initConfigFromFile(int argc, char **argv) {
     sk.promiscuous_on = false;
     sk.numa_on = false;
 
+    sk.only_udp = false;
     sk.port = 53;
     sk.daemonize = false;
     sk.logVerbose = false;
@@ -970,6 +973,9 @@ static void initConfigFromFile(int argc, char **argv) {
     }
 
     conf_err = getIntVal(sk.errstr, cbuf, "port", &sk.port);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+
+    conf_err = getBoolVal(sk.errstr, cbuf, "only_udp", &sk.only_udp);
     CHECK_CONF_ERR(conf_err, sk.errstr);
 
     sk.data_store = getStrVal(cbuf, "data_store", NULL);
@@ -1481,21 +1487,28 @@ int main(int argc, char *argv[]) {
 
     sk.force_quit = false;
     initDpdkModule();
-    init_kni_module();
+
+    if (!sk.only_udp) init_kni_module();
 
     initShuke();
 
     startDpdkThreads();
-    start_kni_tx_threads();
-    kni_ifconfig_all();
 
-    sleep(4);
-    LOG_INFO(USER1, "starting dns tcp server.");
-    sk.tcp_srv = tcpServerCreate();
-    assert(sk.tcp_srv);
+    if (! sk.only_udp) {
+        start_kni_tx_threads();
+        kni_ifconfig_all();
+    }
+
+    if (! sk.only_udp) {
+        sleep(4);
+        LOG_INFO(USER1, "starting dns tcp server.");
+        sk.tcp_srv = tcpServerCreate();
+        assert(sk.tcp_srv);
+    }
 
     aeMain(sk.el);
 
-    cleanup_kni_module();
+    if (! sk.only_udp) cleanup_kni_module();
+
     cleanupDpdkModule();
 }
