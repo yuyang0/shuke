@@ -523,7 +523,7 @@ zone *zoneCreate(char *ss, int socket_id) {
     zn->dotOrigin = socket_strdup(socket_id, dotOrigin);
     zn->socket_id = socket_id;
     zn->d = dictCreate(&dnsDictType, NULL, socket_id);
-    rb_init_node(&zn->node);
+    rb_init_node(&zn->rbnode);
     LOG_DEBUG(USER1, "create zone (dotOrigin=>%s, sid=> %d)", zn->dotOrigin, socket_id);
     return zn;
 }
@@ -691,34 +691,71 @@ void zoneUpdateRRSetOffsets(zone *z) {
 /*----------------------------------------------
  *     zone dict definition
  *---------------------------------------------*/
+int rcu_ht_match(struct cds_lfht_node *ht_node, const void *_key)
+{
+    zone *z = caa_container_of(ht_node, struct _zone, htnode);
+    const char *key = _key;
+    return strcasecmp(z->origin, key) == 0;
+}
+
+void zoneDictFreeCallback(struct rcu_head *head)
+{
+    zone *z = caa_container_of(head, zone, rcu_head);
+    zoneDestroy(z);
+}
+
+static
+void *rcu_ht_fetch_value(struct cds_lfht *ht, void *key) {
+    struct cds_lfht_iter iter;	/* For iteration on hash table */
+    struct cds_lfht_node *ht_node;
+    unsigned int hash = zoneDictHash(key, strlen(key));
+    cds_lfht_lookup(ht, hash, rcu_ht_match, key, &iter);
+    ht_node = cds_lfht_iter_get_node(&iter);
+    if (!ht_node) {
+        return NULL;
+    } else {
+        return caa_container_of(ht_node, zone, htnode);
+    }
+}
+
+/* And a case insensitive hash function (based on djb hash) */
+unsigned int zoneDictHash(char *buf, size_t len) {
+    unsigned int hash = (unsigned int)5381;
+
+    while (len--)
+        hash = ((hash << 5) + hash) + (tolower(*buf++)); /* hash * 33 + c */
+    return hash;
+}
+
 zoneDict *zoneDictCreate(int socket_id) {
     zoneDict *zd = socket_calloc(socket_id, 1, sizeof(*zd));
-    zoneDictInitLock(zd);
-    zd->d = dictCreate(&zoneDictType, NULL, socket_id);
+    zd->ht = cds_lfht_new(1, 1, 0,
+                          CDS_LFHT_AUTO_RESIZE | CDS_LFHT_ACCOUNTING,
+                          NULL);
     zd->socket_id = socket_id;
     return zd;
 }
 
-zoneDict *zoneDictCopy(zoneDict *zd, int socket_id) {
-    zoneDict *new_zd = zoneDictCreate(socket_id);
-
-    zoneDictRLock(zd);
-    dictIterator *it = dictGetIterator(zd->d);
-    dictEntry *de;
-    while((de = dictNext(it)) != NULL) {
-        char *origin = dictGetKey(de);
-        zone *z = dictGetVal(de);
-        zone *new_z = zoneCopy(z, socket_id);
-        dictReplace(new_zd->d, origin, new_z);
-    }
-    dictReleaseIterator(it);
-    zoneDictRUnlock(zd);
-    return new_zd;
-}
-
 void zoneDictDestroy(zoneDict *zd) {
-    dictRelease(zd->d);
-    zoneDictDestroyLock(zd);
+    int ret = 0;
+    struct cds_lfht_iter iter;	/* For iteration on hash table */
+    struct cds_lfht_node *ht_node;
+    struct cds_lfht *ht = zd->ht;
+    zone *z;
+    zoneDictWLock(zd);
+    cds_lfht_for_each_entry(ht, &iter, z, htnode) {
+        ht_node = cds_lfht_iter_get_node(&iter);
+        ret = cds_lfht_del(ht, ht_node);
+        if (!ret) {
+            call_rcu(&z->rcu_head, zoneDictFreeCallback);
+        }
+    }
+    zoneDictWUnlock(zd);
+
+    int err = cds_lfht_destroy(zd->ht, NULL);
+    if (err) {
+        LOG_ERR(USER1, "destroy cru hash table failed.");
+    }
     socket_free(zd->socket_id, zd);
 }
 
@@ -729,7 +766,7 @@ void zoneDictDestroy(zoneDict *zd) {
  *         so the rlock must be acquired in caller
  */
 zone *zoneDictFetchVal(zoneDict *zd, char *key) {
-    zone *z = dictFetchValue(zd->d, key);
+    zone *z = rcu_ht_fetch_value(zd->ht, key);
     return z;
 }
 
@@ -752,7 +789,7 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
     nLabel = getNumLabels(start);
     if (nLabel < 2) return NULL;
     for (int i = nLabel; i >= 2; --i) {
-        z = dictFetchValue(zd->d, start);
+        z = rcu_ht_fetch_value(zd->ht, start);
         if (z != NULL) break;
         start += (*start + 1);
     }
@@ -764,31 +801,73 @@ zone *zoneDictGetZone(zoneDict *zd, char *name) {
  * element with such key and dictReplace() just performed a value update
  * operation. */
 int zoneDictReplace(zoneDict *zd, zone *z) {
+    int err = 1;
+    zone *old_z;
+    struct cds_lfht *ht = zd->ht;
+    struct cds_lfht_node *ht_node;
+    unsigned int hash = zoneDictHash(z->origin, z->originLen);
     zoneDictWLock(zd);
-    int err = dictReplace(zd->d, z->origin, z);
+    ht_node = cds_lfht_add_replace(ht, hash, rcu_ht_match, z->origin,
+                                   &z->htnode);
+    if (ht_node) {
+        old_z = caa_container_of(ht_node, zone, htnode);
+        call_rcu(&old_z->rcu_head, zoneDictFreeCallback);
+        err = 0;
+    }
     zoneDictWUnlock(zd);
     return err;
 }
 
 int zoneDictAdd(zoneDict *zd, zone *z) {
+    int err = DICT_OK;
+    void *key = z->origin;
+    struct cds_lfht_node *htnode;
+    unsigned int hash = zoneDictHash(key, strlen(key));
     zoneDictWLock(zd);
-    int err = dictAdd(zd->d, z->origin, z);
+    htnode = cds_lfht_add_unique(zd->ht, hash, rcu_ht_match, z->origin, &z->htnode);
+    if (htnode != &z->htnode) {
+        err = DICT_ERR;
+    }
     zoneDictWUnlock(zd);
     return err;
 }
 
 int zoneDictDelete(zoneDict *zd, char *origin) {
-    int err;
+    int err = 0;
+    struct cds_lfht *ht = zd->ht;	/* Hash table */
+    int ret = 0;
+    struct cds_lfht_iter iter;	/* For iteration on hash table */
+    struct cds_lfht_node *ht_node;
+    unsigned int hash = zoneDictHash(origin, strlen(origin));
 
     zoneDictWLock(zd);
-    err = dictDelete(zd->d, origin);
+    cds_lfht_lookup(ht, hash, rcu_ht_match, origin, &iter);
+    ht_node = cds_lfht_iter_get_node(&iter);
+    if (ht_node) {
+        ret = cds_lfht_del(ht, ht_node);
+        if (!ret) {
+            zone *del_z = caa_container_of(ht_node, zone, htnode);
+            call_rcu(&del_z->rcu_head, zoneDictFreeCallback);
+        }
+    }
     zoneDictWUnlock(zd);
     return err;
 }
 
 int zoneDictEmpty(zoneDict *zd) {
+    struct cds_lfht_iter iter;	/* For iteration on hash table */
+    struct cds_lfht_node *ht_node;
+    zone *z;
+    int ret;
+
     zoneDictRLock(zd);
-    dictEmpty(zd->d);
+    cds_lfht_for_each_entry(zd->ht, &iter, z, htnode) {
+        ht_node = cds_lfht_iter_get_node(&iter);
+        ret = cds_lfht_del(zd->ht, ht_node);
+        if (!ret) {
+            call_rcu(&z->rcu_head, zoneDictFreeCallback);
+        }
+    }
     zoneDictRUnlock(zd);
     return DS_OK;
 }
@@ -796,35 +875,34 @@ int zoneDictEmpty(zoneDict *zd) {
 int zoneDictExistZone(zoneDict *zd, char *origin) {
     int ret;
     zoneDictRLock(zd);
-    ret = (dictFind(zd->d, origin) != NULL);
+    ret = (rcu_ht_fetch_value(zd->ht, origin) != NULL);
     zoneDictRUnlock(zd);
     return ret;
 }
 
-size_t zoneDictGetNumZones(zoneDict *zd, int lock) {
-    size_t n;
-    if (lock) zoneDictRLock(zd);
-    n = dictSize(zd->d);
-    if (lock) zoneDictRUnlock(zd);
-    return n;
+size_t zoneDictGetNumZones(zoneDict *zd) {
+    unsigned long count;
+    long approx_before, approx_after;
+    zoneDictRLock(zd);
+    cds_lfht_count_nodes(zd->ht, &approx_before, &count,
+                         &approx_after);
+    zoneDictRUnlock(zd);
+    return (size_t)count;
 }
 
 // may lock the dict long time, mainly for debug.
 sds zoneDictToStr(zoneDict *zd) {
+    struct cds_lfht_iter iter;	/* For iteration on hash table */
     zone *z;
     sds zone_s;
     sds s = sdsempty();
 
     zoneDictRLock(zd);
-    dictIterator *it = dictGetIterator(zd->d);
-    dictEntry *de;
-    while((de = dictNext(it)) != NULL) {
-        z = dictGetVal(de);
+    cds_lfht_for_each_entry(zd->ht, &iter, z, htnode) {
         zone_s = zoneToStr(z);
         s = sdscatsds(s, zone_s);
         sdsfree(zone_s);
     }
-    dictReleaseIterator(it);
     zoneDictRUnlock(zd);
     return s;
 }
@@ -872,22 +950,6 @@ dictType dnsDictType = {
         _dnsDictValDestructor,         /* val destructor */
 };
 
-/* ----------------------- zone Hash Table Type ------------------------*/
-static void _zoneDictValDestructor(void *privdata, void *val)
-{
-    DICT_NOTUSED(privdata);
-    zone *z = val;
-    zoneDestroy(z);
-}
-
-dictType zoneDictType = {
-        _dictStringCaseHash,  /* hash function */
-        _dictStringKeyDup,              /* key dup */
-        NULL,                           /* val dup */
-        _dictStringKeyCaseCompare,          /* key compare */
-        _dictStringKeyDestructor,         /* key destructor */
-        _zoneDictValDestructor,         /* val destructor */
-};
 #if defined(SK_TEST)
 #include "testhelp.h"
 int dsTest(int argc, char *argv[]) {

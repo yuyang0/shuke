@@ -17,6 +17,7 @@ OPTIMIZATION?=-O3
 
 # PROJECT_ROOT:=$(abspath .)
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
+URCU_LIBS:=-lurcu-cds -lurcu
 
 SHUKE_SRC_DIR:=src
 # Default settings
@@ -39,7 +40,7 @@ SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
 FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS) $(SHUKE_CFLAGS) $(MACROS)
 FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG)
-FINAL_LIBS=$(HIMONGO_STATICLIB) -pthread -lrt
+FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_LIBS) -pthread -lrt
 
 # FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
 FINAL_CFLAGS += $(addprefix -I,$(INC_DIR_LIST))

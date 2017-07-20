@@ -471,7 +471,7 @@ static sds genInfoString(char *section) {
                           (long long)nr_req,
                           (long long)rte_atomic64_read(&(sk.nr_dropped)),
                           (long long unsigned)(nr_req/uptime),
-                          zoneDictGetNumZones(sk.zd, 1));
+                          zoneDictGetNumZones(sk.zd));
 
         s = sdscat(s, "\r\n");
         s = sdscatprintf(s,
@@ -724,7 +724,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         }
         triggerReloadAllZone();
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
-        size_t n = zoneDictGetNumZones(sk.zd, 1);
+        size_t n = zoneDictGetNumZones(sk.zd);
         s = sdsnewprintf("%lu", n);
     } else {
         s = sdsnewprintf("unknown subcommand %s for ZONE.", argv[1]);

@@ -719,6 +719,9 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     uint8_t portid, queueid;
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
         US_PER_S * BURST_TX_DRAIN_US;
+
+    rcu_register_thread();
+
 #ifdef PRINT_QUEUE_STAT
     uint64_t prev_print_tsc =0
     const uint64_t print_interval = (rte_get_tsc_hz() * 2);
@@ -792,6 +795,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         }
     }
 
+    rcu_unregister_thread();
     return 0;
 }
 

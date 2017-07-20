@@ -23,7 +23,7 @@ int rbtreeInsertZone(zone *z) {
 
     /* Figure out where to put new node */
     while (*new) {
-        zone *this = container_of(*new, zone, node);
+        zone *this = container_of(*new, zone, rbnode);
         long result = z->refresh_ts - this->refresh_ts;
 
         parent = *new;
@@ -34,23 +34,23 @@ int rbtreeInsertZone(zone *z) {
     }
 
     /* Add new node and rebalance tree. */
-    rb_link_node(&z->node, parent, new);
-    rb_insert_color(&z->node, &sk.rbroot);
+    rb_link_node(&z->rbnode, parent, new);
+    rb_insert_color(&z->rbnode, &sk.rbroot);
 
     return 1;
 }
 
 void rbtreeDeleteZone(zone *z) {
     // return if the zone is not in rbtree
-    if (RB_EMPTY_NODE(&z->node)) return;
-    rb_erase(&z->node, &sk.rbroot);
-    RB_CLEAR_NODE(&z->node);
+    if (RB_EMPTY_NODE(&z->rbnode)) return;
+    rb_erase(&z->rbnode, &sk.rbroot);
+    RB_CLEAR_NODE(&z->rbnode);
 }
 
 zone *getOldestZone() {
     struct rb_node *n = rb_first(&sk.rbroot);
     if (n) {
-        return rb_entry(n, zone, node);
+        return rb_entry(n, zone, rbnode);
     }
     return NULL;
 }
@@ -65,7 +65,7 @@ void masterRefreshZone(char *origin) {
     zoneDictRUnlock(sk.zd);
 
     if (z == NULL) return;
-    assert(RB_EMPTY_NODE(&z->node));
+    assert(RB_EMPTY_NODE(&z->rbnode));
     z->refresh_ts = sk.unixtime + z->refresh;
     rbtreeInsertZone(z);
 }
@@ -82,29 +82,33 @@ int replaceZoneAllNumaNodes(zone *z) {
 
     replaceZoneOtherNuma(z);
 
-    zoneDictWLock(zd);
-    zone *old_z = dictFetchValue(zd->d, z->origin);
-    if (old_z) {
+    int err = 1;
+    zone *old_z;
+    struct cds_lfht *ht = zd->ht;
+    struct cds_lfht_node *ht_node;
+    unsigned int hash = zoneDictHash(z->origin, z->originLen);
+    rcu_read_lock();
+    ht_node = cds_lfht_add_replace(ht, hash, rcu_ht_match, z->origin,
+                                   &z->htnode);
+    if (ht_node) {
+        old_z = caa_container_of(ht_node, zone, htnode);
         rbtreeDeleteZone(old_z);
+        call_rcu(&old_z->rcu_head, zoneDictFreeCallback);
+        err = 0;
     }
-    int err = dictReplace(zd->d, z->origin, z);
-    rbtreeInsertZone(z);
-    zoneDictWUnlock(zd);
+    rcu_read_unlock();
     return err;
 }
 
 int addZoneAllNumaNodes(zone *z) {
-    zoneDict *zd = sk.zd;
     z->refresh_ts = sk.unixtime + z->refresh;
     zoneUpdateRRSetOffsets(z);
 
     addZoneOtherNuma(z);
 
-    zoneDictWLock(zd);
-    int err = dictAdd(zd->d, z->origin, z);
+    int err = zoneDictAdd(sk.zd, z);
     assert(err == DICT_OK);
     rbtreeInsertZone(z);
-    zoneDictWUnlock(zd);
     return err;
 }
 /*!
@@ -113,19 +117,29 @@ int addZoneAllNumaNodes(zone *z) {
  * @return
  */
 int deleteZoneAllNumaNodes(char *origin) {
-    int err;
+    int err = 0;
     zoneDict *zd = sk.zd;
 
     // delete the zone on non-master numa node
     deleteZoneOtherNuma(origin);
 
-    // delete zone on master numa node.
+    struct cds_lfht *ht = zd->ht;	/* Hash table */
+    int ret = 0;
+    struct cds_lfht_iter iter;	/* For iteration on hash table */
+    struct cds_lfht_node *ht_node;
+    unsigned int hash = zoneDictHash(origin, strlen(origin));
+
     zoneDictWLock(zd);
-    zone *old_z = dictFetchValue(zd->d, origin);
-    if (old_z) {
-        rbtreeDeleteZone(old_z);
+    cds_lfht_lookup(ht, hash, rcu_ht_match, origin, &iter);
+    ht_node = cds_lfht_iter_get_node(&iter);
+    if (ht_node) {
+        ret = cds_lfht_del(ht, ht_node);
+        if (ret == 0) {
+            zone *del_z = caa_container_of(ht_node, zone, htnode);
+            rbtreeDeleteZone(del_z);
+            call_rcu(&del_z->rcu_head, zoneDictFreeCallback);
+        }
     }
-    err = dictDelete(zd->d, origin);
     zoneDictWUnlock(zd);
     return err;
 }
@@ -1483,6 +1497,8 @@ int main(int argc, char *argv[]) {
     initDpdkModule();
     init_kni_module();
 
+    rcu_register_thread();
+
     initShuke();
 
     startDpdkThreads();
@@ -1498,4 +1514,6 @@ int main(int argc, char *argv[]) {
 
     cleanup_kni_module();
     cleanupDpdkModule();
+
+    rcu_unregister_thread();
 }

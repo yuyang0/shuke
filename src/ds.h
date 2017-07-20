@@ -7,6 +7,10 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
+#include <urcu.h>		/* RCU flavor */
+#include <urcu/rculfhash.h>	/* RCU Lock-free hash table */
+#include <urcu/compiler.h>	/* For CAA_ARRAY_SIZE */
+
 #include <rte_rwlock.h>
 #include <rte_atomic.h>
 
@@ -152,23 +156,22 @@ typedef struct _zone {
 
     // timestamp when this zone needs reload
     long refresh_ts;
-    struct rb_node node;
+    struct rb_node rbnode;
+    struct cds_lfht_node htnode;
+    struct rcu_head rcu_head;
 } zone;
 
 typedef struct _zoneDict {
     int socket_id;
-    rte_rwlock_t lock;
     // the key is the origin of the zone(len label format)
     // the value is zone instance.
-    dict *d;
+    struct cds_lfht *ht;
 } zoneDict;
 
-#define zoneDictRLock(zd) rte_rwlock_read_lock(&((zd)->lock))
-#define zoneDictRUnlock(zd) rte_rwlock_read_unlock(&((zd)->lock))
-#define zoneDictWLock(zd) rte_rwlock_write_lock(&((zd)->lock))
-#define zoneDictWUnlock(zd) rte_rwlock_write_unlock(&((zd)->lock))
-#define zoneDictInitLock(zd) rte_rwlock_init(&((zd)->lock))
-#define zoneDictDestroyLock(zd)
+#define zoneDictRLock(zd) (void)zd; rcu_read_lock()
+#define zoneDictRUnlock(zd) (void)zd; rcu_read_unlock()
+#define zoneDictWLock(zd) (void)zd; rcu_read_lock()
+#define zoneDictWUnlock(zd) (void)zd; rcu_read_unlock()
 
 RRSet *RRSetCreate(uint16_t type, int socket_id);
 RRSet *RRSetDup(RRSet *rs, int socket_id);
@@ -199,8 +202,15 @@ int zoneReplace(zone *z, void *key, dnsDictValue *val);
 int zoneReplaceTypeVal(zone *z, char *key, RRSet *rs);
 sds zoneToStr(zone *z);
 
+/*----------------------------------------------
+ *     zone dict declaration
+ *---------------------------------------------*/
+int rcu_ht_match(struct cds_lfht_node *ht_node, const void *_key);
+void zoneDictFreeCallback(struct rcu_head *head);
+
+unsigned int zoneDictHash(char *buf, size_t len);
 zoneDict *zoneDictCreate(int socket_id);
-zoneDict *zoneDictCopy(zoneDict *zd, int socket_id);
+
 void zoneDictDestroy(zoneDict *zd);
 zone *zoneDictFetchVal(zoneDict *zd, char *key);
 
@@ -211,7 +221,7 @@ int zoneDictAdd(zoneDict *zd, zone *z);
 
 int zoneDictDelete(zoneDict *zd, char *origin);
 int zoneDictEmpty(zoneDict *zd);
-size_t zoneDictGetNumZones(zoneDict *zd, int lock);
+size_t zoneDictGetNumZones(zoneDict *zd);
 int zoneDictExistZone(zoneDict *zd, char *origin);
 sds zoneDictToStr(zoneDict *zd);
 
@@ -233,7 +243,6 @@ static inline bool isAbsDotDomain(char *ss) {
 }
 
 extern dictType dnsDictType;
-extern dictType zoneDictType;
 
 #if defined(SK_TEST)
 int zoneParserTest(int argc, char *argv[]);
