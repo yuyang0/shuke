@@ -4,7 +4,6 @@
 
 #include "shuke.h"
 #include "utils.h"
-#include "shukeassert.h"
 
 #define RTE_LOGTYPE_MONGO RTE_LOGTYPE_USER1
 

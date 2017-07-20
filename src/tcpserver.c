@@ -2,7 +2,6 @@
 // Created by Yu Yang on 2017-01-12
 //
 #include "shuke.h"
-#include "shukeassert.h"
 
 static void tcpReadHandler(struct aeEventLoop *el, int fd, void *privdata, int mask);
 static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, int mask);

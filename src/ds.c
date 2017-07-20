@@ -13,7 +13,6 @@
 #include "log.h"
 #include "utils.h"
 #include "ds.h"
-#include "shukeassert.h"
 
 #define RRSET_MAX_PREALLOC (1024*1024)
 

@@ -15,7 +15,6 @@
 
 #include "shuke.h"
 #include "asciilogo.h"
-#include "shukeassert.h"
 
 struct shuke sk;
 

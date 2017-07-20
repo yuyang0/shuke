@@ -36,10 +36,10 @@
 #include "fmacros.h"
 #include <stdlib.h>
 #include <limits.h>
+#include <assert.h>
 
 #include "dict.h"
 #include "zmalloc.h"
-#include "shukeassert.h"
 
 /* -------------------------- private prototypes ---------------------------- */
 

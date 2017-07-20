@@ -5,7 +5,6 @@
 #include "dpdk_module.h"
 #include "shuke.h"
 #include "utils.h"
-#include "shukeassert.h"
 
 #define STAT_ATOMIC_WRITE_BATCH   100
 

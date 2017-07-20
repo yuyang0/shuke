@@ -8,7 +8,6 @@
 #include <arpa/inet.h>
 
 #include "shuke.h"
-#include "shukeassert.h"
 
 /* Macros for printing using RTE_LOG */
 // #define RTE_LOGTYPE_KNI RTE_LOGTYPE_USER1
