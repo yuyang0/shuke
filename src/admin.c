@@ -5,8 +5,6 @@
 #include "shuke.h"
 #include "utils.h"
 
-#include "shukeassert.h"
-
 #include <sys/resource.h>
 #include <sys/utsname.h>
 
