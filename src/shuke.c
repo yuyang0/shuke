@@ -279,6 +279,24 @@ void addZoneOtherNuma(zone *z) {
     }
 }
 
+void collectStats() {
+    int64_t nr_req = 0, nr_dropped = 0;
+    unsigned lcore_id = 0;
+    lcore_conf_t *qconf;
+
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        lcore_id = (unsigned )sk.lcore_ids[i];
+        if (lcore_id == rte_get_master_lcore()) continue;
+
+        qconf = &sk.lcore_conf[lcore_id];
+        nr_req += qconf->nr_req;
+        nr_dropped += qconf->nr_dropped;
+    }
+    sk.nr_req = nr_req;
+    sk.nr_dropped = nr_dropped;
+    sk.last_collect_ms = mstime();
+}
+
 void config_log() {
     FILE *fp = sk.log_fp;
 
@@ -1044,6 +1062,7 @@ static void initShuke() {
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
     sk.starttime = time(NULL);
     updateCachedTime();
+    sk.last_collect_ms = sk.mstime;
 
     sk.el = aeCreateEventLoop(1024, true);
     assert(sk.el);
@@ -1469,9 +1488,6 @@ int main(int argc, char *argv[]) {
         return -1;  /* test not found */
     }
 #endif
-
-    rte_atomic64_init(&(sk.nr_req));
-    rte_atomic64_init(&(sk.nr_dropped));
 
     initConfigFromFile(argc, argv);
     if (sk.daemonize) daemonize();

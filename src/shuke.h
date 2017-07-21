@@ -260,8 +260,9 @@ struct shuke {
     uint64_t hz;		/**< Number of events per seconds */
 
     // statistics
-    rte_atomic64_t nr_req;                   // number of processed requests
-    rte_atomic64_t nr_dropped;
+    int64_t nr_req;                   // number of processed requests
+    int64_t nr_dropped;
+    long long last_collect_ms;
 
     uint64_t num_tcp_conn;
     uint64_t total_tcp_conn;
@@ -323,7 +324,7 @@ int deleteZoneAllNumaNodes(char *origin);
 void masterRefreshZone(char *origin);
 
 void config_log();
-
+void collectStats();
 /*----------------------------------------------
  *     debug utils
  *---------------------------------------------*/

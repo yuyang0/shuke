@@ -6,8 +6,6 @@
 #include "shuke.h"
 #include "utils.h"
 
-#define STAT_ATOMIC_WRITE_BATCH   100
-
 #define MAX_LCORE_PARAMS 1024
 
 #define MAX_JUMBO_PKT_LEN  9600
@@ -627,10 +625,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                            src_addr, udp_h->src_port, is_ipv4, qconf->node);
     if(n == ERR_CODE) goto invalid;
 
-    if (++qconf->nr_req >= STAT_ATOMIC_WRITE_BATCH) {
-        rte_atomic64_add(&(sk.nr_req), qconf->nr_req);
-        qconf->nr_req = 0;
-    }
+    ++qconf->nr_req;
+
     ether_addr_copy(&eth_h->s_addr, &eth_addr);
     ether_addr_copy(&eth_h->d_addr, &eth_h->s_addr);
     ether_addr_copy(&eth_addr, &eth_h->d_addr);
@@ -677,10 +673,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
 invalid:
     // LOG_DEBUG(DPDK, "drop packet.");
-    if (++qconf->nr_dropped >= STAT_ATOMIC_WRITE_BATCH) {
-        rte_atomic64_add(&(sk.nr_dropped), qconf->nr_dropped);
-        qconf->nr_dropped = 0;
-    }
+    ++qconf->nr_dropped;
     rte_pktmbuf_free(m);
 }
 
