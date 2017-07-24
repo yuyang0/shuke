@@ -272,35 +272,35 @@ int snpack(char *buf, int offset, size_t size, char const *fmt, ...) {
         switch(*f) {
             case 'b':
             case 'B':
-                if (remain < 1) goto error;
+                if (unlikely(remain < 1)) goto error;
                 u8 = (uint8_t)va_arg(ap, int);
                 *ptr++ = u8;
                 remain--;
                 break;
             case 'h':  //signed short
             case 'H':
-                if (remain < 2) goto error;
+                if (unlikely(remain < 2)) goto error;
                 u16 = (uint16_t )va_arg(ap, int);
                 if (need_rev) u16 = rte_bswap16(u16);
-                memcpy(ptr, &u16, 2);
+                *((uint16_t*)ptr) = u16;
                 ptr += 2;
                 remain -= 2;
                 break;
             case 'i':
             case 'I':
-                if (remain < 4) goto error;
+                if (unlikely(remain < 4)) goto error;
                 u32 = (uint32_t )va_arg(ap, int);
                 if (need_rev) u32 = rte_bswap32(u32);
-                memcpy(ptr, &u32, 4);
+                *((uint32_t*)ptr) = u32;
                 ptr += 4;
                 remain -= 4;
                 break;
             case 'q':
             case 'Q':
-                if (remain < 8) goto error;
+                if (unlikely(remain < 8)) goto error;
                 u64 = (uint64_t )va_arg(ap, long long);
                 if (need_rev) u64 = rte_bswap64(u64);
-                memcpy(ptr, &u64, 8);
+                *((uint64_t*)ptr) = u64;
                 ptr += 8;
                 remain -= 4;
                 break;
@@ -308,8 +308,8 @@ int snpack(char *buf, int offset, size_t size, char const *fmt, ...) {
             case 'S':
                 ss = va_arg(ap, char *);
                 size_t ss_len = strlen(ss) + 1;
-                if (remain < ss_len) goto error;
-                memcpy(ptr, ss, ss_len);
+                if (unlikely(remain < ss_len)) goto error;
+                rte_memcpy(ptr, ss, ss_len);
                 ptr += ss_len;
                 remain -= ss_len;
                 break;
@@ -317,9 +317,9 @@ int snpack(char *buf, int offset, size_t size, char const *fmt, ...) {
             case 'M':
                 ss = va_arg(ap, char *);
                 mem_len = va_arg(ap, size_t);
-                if (remain < mem_len) goto error;
-                if (mem_len == 0) break;
-                memcpy(ptr, ss, mem_len);
+                if (unlikely(remain < mem_len)) goto error;
+                if (unlikely(mem_len == 0)) break;
+                rte_memcpy(ptr, ss, mem_len);
                 ptr += mem_len;
                 remain -= mem_len;
                 break;
