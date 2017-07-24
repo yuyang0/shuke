@@ -253,7 +253,7 @@ int dumpCompressedName(struct context *ctx, char *name, compressInfo *cps, size_
 }
 
 /*!
- * dump the RRSet object to sds
+ * dump the RRSet object to response buffer
  *
  * @param ctx:  context object, used to store the dumped bytes
  * @param rs:  the RRSet object needs to be dumped
@@ -568,9 +568,8 @@ dnsDictValue *zoneFetchValueAbs(zone *z, void *key, size_t keyLen) {
     // the key ends with origin(absolute domain name).
     assert (keyLen >= originLen && strcasecmp(key+remain, z->origin) == 0);
 
-    char buf[255] = {0};
-    if (remain == 0) strcpy(buf, "@");
-    else memcpy(buf, key, remain);
+    char buf[255] = "@";
+    if (remain > 0) memcpy(buf, key, remain);
     return dictFetchValue(z->d, buf);
 }
 
@@ -747,15 +746,11 @@ zone *zoneDictFetchVal(zoneDict *zd, char *key) {
  */
 zone *zoneDictGetZone(zoneDict *zd, char *name) {
     zone *z = NULL;
-    int nLabel = 0;
     char *start = name;
 
-    nLabel = getNumLabels(start);
-    if (nLabel < 2) return NULL;
-    for (int i = nLabel; i >= 2; --i) {
+    for (; *start > 0; start += (*start + 1)) {
         z = dictFetchValue(zd->d, start);
         if (z != NULL) break;
-        start += (*start + 1);
     }
     return z;
 }
