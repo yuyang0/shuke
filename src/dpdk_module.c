@@ -1006,19 +1006,7 @@ initDpdkModule() {
             rte_eth_promiscuous_enable(portid);
     }
 
-    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
-        lcore_id = (unsigned )sk.lcore_ids[i];
-        if (lcore_id == rte_get_master_lcore()) continue;
-        assert(rte_lcore_is_enabled(lcore_id));
-
-        qconf = &sk.lcore_conf[lcore_id];
-        for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
-            portid = qconf->rx_queue_list[queue].port_id;
-            queueid = qconf->rx_queue_list[queue].queue_id;
-        }
-    }
-
-    check_all_ports_link_status((uint8_t)nb_ports, sk.portmask);
+    check_all_ports_link_status((uint8_t)nb_ports, (uint32_t )sk.portmask);
 
     rte_timer_subsystem_init();
     sk.hz = rte_get_timer_hz();

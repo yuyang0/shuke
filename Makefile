@@ -7,7 +7,7 @@ RTE_TARGET ?= x86_64-native-linuxapp-gcc
 
 include $(RTE_SDK)/mk/rte.vars.mk
 
-ifdef TEST
+ifeq ($(DEBUG), 1)
 SHUKE_CFLAGS=-DSK_TEST
 OPTIMIZATION?=-O0
 endif
