@@ -31,7 +31,7 @@ void *socket_malloc(int socket_id, size_t size) {
         ptr = malloc(size);
         if (!ptr) malloc_oom_handler(size);
     } else {
-        ptr = rte_malloc_socket(NULL, size, 0, socket_id);
+        ptr = rte_malloc_socket(NULL, size, RTE_CACHE_LINE_SIZE, socket_id);
         if (!ptr) socket_malloc_oom_handler(size);
     }
     return ptr;
@@ -49,7 +49,7 @@ void *socket_zmalloc(int socket_id, size_t size) {
         ptr = calloc(1, size);
         if (!ptr) malloc_oom_handler(size);
     } else {
-        ptr = rte_zmalloc_socket(NULL, size, 0, socket_id);
+        ptr = rte_zmalloc_socket(NULL, size, RTE_CACHE_LINE_SIZE, socket_id);
         if (!ptr) socket_malloc_oom_handler(size);
     }
     return ptr;
@@ -61,7 +61,7 @@ void *socket_calloc(int socket_id, size_t nmemb, size_t size) {
         ptr = calloc(nmemb, size);
         if (!ptr) malloc_oom_handler(size);
     } else {
-        ptr = rte_calloc_socket(NULL, nmemb, size, 0, socket_id);
+        ptr = rte_calloc_socket(NULL, nmemb, size, RTE_CACHE_LINE_SIZE, socket_id);
         if (!ptr) socket_malloc_oom_handler(size);
     }
     return ptr;
@@ -79,7 +79,7 @@ void *socket_realloc(int socket_id, void *ptr, size_t size) {
         ptr = realloc(ptr, size);
         if (!ptr) malloc_oom_handler(size);
     } else {
-        ptr = rte_realloc(ptr, size, 0);
+        ptr = rte_realloc(ptr, size, RTE_CACHE_LINE_SIZE);
         if (!ptr) malloc_oom_handler(size);
     }
     return ptr;
