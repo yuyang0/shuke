@@ -23,7 +23,7 @@ SHUKE_SRC_DIR:=src
 STD=-std=gnu99
 WARN=-Wall -W
 OPT=$(OPTIMIZATION)
-DEBUG=-g -ggdb
+DEBUG_FLAGS=-g -ggdb
 
 LIB_DIR_LIST=/usr/local/lib \
 						 $(RTE_SDK)/$(RTE_TARGET)/lib
@@ -37,8 +37,8 @@ SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
 
-FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS) $(SHUKE_CFLAGS) $(MACROS)
-FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG)
+FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(CFLAGS) $(SHUKE_CFLAGS) $(MACROS)
+FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG_FLAGS)
 FINAL_LIBS=$(HIMONGO_STATICLIB) -pthread -lrt
 
 # FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
@@ -106,7 +106,7 @@ update3rd:
 3rd: $(HIMONGO_STATICLIB)
 
 dnsbench: src/bench.c src/ae.c
-	$(SHUKE_CC) -o $@ $^ $(STD) $(WARN) $(OPT) $(DEBUG) $(SHUKE_CFLAGS) -DUSE_MALLOC
+	$(SHUKE_CC) -o $@ $^ $(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(SHUKE_CFLAGS) -DUSE_MALLOC
 
 
 #Libraries of dpdk
