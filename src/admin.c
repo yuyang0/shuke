@@ -489,6 +489,7 @@ static sds genInfoString(char *section) {
         prev_nr_req = nr_req;
         prev_nr_dropped = nr_dropped;
 
+#ifndef ONLY_UDP
         s = sdscat(s, "\r\n");
         s = sdscatprintf(s,
                          "# Tcp stats\r\n"
@@ -498,6 +499,7 @@ static sds genInfoString(char *section) {
                          (long long unsigned)sk.num_tcp_conn,
                          (long long unsigned)sk.total_tcp_conn,
                          (long long unsigned)sk.rejected_tcp_conn);
+#endif
 
         struct rte_eth_stats eth_stats;
         for (int i = 0; i < sk.nr_ports; i++) {
@@ -509,6 +511,7 @@ static sds genInfoString(char *section) {
             s = sdscat(s, "\r\n");
             s = sdscatprintf(s,
                              "# Port %d stats\r\n"
+                             "addr:%s\r\n"
                              "input_packets:%llu\r\n"
                              "input_packets_per_sec:%llu\r\n"
                              "output_packets:%llu\r\n"
@@ -521,6 +524,7 @@ static sds genInfoString(char *section) {
                              "input_errors:%llu\r\n"
                              "output_errors:%llu\r\n",
                              portid,
+                             sk.port_info[portid]->eth_addr_s,
                              (long long unsigned) eth_stats.ipackets,
                              (long long unsigned) eth_stats.ipackets/uptime,
                              (long long unsigned) eth_stats.opackets,

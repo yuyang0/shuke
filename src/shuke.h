@@ -188,8 +188,8 @@ struct shuke {
      */
     // MAP: lcore_id => lcore_conf_t
     lcore_conf_t lcore_conf[RTE_MAX_LCORE];
-    // MAP: portid => port_kni_conf_t*
-    port_kni_conf_t *kni_conf[RTE_MAX_ETHPORTS];
+    // MAP: portid => port_info_t*
+    port_info_t *port_info[RTE_MAX_ETHPORTS];
 
     //MAP: socketid => numaNode_t*
     numaNode_t *nodes[MAX_NUMA_NODES];
@@ -200,8 +200,10 @@ struct shuke {
 
     int *lcore_ids;
     int nr_lcore_ids;
+#ifndef ONLY_UDP
     int *kni_tx_lcore_ids;
     int nr_kni_tx_lcore_id;
+#endif
     int *port_ids;
     int nr_ports;
     // char *total_coremask;

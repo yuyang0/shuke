@@ -2,6 +2,8 @@
 // Created by yangyu on 17-6-15.
 //
 
+#ifndef ONLY_UDP
+
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -105,8 +107,8 @@ int kni_ifconfig_all()
 {
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        port_kni_conf_t *kconf = sk.kni_conf[portid];
-        kni_ifconfig(kconf->name, sk.bindaddr[i]);
+        port_info_t *kconf = sk.port_info[portid];
+        kni_ifconfig(kconf->veth_name, sk.bindaddr[i]);
     }
     return OK_CODE;
 }
@@ -139,10 +141,10 @@ void kni_init_tx_queue() {
 
     for (int i = 0; i < sk.nr_ports; ++i) {
         portid = sk.port_ids[i];
-        port_kni_conf_t *kconf = sk.kni_conf[portid];
+        port_info_t *kconf = sk.port_info[portid];
 
-        queueid = kconf->tx_queue_id;
-        lcore_id = (unsigned )kconf->lcore_tx;
+        queueid = kconf->kni_tx_queue_id;
+        lcore_id = (unsigned )kconf->kni_lcore_tx;
         assert(rte_lcore_is_enabled(lcore_id));
 
         if (sk.numa_on)
@@ -170,7 +172,7 @@ void kni_init_tx_queue() {
  * Interface to dequeue mbufs from tx_q and burst tx
  */
 static void
-kni_egress(port_kni_conf_t *p)
+kni_egress(port_info_t *p)
 {
     uint8_t port_id;
     unsigned nb_tx, num;
@@ -189,7 +191,7 @@ kni_egress(port_kni_conf_t *p)
     }
     if (num > 0) {
         /* Burst tx to eth */
-        nb_tx = rte_eth_tx_burst(port_id, p->tx_queue_id, pkts_burst, (uint16_t)num);
+        nb_tx = rte_eth_tx_burst(port_id, p->kni_tx_queue_id, pkts_burst, (uint16_t)num);
         kni_stats[port_id].tx_packets += nb_tx;
 
         if (unlikely(nb_tx < num)) {
@@ -204,14 +206,14 @@ static int
 main_loop(__rte_unused void *arg)
 {
     const unsigned lcore_id = rte_lcore_id();
-    port_kni_conf_t *kconf_list[RTE_MAX_ETHPORTS];
+    port_info_t *kconf_list[RTE_MAX_ETHPORTS];
     int nr_kconf = 0;
-    port_kni_conf_t *kconf;
+    port_info_t *kconf;
 
     for (int i = 0; i < sk.nr_ports; i++) {
         int portid = sk.port_ids[i];
-        if (sk.kni_conf[portid]->lcore_tx == (int)lcore_id) {
-            kconf_list[nr_kconf++] = sk.kni_conf[portid];
+        if (sk.port_info[portid]->kni_lcore_tx == (int)lcore_id) {
+            kconf_list[nr_kconf++] = sk.port_info[portid];
             LOG_INFO(KNI, "lcore %u is writing to port %d.", lcore_id, portid);
         }
     }
@@ -294,7 +296,7 @@ kni_config_network_interface(uint8_t port_id, uint8_t if_up)
 static int
 kni_alloc(uint8_t port_id)
 {
-    port_kni_conf_t *kconf = sk.kni_conf[port_id];
+    port_info_t *kconf = sk.port_info[port_id];
     struct rte_kni *kni;
     struct rte_kni_conf conf;
 
@@ -302,9 +304,9 @@ kni_alloc(uint8_t port_id)
 
     /* Clear conf at first */
     memset(&conf, 0, sizeof(conf));
-    strncpy(conf.name, kconf->name, RTE_KNI_NAMESIZE);
-    if (kconf->lcore_k >= 0) {
-        conf.core_id = (uint32_t )kconf->lcore_k;
+    strncpy(conf.name, kconf->veth_name, RTE_KNI_NAMESIZE);
+    if (kconf->kni_lcore_k >= 0) {
+        conf.core_id = (uint32_t )kconf->kni_lcore_k;
         conf.force_bind = 1;
     }
     conf.group_id = (uint16_t)port_id;
@@ -332,7 +334,7 @@ kni_alloc(uint8_t port_id)
     if (!kni)
         rte_exit(EXIT_FAILURE, "Fail to create kni for "
                 "port: %d\n", port_id);
-    sk.kni_conf[port_id]->kni = kni;
+    sk.port_info[port_id]->kni = kni;
 
     return 0;
 }
@@ -342,7 +344,7 @@ void
 init_kni_module(void)
 {
     int portid = sk.port_ids[0];
-    int lcore_id = sk.kni_conf[portid]->lcore_tx;
+    int lcore_id = sk.port_info[portid]->kni_lcore_tx;
     int socket_id = rte_lcore_to_socket_id((unsigned) lcore_id);
     /* Create the mbuf pool */
     pktmbuf_pool = rte_pktmbuf_pool_create("kni_mbuf_pool", NB_MBUF,
@@ -364,7 +366,7 @@ cleanup_kni_module()
     /* Release resources */
     for (int i = 0; i < sk.nr_ports; i++) {
         int portid = sk.port_ids[i];
-        if (rte_kni_release(sk.kni_conf[portid]->kni))
+        if (rte_kni_release(sk.port_info[portid]->kni))
             LOG_ERR(KNI, "Fail to release kni\n");
     }
 #ifdef RTE_LIBRTE_XEN_DOM0
@@ -390,3 +392,5 @@ start_kni_tx_threads()
     }
     return 0;
 }
+
+#endif
