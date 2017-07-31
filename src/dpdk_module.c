@@ -720,10 +720,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     uint8_t portid, queueid;
     const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) /
         US_PER_S * BURST_TX_DRAIN_US;
-#ifdef PRINT_QUEUE_STAT
-    uint64_t prev_print_tsc =0
-    const uint64_t print_interval = (rte_get_tsc_hz() * 2);
-#endif
     prev_tsc = 0;
 
     init_per_lcore();
@@ -774,12 +770,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 
             prev_tsc = cur_tsc;
         }
-#ifdef PRINT_QUEUE_STAT
-        if (unlikely(cur_tsc - prev_print_tsc) > print_interval) {
-            printf("core %d got %lli packets\n", lcore_id, qconf->received_req);
-            prev_print_tsc = cur_tsc;
-        }
-#endif
         /*
          * Read packet from RX queues
          */

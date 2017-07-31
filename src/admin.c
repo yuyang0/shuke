@@ -539,6 +539,19 @@ static sds genInfoString(char *section) {
         }
     }
 
+    s = sdscat(s, "\r\n");
+    s = sdscat(s, "# Core received packets\r\n");
+
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        char human[128];
+        unsigned lcore_id = (unsigned )sk.lcore_ids[i];
+        if (lcore_id == rte_get_master_lcore()) continue;
+        lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
+        numberToHuman(human, (unsigned long long)qconf->received_req);
+        s = sdscatprintf(s, "%d: %s ", lcore_id, human);
+    }
+    s = sdscat(s, "\r\n");
+
     // cpu usage
     if (allsections || defsections || (strcasecmp(section, "cpu") == 0)) {
         if (sections++) s = sdscat(s, "\r\n");

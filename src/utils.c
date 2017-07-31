@@ -75,7 +75,6 @@ void bytesToHuman(char *s, unsigned long long n) {
     if (n < 1024) {
         /* Bytes */
         sprintf(s,"%lluB",n);
-        return;
     } else if (n < (1024*1024)) {
         d = (double)n/(1024);
         sprintf(s,"%.2fK",d);
@@ -94,6 +93,38 @@ void bytesToHuman(char *s, unsigned long long n) {
     } else {
         /* Let's hope we never need this */
         sprintf(s,"%lluB",n);
+    }
+}
+
+void numberToHuman(char *s, unsigned long long n) {
+    double d;
+    unsigned long long K = 1000;
+    unsigned long long M = K * K;
+    unsigned long long B = K * K * K;
+    unsigned long long T = K * K * K * K;
+    unsigned long long P = K * K * K * K * K;
+
+    if (n < K) {
+        /* Bytes */
+        sprintf(s,"%llu",n);
+    } else if (n < (1000 * K)) {
+        d = (double)n/K;
+        sprintf(s,"%.2fK",d);
+    } else if (n < (1000 * M)) {
+        d = (double)n/M;
+        sprintf(s,"%.2fM",d);
+    } else if (n < (1000 * B)) {
+        d = (double)n/B;
+        sprintf(s,"%.2fB",d);
+    } else if (n < (1000 * T)) {
+        d = (double)n/T;
+        sprintf(s,"%.2fT",d);
+    } else if (n < (1000LL* P)) {
+        d = (double)n/P;
+        sprintf(s,"%.2fP",d);
+    } else {
+        /* Let's hope we never need this */
+        sprintf(s,"%llu",n);
     }
 }
 
