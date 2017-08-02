@@ -501,7 +501,6 @@ void logQuery(struct context *ctx, char *cip, int cport, bool is_tcp) {
 int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     if (dv == NULL) return ERR_CODE;
     // current start position in response buffer.
-    int cur;
     int errcode;
     numaNode_t *node = ctx->node;
     const int AR_INFO_SIZE = 64;
@@ -595,14 +594,11 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         }
     }
     // update the header. don't update `cur` in ctx
-    cur = snpack(ctx->resp, 0, ctx->totallen, "h>hhhhh", hdr.xid, hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
-    assert(cur != ERR_CODE);
-
+    dnsHeader_dump(&hdr, ctx->resp, DNS_HDR_SIZE);
     return OK_CODE;
 }
 
 int dumpDnsError(struct context *ctx, int err) {
-    int cur;
     dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, 0};
 
     SET_QR_R(hdr.flag);
@@ -611,8 +607,7 @@ int dumpDnsError(struct context *ctx, int err) {
     if (err == DNS_RCODE_NXDOMAIN) SET_AA(hdr.flag);
 
     // a little trick, overwrite the dns header, don't update `cur` in ctx
-    cur = snpack(ctx->resp, 0, ctx->totallen, "h>hhhhh", hdr.xid, hdr.flag, hdr.nQd, hdr.nAnRR, hdr.nNsRR, hdr.nArRR);
-    assert(cur != ERR_CODE);
+    dnsHeader_dump(&hdr, ctx->resp, ctx->totallen);
     return OK_CODE;
 }
 
@@ -729,6 +724,8 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *s
         cport = ntohs(src_port);
         logQuery(&ctx, cip, cport, false);
     }
+    // resetDname(&(ctx.dname));
+
     return status;
 }
 
@@ -752,6 +749,8 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
 
     snpack(ctx.resp, DNS_HDR_SIZE, respLen, "m>hh", ctx.name, ctx.nameLen+1, ctx.qType, ctx.qClass);
     tcpConnAppendDnsResponse(conn, ctx.resp, ctx.cur);
+
+    // resetDname(&(ctx.dname));
     return status;
 }
 

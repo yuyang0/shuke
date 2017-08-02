@@ -7,6 +7,20 @@
 
 #include <stdint.h>
 
+#define DEFAULT_LABEL_COUNT 32
+
+typedef struct _dname {
+    char *name;
+    uint8_t nameLen;
+    uint8_t offsets[DEFAULT_LABEL_COUNT];
+    /*
+     * when the label count smaller than DEFAULT_LABEL_COUNT, then this pointer will point to offsets,
+     * otherwise it will point to memory allocated in heap.
+     */
+    uint8_t *label_offset;
+    uint8_t label_count;
+} dname_t;
+
 #define PROTO_OK     0
 #define PROTO_ERR   -1
 
@@ -298,6 +312,9 @@ int dnsRR_load(char *buf, size_t size, dnsRR_t *rr) {
     return parseDnsRRInfo(buf, size, rr->name, &(rr->rrType), &(rr->rrClass),
                           &(rr->ttl), &(rr->rdlength), rr->rdata);
 }
+
+int parseDname(char *name, size_t max, dname_t *dname);
+void resetDname(dname_t *dname);
 
 #if defined(CDNS_TEST)
 int dnsTest(int argc, char *argv[]);
