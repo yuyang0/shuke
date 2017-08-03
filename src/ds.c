@@ -296,9 +296,12 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
 
     // support round robin
     if (rs->num > 1) {
-        start_idx = rte_atomic32_add_return(&(rs->rr_idx), 1) % rs->num;
+        //TODO better way to support round rabin
+        // start_idx = rte_atomic32_add_return(&(rs->rr_idx), 1) % rs->num;
+        start_idx = 0;
         LOG_DEBUG(USER1, "rr idx: %d", rs->rr_idx);
     }
+
     for (int i = 0; i < rs->num; ++i) {
         int idx = (i + start_idx) % rs->num;
         rdata = rs->data + (rs->offsets[idx]);
