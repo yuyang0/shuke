@@ -118,9 +118,11 @@ typedef struct lcore_conf {
     uint16_t tx_port_id[RTE_MAX_ETHPORTS];
     uint16_t tx_queue_id[RTE_MAX_ETHPORTS];
     struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
+
+#ifndef ONLY_UDP
     // used for kni
     struct mbuf_table kni_tx_mbufs[RTE_MAX_ETHPORTS];
-
+#endif
     struct numaNode_s *node;
     // used to implement time function
     uint64_t tsc_hz;
@@ -134,19 +136,22 @@ typedef struct lcore_conf {
     int64_t received_req;
 } __rte_cache_aligned lcore_conf_t;
 
-typedef struct port_kni_conf {
+typedef struct port_info {
     // ethernet address for this port
     struct ether_addr eth_addr;
     // ethernet address(string format)
     char eth_addr_s[ETHER_ADDR_FMT_SIZE];
-
-    char name[RTE_KNI_NAMESIZE];
     uint8_t port_id;
-    int lcore_tx;
-    int lcore_k;
-    uint16_t tx_queue_id;
+
+#ifndef ONLY_UDP
+    // kni config
+    char veth_name[RTE_KNI_NAMESIZE];
+    int kni_lcore_tx;
+    int kni_lcore_k;
+    uint16_t kni_tx_queue_id;
     struct rte_kni *kni;
-} __rte_cache_aligned port_kni_conf_t;
+#endif
+} __rte_cache_aligned port_info_t;
 
 extern struct rte_eth_conf default_port_conf;
 

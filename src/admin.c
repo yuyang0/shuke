@@ -461,18 +461,35 @@ static sds genInfoString(char *section) {
     // statistics
     if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
         if (sections++) s = sdscat(s, "\r\n");
-        int64_t nr_req = rte_atomic64_read(&(sk.nr_req));
+        static int64_t prev_nr_req = 0;
+        static int64_t prev_nr_dropped = 0;
+        long long prev_ms = sk.last_collect_ms;
+
+        collectStats();
+
+        int64_t interval = (int64_t)(sk.last_collect_ms - prev_ms);
+        if (unlikely(interval == 0)) interval = 1;
+
+        int64_t nr_req = sk.nr_req;
+        int64_t nr_dropped = sk.nr_dropped;
          s = sdscatprintf(s,
                           "# Stats\r\n"
                           "total_requests:%lld\r\n"
                           "dropped_requests:%lld\r\n"
+                          "avg_qps:%llu\r\n"
                           "qps:%llu\r\n"
+                          "dropped_qps:%llu\r\n"
                           "num_zones:%lu\r\n",
                           (long long)nr_req,
-                          (long long)rte_atomic64_read(&(sk.nr_dropped)),
+                          (long long)nr_dropped,
                           (long long unsigned)(nr_req/uptime),
+                          (long long unsigned)((nr_req - prev_nr_req)/(interval/1000.0)),
+                          (long long unsigned)((nr_dropped - prev_nr_dropped)/(interval/1000.0)),
                           zoneDictGetNumZones(sk.zd));
+        prev_nr_req = nr_req;
+        prev_nr_dropped = nr_dropped;
 
+#ifndef ONLY_UDP
         s = sdscat(s, "\r\n");
         s = sdscatprintf(s,
                          "# Tcp stats\r\n"
@@ -482,6 +499,7 @@ static sds genInfoString(char *section) {
                          (long long unsigned)sk.num_tcp_conn,
                          (long long unsigned)sk.total_tcp_conn,
                          (long long unsigned)sk.rejected_tcp_conn);
+#endif
 
         struct rte_eth_stats eth_stats;
         for (int i = 0; i < sk.nr_ports; i++) {
@@ -493,6 +511,7 @@ static sds genInfoString(char *section) {
             s = sdscat(s, "\r\n");
             s = sdscatprintf(s,
                              "# Port %d stats\r\n"
+                             "addr:%s\r\n"
                              "input_packets:%llu\r\n"
                              "input_packets_per_sec:%llu\r\n"
                              "output_packets:%llu\r\n"
@@ -505,6 +524,7 @@ static sds genInfoString(char *section) {
                              "input_errors:%llu\r\n"
                              "output_errors:%llu\r\n",
                              portid,
+                             sk.port_info[portid]->eth_addr_s,
                              (long long unsigned) eth_stats.ipackets,
                              (long long unsigned) eth_stats.ipackets/uptime,
                              (long long unsigned) eth_stats.opackets,

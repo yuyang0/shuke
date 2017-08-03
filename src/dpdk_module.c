@@ -6,8 +6,6 @@
 #include "shuke.h"
 #include "utils.h"
 
-#define STAT_ATOMIC_WRITE_BATCH   100
-
 #define MAX_LCORE_PARAMS 1024
 
 #define MAX_JUMBO_PKT_LEN  9600
@@ -431,11 +429,12 @@ send_single_packet(lcore_conf_t *qconf,
     return 0;
 }
 
+#ifndef ONLY_UDP
 /* Send burst of packets on an output interface */
 static inline int
 kni_send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
 {
-    port_kni_conf_t *kconf = sk.kni_conf[port];
+    port_info_t *kconf = sk.port_info[port];
     struct rte_mbuf **m_table;
     int ret;
 
@@ -471,6 +470,14 @@ kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port)
     qconf->kni_tx_mbufs[port].len = len;
     return ret;
 }
+
+static inline __attribute__((always_inline)) void
+__send_to_kni(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t portid)
+{
+    /* Burst tx to kni */
+    kni_send_single_packet(qconf, m, portid);
+}
+#endif
 
 #ifdef SOFT_CKSUM
 
@@ -526,13 +533,6 @@ verify_cksum(struct rte_mbuf *m) {
 }
 
 static inline __attribute__((always_inline)) void
-__send_to_kni(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t portid)
-{
-    /* Burst tx to kni */
-    kni_send_single_packet(qconf, m, portid);
-}
-
-static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
 {
@@ -550,7 +550,9 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     struct ipv4_hdr *ipv4_h = NULL;
     struct ipv6_hdr *ipv6_h = NULL;
     struct udp_hdr  *udp_h = NULL;
+#ifndef ONLY_UDP
     struct tcp_hdr  *tcp_h = NULL;
+#endif
     bool is_ipv4 = false;
     struct ether_addr eth_addr;
     char ipv6_addr[16];
@@ -574,7 +576,9 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     switch (ether_type) {
         case ETHER_TYPE_ARP:
             LOG_DEBUG(DPDK, "%d got a arp packet.", portid);
+#ifndef ONLY_UDP
             __send_to_kni(qconf, m, portid);
+#endif
             return;
         case ETHER_TYPE_IPv4:
             is_ipv4 = true;
@@ -602,6 +606,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 goto invalid;
             }
             break;
+#ifndef ONLY_UDP
         case IPPROTO_TCP:
             tcp_h = (struct tcp_hdr *) (l3_h + m->l3_len);
             // check the tcp port
@@ -610,6 +615,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             }
             __send_to_kni(qconf, m, portid);
             return;
+#endif
         default:
             goto invalid;
     }
@@ -627,10 +633,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                            src_addr, udp_h->src_port, is_ipv4, qconf->node);
     if(n == ERR_CODE) goto invalid;
 
-    if (++qconf->nr_req >= STAT_ATOMIC_WRITE_BATCH) {
-        rte_atomic64_add(&(sk.nr_req), qconf->nr_req);
-        qconf->nr_req = 0;
-    }
+    ++qconf->nr_req;
+
     ether_addr_copy(&eth_h->s_addr, &eth_addr);
     ether_addr_copy(&eth_h->d_addr, &eth_h->s_addr);
     ether_addr_copy(&eth_addr, &eth_h->d_addr);
@@ -677,10 +681,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
 invalid:
     // LOG_DEBUG(DPDK, "drop packet.");
-    if (++qconf->nr_dropped >= STAT_ATOMIC_WRITE_BATCH) {
-        rte_atomic64_add(&(sk.nr_dropped), qconf->nr_dropped);
-        qconf->nr_dropped = 0;
-    }
+    ++qconf->nr_dropped;
     rte_pktmbuf_free(m);
 }
 
@@ -763,6 +764,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
                                portid);
                     qconf->tx_mbufs[portid].len = 0;
                 }
+#ifndef ONLY_UDP
                 // TODO: loop on rx port of this lcore
                 if (qconf->kni_tx_mbufs[portid].len > 0) {
                     kni_send_burst(qconf,
@@ -770,6 +772,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
                                    portid);
                     qconf->kni_tx_mbufs[portid].len = 0;
                 }
+#endif
             }
 
             prev_tsc = cur_tsc;
@@ -897,11 +900,18 @@ initDpdkModule() {
         fflush(stdout);
 
         nb_rx_queue = get_port_n_rx_queues(portid);
+#ifdef ONLY_UDP
+        /*
+         * every core should has a tx queue except master core
+         */
+        n_tx_queue = (uint32_t )(sk.nr_lcore_ids-1);
+#else
         /*
          * every core should has a tx queue except master core
          * every port should preserve a tx queue for kni tx thread
          */
         n_tx_queue = (uint32_t )sk.nr_lcore_ids;
+#endif
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
         LOG_INFO(DPDK, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
@@ -917,9 +927,9 @@ initDpdkModule() {
             rte_exit(EXIT_FAILURE, "port %d doesn't support cksum offload\n", portid);
         }
 
-        rte_eth_macaddr_get(portid, &sk.kni_conf[portid]->eth_addr);
-        ether_format_addr(sk.kni_conf[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &sk.kni_conf[portid]->eth_addr);
-        LOG_INFO(DPDK, "port %d mac address: %s.", portid, sk.kni_conf[portid]->eth_addr_s);
+        rte_eth_macaddr_get(portid, &sk.port_info[portid]->eth_addr);
+        ether_format_addr(sk.port_info[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &sk.port_info[portid]->eth_addr);
+        LOG_INFO(DPDK, "port %d mac address: %s.", portid, sk.port_info[portid]->eth_addr_s);
 
         /* init memory */
         ret = init_mem(NB_MBUF);
@@ -993,7 +1003,9 @@ initDpdkModule() {
         }
     }
 
+#ifndef ONLY_UDP
     kni_init_tx_queue();
+#endif
 
     /* start ports */
     for (portid = 0; portid < nb_ports; portid++) {
@@ -1017,19 +1029,7 @@ initDpdkModule() {
             rte_eth_promiscuous_enable(portid);
     }
 
-    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
-        lcore_id = (unsigned )sk.lcore_ids[i];
-        if (lcore_id == rte_get_master_lcore()) continue;
-        assert(rte_lcore_is_enabled(lcore_id));
-
-        qconf = &sk.lcore_conf[lcore_id];
-        for (queue = 0; queue < qconf->n_rx_queue; ++queue) {
-            portid = qconf->rx_queue_list[queue].port_id;
-            queueid = qconf->rx_queue_list[queue].queue_id;
-        }
-    }
-
-    check_all_ports_link_status((uint8_t)nb_ports, sk.portmask);
+    check_all_ports_link_status((uint8_t)nb_ports, (uint32_t )sk.portmask);
 
     rte_timer_subsystem_init();
     sk.hz = rte_get_timer_hz();

@@ -2,6 +2,7 @@
 // Created by yangyu on 17-2-16.
 //
 #include <string.h>
+#include <assert.h>
 #include <arpa/inet.h>
 
 #include "endianconv.h"
@@ -170,7 +171,7 @@ RRSet *RRSetRemoveFreeSpace(RRSet *rs) {
 
 RRSet *RRSetCat(RRSet *rs, char *buf, size_t len) {
     RRSet *new = RRSetMakeRoomFor(rs, len);
-    memcpy(new->data+new->len, buf, len);
+    rte_memcpy(new->data+new->len, buf, len);
     new->num++;
     new->len += len;
     new->free -= len;
@@ -252,7 +253,7 @@ int dumpCompressedName(struct context *ctx, char *name, compressInfo *cps, size_
 }
 
 /*!
- * dump the RRSet object to sds
+ * dump the RRSet object to response buffer
  *
  * @param ctx:  context object, used to store the dumped bytes
  * @param rs:  the RRSet object needs to be dumped
@@ -455,7 +456,7 @@ sds RRSetToStr(RRSet *rs) {
                 // one TXT record may contain multiple strings
                 while(readlen < rdlength) {
                     uint8_t len = (uint8_t)(*data);
-                    memcpy(txt, data+1, len);
+                    rte_memcpy(txt, data+1, len);
                     txt[len] = 0;
                     data += (len+1);
                     readlen += (len+1);
@@ -567,9 +568,8 @@ dnsDictValue *zoneFetchValueAbs(zone *z, void *key, size_t keyLen) {
     // the key ends with origin(absolute domain name).
     assert (keyLen >= originLen && strcasecmp(key+remain, z->origin) == 0);
 
-    char buf[255] = {0};
-    if (remain == 0) strcpy(buf, "@");
-    else memcpy(buf, key, remain);
+    char buf[255] = "@";
+    if (remain > 0) rte_memcpy(buf, key, remain);
     return dictFetchValue(z->d, buf);
 }
 
@@ -592,7 +592,7 @@ RRSet *zoneFetchTypeVal(zone *z, void *key, uint16_t type) {
     if (keyLen >= originLen && strcasecmp(key+remain, z->origin) == 0) {
         char label[MAX_DOMAIN_LEN+2] = "@";
         if (remain > 0) {
-            memcpy(label, key, remain);
+            rte_memcpy(label, key, remain);
             label[remain] = 0;
         }
         dv = dictFetchValue(z->d, label);
@@ -783,15 +783,11 @@ zone *zoneDictFetchVal(zoneDict *zd, char *key) {
  */
 zone *zoneDictGetZone(zoneDict *zd, char *name) {
     zone *z = NULL;
-    int nLabel = 0;
     char *start = name;
 
-    nLabel = getNumLabels(start);
-    if (nLabel < 2) return NULL;
-    for (int i = nLabel; i >= 2; --i) {
+    for (; *start > 0; start += (*start + 1)) {
         z = rcu_ht_fetch_value(zd->ht, start);
         if (z != NULL) break;
-        start += (*start + 1);
     }
     return z;
 }

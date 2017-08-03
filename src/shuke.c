@@ -293,6 +293,24 @@ void addZoneOtherNuma(zone *z) {
     }
 }
 
+void collectStats() {
+    int64_t nr_req = 0, nr_dropped = 0;
+    unsigned lcore_id = 0;
+    lcore_conf_t *qconf;
+
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        lcore_id = (unsigned )sk.lcore_ids[i];
+        if (lcore_id == rte_get_master_lcore()) continue;
+
+        qconf = &sk.lcore_conf[lcore_id];
+        nr_req += qconf->nr_req;
+        nr_dropped += qconf->nr_dropped;
+    }
+    sk.nr_req = nr_req;
+    sk.nr_dropped = nr_dropped;
+    sk.last_collect_ms = mstime();
+}
+
 void config_log() {
     FILE *fp = sk.log_fp;
 
@@ -780,8 +798,14 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
             sk.asyncReloadZone(ctx);
         }
     }
-    // run tcp dns server cron
-    tcpServerCron(el, id, (void *)sk.tcp_srv);
+
+#ifndef ONLY_UDP
+    if (! sk.only_udp) {
+        // run tcp dns server cron
+        tcpServerCron(el, id, (void *)sk.tcp_srv);
+    }
+#endif
+
     return TIME_INTERVAL;
 }
 
@@ -925,6 +949,7 @@ static void initConfigFromFile(int argc, char **argv) {
     sk.promiscuous_on = false;
     sk.numa_on = false;
 
+    sk.only_udp = false;
     sk.port = 53;
     sk.daemonize = false;
     sk.logVerbose = false;
@@ -984,6 +1009,9 @@ static void initConfigFromFile(int argc, char **argv) {
     }
 
     conf_err = getIntVal(sk.errstr, cbuf, "port", &sk.port);
+    CHECK_CONF_ERR(conf_err, sk.errstr);
+
+    conf_err = getBoolVal(sk.errstr, cbuf, "only_udp", &sk.only_udp);
     CHECK_CONF_ERR(conf_err, sk.errstr);
 
     sk.data_store = getStrVal(cbuf, "data_store", NULL);
@@ -1052,6 +1080,7 @@ static void initShuke() {
     sk.arch_bits = (sizeof(long) == 8)? 64 : 32;
     sk.starttime = time(NULL);
     updateCachedTime();
+    sk.last_collect_ms = sk.mstime;
 
     sk.el = aeCreateEventLoop(1024, true);
     assert(sk.el);
@@ -1131,11 +1160,14 @@ static int construct_lcore_list() {
         offset += n;
     }
 
+#ifndef ONLY_UDP
     for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
         if (offset >= 4096) return ERR_CODE;
         n = snprintf(buffer+offset, 4096-offset, ",%d", sk.kni_tx_lcore_ids[i]);
         offset += n;
     }
+#endif
+
     sk.total_lcore_list = strdup(buffer);
     return OK_CODE;
 }
@@ -1145,6 +1177,7 @@ static int hexchar_to_int(char c) {
     return (int)strtol(buf, NULL, 16);
 }
 
+#ifndef ONLY_UDP
 static int parse_kni_tx_config() {
     int ids[1024];
     int nr_id = 0;
@@ -1205,22 +1238,22 @@ static int parse_kni_tx_config() {
                 break;
             }
         }
-        if (!sk.kni_conf[portid]) {
+        if (!sk.port_info[portid]) {
             snprintf(sk.errstr, ERR_STR_LEN, "port %lu is not enabled.", portid);
             return ERR_CODE;
         }
         if (found == false) ids[nr_id++] = lcore_id;
-        if (sk.kni_conf[portid]->lcore_tx >= 0) {
+        if (sk.port_info[portid]->kni_lcore_tx >= 0) {
             snprintf(sk.errstr, ERR_STR_LEN, "duplicate config for port %lu.", portid);
             return ERR_CODE;
         }
-        sk.kni_conf[portid]->lcore_tx = lcore_id;
+        sk.port_info[portid]->kni_lcore_tx = lcore_id;
         ++nb_params;
     }
-    // check if every port contains lcore_tx
+    // check if every port contains kni_lcore_tx
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        if (sk.kni_conf[portid]->lcore_tx < 0) {
+        if (sk.port_info[portid]->kni_lcore_tx < 0) {
             snprintf(sk.errstr, ERR_STR_LEN, "port %d doesn't have kni tx lcore config.", portid);
             return ERR_CODE;
         }
@@ -1281,27 +1314,57 @@ static int parse_kni_kernel_config() {
         }
         unsigned long portid = int_fld[FLD_PORT];
         int lcore_id = (int)int_fld[FLD_LCORE];
-        if (!sk.kni_conf[portid]) {
+        if (!sk.port_info[portid]) {
             snprintf(sk.errstr, ERR_STR_LEN, "port %lu is not enabled.", portid);
             return ERR_CODE;
         }
-        if (sk.kni_conf[portid]->lcore_k >= 0) {
+        if (sk.port_info[portid]->kni_lcore_k >= 0) {
             snprintf(sk.errstr, ERR_STR_LEN, "duplicate config for port %lu.", portid);
             return ERR_CODE;
         }
-        sk.kni_conf[portid]->lcore_k = lcore_id;
+        sk.port_info[portid]->kni_lcore_k = lcore_id;
         ++nb_params;
     }
-    // check if every port contains lcore_k
+    // check if every port contains kni_lcore_k
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        if (sk.kni_conf[portid]->lcore_k < 0) {
+        if (sk.port_info[portid]->kni_lcore_k < 0) {
             snprintf(sk.errstr, ERR_STR_LEN, "port %d doesn't have kni kernel lcore config.", portid);
             return ERR_CODE;
         }
     }
     return OK_CODE;
 }
+
+int initKniConfig() {
+    // initialize kni config
+    if (sk.bindaddr_count != sk.nr_ports) {
+        fprintf(stderr, "the number of ip address should equal to number of ports.\n");
+        exit(-1);
+    }
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        assert(sk.port_info[portid]);
+        snprintf(sk.port_info[portid]->veth_name, RTE_KNI_NAMESIZE, "vEth%u", portid);
+        sk.port_info[portid]->kni_lcore_tx = -1;
+        sk.port_info[portid]->kni_lcore_k = -1;
+        sk.port_info[portid]->kni_tx_queue_id = (uint16_t )(sk.nr_lcore_ids - 1);
+    }
+
+    if (parse_kni_tx_config() != OK_CODE) {
+        fprintf(stderr, "kni_tx_config error: %s\n", sk.errstr);
+        exit(-1);
+    }
+
+    if (sk.kni_kernel_config) {
+        if (parse_kni_kernel_config() != OK_CODE) {
+            fprintf(stderr, "kni_kernel_config error: %s.\n", sk.errstr);
+            exit(-1);
+        }
+    }
+    return OK_CODE;
+}
+#endif
 
 static int parse_str_coremask(char *coremask, int buf[], int *n) {
     int max = *n;
@@ -1371,53 +1434,11 @@ int initNumaConfig() {
     return 0;
 }
 
-int initKniConfig() {
-    int ids[1024];
-    int nr_id;
-
-    nr_id = 1024;
-    if (get_port_ids(ids, &nr_id) == ERR_CODE) {
-        fprintf(stderr, "error: the number of port is bigger than %d.\n", nr_id);
-        abort();
-    }
-    sk.port_ids = memdup(ids, nr_id * sizeof(int));
-    sk.nr_ports = nr_id;
-
-    // initialize kni config
-    if (sk.bindaddr_count != sk.nr_ports) {
-        fprintf(stderr, "the number of ip address should equal to number of ports.\n");
-        exit(-1);
-    }
-    for (int i = 0; i < sk.nr_ports; ++i) {
-        int portid = sk.port_ids[i];
-        assert(sk.kni_conf[portid] == NULL);
-        sk.kni_conf[portid] = calloc(1, sizeof(struct port_kni_conf));
-        assert(sk.kni_conf[portid]);
-        snprintf(sk.kni_conf[portid]->name, RTE_KNI_NAMESIZE, "vEth%u", portid);
-        sk.kni_conf[portid]->port_id = (uint8_t)portid;
-        sk.kni_conf[portid]->lcore_tx = -1;
-        sk.kni_conf[portid]->lcore_k = -1;
-        sk.kni_conf[portid]->tx_queue_id = (uint16_t )(sk.nr_lcore_ids - 1);
-    }
-
-    if (parse_kni_tx_config() != OK_CODE) {
-        fprintf(stderr, "kni_tx_config error: %s\n", sk.errstr);
-        exit(-1);
-    }
-
-    if (sk.kni_kernel_config) {
-        if (parse_kni_kernel_config() != OK_CODE) {
-            fprintf(stderr, "kni_kernel_config error: %s.\n", sk.errstr);
-            exit(-1);
-        }
-    }
-    return OK_CODE;
-}
-
 int initOtherConfig() {
     int ids[1024];
     int nr_id;
 
+    // parse coremask
     nr_id = 1024;
     if (parse_str_coremask(sk.coremask, ids, &nr_id) == ERR_CODE) {
         fprintf(stderr, "error: the number of locre is bigger than %d.\n", nr_id);
@@ -1431,7 +1452,26 @@ int initOtherConfig() {
     if (sk.master_lcore_id < 0)
         sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
 
+    // parse all port id
+    nr_id = 1024;
+    if (get_port_ids(ids, &nr_id) == ERR_CODE) {
+        fprintf(stderr, "error: the number of port is bigger than %d.\n", nr_id);
+        abort();
+    }
+    sk.port_ids = memdup(ids, nr_id * sizeof(int));
+    sk.nr_ports = nr_id;
+
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        assert(sk.port_info[portid] == NULL);
+        sk.port_info[portid] = calloc(1, sizeof(port_info_t));
+        assert(sk.port_info[portid]);
+        sk.port_info[portid]->port_id = (uint8_t)portid;
+    }
+
+#ifndef ONLY_UDP
     initKniConfig();
+#endif
 
     if (construct_lcore_list() == ERR_CODE) {
         fprintf(stderr, "error: lcore list is too long\n");
@@ -1445,6 +1485,7 @@ int initOtherConfig() {
 
     initNumaConfig();
 
+#ifndef ONLY_UDP
     // all kni tx lcores should stay in one socket
     unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
     for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
@@ -1453,6 +1494,7 @@ int initOtherConfig() {
             exit(-1);
         }
     }
+#endif
 
     return OK_CODE;
 }
@@ -1478,9 +1520,6 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    rte_atomic64_init(&(sk.nr_req));
-    rte_atomic64_init(&(sk.nr_dropped));
-
     initConfigFromFile(argc, argv);
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
@@ -1495,24 +1534,35 @@ int main(int argc, char *argv[]) {
 
     sk.force_quit = false;
     initDpdkModule();
-    init_kni_module();
+
+#ifndef ONLY_UDP
+    if (!sk.only_udp) init_kni_module();
+#endif
 
     rcu_register_thread();
 
     initShuke();
 
     startDpdkThreads();
-    start_kni_tx_threads();
-    kni_ifconfig_all();
 
-    sleep(4);
-    LOG_INFO(USER1, "starting dns tcp server.");
-    sk.tcp_srv = tcpServerCreate();
-    assert(sk.tcp_srv);
+#ifndef ONLY_UDP
+    if (! sk.only_udp) {
+        start_kni_tx_threads();
+        kni_ifconfig_all();
+
+        sleep(4);
+        LOG_INFO(USER1, "starting dns tcp server.");
+        sk.tcp_srv = tcpServerCreate();
+        assert(sk.tcp_srv);
+    }
+#endif
 
     aeMain(sk.el);
 
-    cleanup_kni_module();
+#ifndef ONLY_UDP
+    if (! sk.only_udp) cleanup_kni_module();
+#endif
+
     cleanupDpdkModule();
 
     rcu_unregister_thread();

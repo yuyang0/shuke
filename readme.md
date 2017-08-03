@@ -9,6 +9,10 @@ An authority dns server implemented with DPDK
 1. build dpdk, shuke is only tested on dpdk-16.11.1.
 2. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
 
+## tips
+1. if you want to build shuke in DEBUG mode, just run `make DEBUG=1`
+2. if you want to see the compiler command, just run `make V=1`
+
 # run
 just run `build/shuke-server -c conf/shuke.conf`, 
 you may need to change the config in the config file.

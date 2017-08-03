@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <assert.h>
 
 #include "defines.h"
 #include "version.h"
@@ -152,6 +153,7 @@ struct shuke {
     char *bindaddr[CONFIG_BINDADDR_MAX];
     int bindaddr_count;
     int port;
+    bool only_udp;
     char *pidfile;
     bool daemonize;
     char *query_log_file;
@@ -186,8 +188,8 @@ struct shuke {
      */
     // MAP: lcore_id => lcore_conf_t
     lcore_conf_t lcore_conf[RTE_MAX_LCORE];
-    // MAP: portid => port_kni_conf_t*
-    port_kni_conf_t *kni_conf[RTE_MAX_ETHPORTS];
+    // MAP: portid => port_info_t*
+    port_info_t *port_info[RTE_MAX_ETHPORTS];
 
     //MAP: socketid => numaNode_t*
     numaNode_t *nodes[MAX_NUMA_NODES];
@@ -198,8 +200,10 @@ struct shuke {
 
     int *lcore_ids;
     int nr_lcore_ids;
+#ifndef ONLY_UDP
     int *kni_tx_lcore_ids;
     int nr_kni_tx_lcore_id;
+#endif
     int *port_ids;
     int nr_ports;
     // char *total_coremask;
@@ -258,8 +262,9 @@ struct shuke {
     uint64_t hz;		/**< Number of events per seconds */
 
     // statistics
-    rte_atomic64_t nr_req;                   // number of processed requests
-    rte_atomic64_t nr_dropped;
+    int64_t nr_req;                   // number of processed requests
+    int64_t nr_dropped;
+    long long last_collect_ms;
 
     uint64_t num_tcp_conn;
     uint64_t total_tcp_conn;
@@ -321,7 +326,7 @@ int deleteZoneAllNumaNodes(char *origin);
 void masterRefreshZone(char *origin);
 
 void config_log();
-
+void collectStats();
 /*----------------------------------------------
  *     debug utils
  *---------------------------------------------*/
