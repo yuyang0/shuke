@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdbool.h>
+#include <rte_branch_prediction.h>
 
 #include "endianconv.h"
 #include "zmalloc.h"
@@ -13,9 +14,101 @@
 
 #define MAXLINE 1024
 
+static const unsigned char _dnsValidCharTable[256] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0X2A, 0, 0, 0X2D, 0, 0,
+        0X30, 0X31, 0X32, 0X33, 0X34, 0X35, 0X36, 0X37, 0X38, 0X39, 0, 0, 0, 0, 0, 0,
+        0, 0X61, 0X62, 0X63, 0X64, 0X65, 0X66, 0X67, 0X68, 0X69, 0X6A, 0X6B, 0X6C, 0X6D, 0X6E, 0X6F,
+        0X70, 0X71, 0X72, 0X73, 0X74, 0X75, 0X76, 0X77, 0X78, 0X79, 0X7A, 0, 0, 0, 0, 0X5F,
+        0, 0X61, 0X62, 0X63, 0X64, 0X65, 0X66, 0X67, 0X68, 0X69, 0X6A, 0X6B, 0X6C, 0X6D, 0X6E, 0X6F,
+        0X70, 0X71, 0X72, 0X73, 0X74, 0X75, 0X76, 0X77, 0X78, 0X79, 0X7A, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+/*!
+ * check dns name format.
+ * name should in binary form(len label)
+ *
+ * @param name : the name <len label format>
+ * @param max : the max size of name(include terminate null), mainly used to detect the name which doesn't endswith 0.
+ * @return -1 if the format is incorrect, otherwise return the length of the len label string.
+ */
+int checkLenLabel(char *name, size_t max) {
+    if (max == 0) max = strlen(name) + 1;
+
+    char *start = name;
+    for (int len = *name++; len != 0; len = *name++) {
+        if (len > MAX_LABEL_LEN) return PROTO_ERR;
+        if ((size_t)(name+len-start) >= max) return PROTO_ERR;
+
+        for (int j = 0; j < len; ++j, name++) {
+            if (! _dnsValidCharTable[(int)(*name)]) {
+                return PROTO_ERR;
+            }
+        }
+    }
+    return (int)(name-start);
+}
+
+int parseDname(char *name, size_t max, dname_t *dname) {
+    if (max == 0) max = strlen(name) + 1;
+    int cnt = 0;
+    int max_cnt = DEFAULT_LABEL_COUNT;
+
+    char *start = name;
+    dname->name = start;
+    dname->label_offset = dname->offsets;
+
+    for (int len = *name; len != 0; len = *name) {
+        // the offset memory space is not enough
+        if (cnt == max_cnt) {
+            if (max_cnt > DEFAULT_LABEL_COUNT) {
+                dname->label_offset = zrealloc(dname->label_offset, max_cnt*2);
+            } else {
+                void *tmp = zmalloc(max_cnt*2);
+                memcpy(tmp, dname->label_offset, max_cnt);
+                dname->label_offset = tmp;
+            }
+            max_cnt *= 2;
+        }
+        dname->label_offset[cnt++] = (uint8_t)(name-start);
+
+        if (len > MAX_LABEL_LEN) goto invalid;
+        // ignore the length byte
+        name++;
+        if ((size_t)(name+len-start) >= max) goto invalid;
+
+        for (int j = 0; j < len; ++j, name++) {
+            if (! _dnsValidCharTable[(int)(*name)]) {
+                goto invalid;
+            }
+        }
+    }
+    dname->label_count = (uint8_t )cnt;
+    dname->nameLen = (uint8_t)(name-start);
+    return PROTO_OK;
+invalid:
+    if (unlikely(dname->label_offset != dname->offsets)) zfree(dname->label_offset);
+    return PROTO_ERR;
+}
+
+void resetDname(dname_t *dname) {
+    if (unlikely(dname->label_offset != dname->offsets)) {
+        zfree(dname->label_offset);
+    }
+}
+
 //we do not support type DS, KEY etc.
 bool isSupportDnsType(uint16_t type) {
-    static unsigned char supportTypeTable[256] = {
+    static const unsigned char supportTypeTable[256] = {
         0, DNS_TYPE_A, DNS_TYPE_NS, 0, 0, DNS_TYPE_CNAME, DNS_TYPE_SOA, 0, 0, 0, 0, 0, DNS_TYPE_PTR, 0, 0, DNS_TYPE_MX,
         DNS_TYPE_TXT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, DNS_TYPE_AAAA, 0, 0, 0,
         0, DNS_TYPE_SRV, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -135,16 +228,11 @@ int dumpDNSHeader(char *buf, size_t size, uint16_t xid, uint16_t flag,
     }
     // ignore the byte order of xid.
     memcpy(buf, &xid, 2);
-    buf += 2;
-    dump16be(flag, buf);
-    buf += 2;
-    dump16be(nQd, buf);
-    buf += 2;
-    dump16be(nAn, buf);
-    buf += 2;
-    dump16be(nNs, buf);
-    buf += 2;
-    dump16be(nAr, buf);
+    dump16be(flag, buf+2);
+    dump16be(nQd, buf+4);
+    dump16be(nAn, buf+6);
+    dump16be(nNs, buf+8);
+    dump16be(nAr, buf+10);
     return DNS_HDR_SIZE;
 }
 
@@ -152,6 +240,7 @@ int parseDnsQuestion(char *buf, size_t size, char **name, uint16_t *qType, uint1
     char *p = buf;
     int err;
     if ((err = checkLenLabel(buf, size)) == PROTO_ERR) {
+        // if (parseDname(buf, size, dname) == PROTO_ERR) {
         return PROTO_ERR;
     }
     size_t nameLen = (size_t)err;
@@ -227,49 +316,6 @@ int dumpDnsRRInfo(char *buf, size_t sz, char *name, uint16_t type,
     p += 2;
     memcpy(p, rdata, rdlength);
     return (int)(totallen);
-}
-
-/*!
- * check dns name format.
- * name should in binary form(len label)
- *
- * @param name : the name <len label format>
- * @param max : the max size of name(include terminate null), mainly used to detect the name which doesn't endswith 0.
- * @return -1 if the format is incorrect, otherwise return the length of the len label string.
- */
-int checkLenLabel(char *name, size_t max) {
-    static unsigned char DnsValidCharTable[256] = {
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0X2A, 0, 0, 0X2D, 0, 0,
-        0X30, 0X31, 0X32, 0X33, 0X34, 0X35, 0X36, 0X37, 0X38, 0X39, 0, 0, 0, 0, 0, 0,
-        0, 0X61, 0X62, 0X63, 0X64, 0X65, 0X66, 0X67, 0X68, 0X69, 0X6A, 0X6B, 0X6C, 0X6D, 0X6E, 0X6F,
-        0X70, 0X71, 0X72, 0X73, 0X74, 0X75, 0X76, 0X77, 0X78, 0X79, 0X7A, 0, 0, 0, 0, 0X5F,
-        0, 0X61, 0X62, 0X63, 0X64, 0X65, 0X66, 0X67, 0X68, 0X69, 0X6A, 0X6B, 0X6C, 0X6D, 0X6E, 0X6F,
-        0X70, 0X71, 0X72, 0X73, 0X74, 0X75, 0X76, 0X77, 0X78, 0X79, 0X7A, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    };
-    if (max == 0) max = strlen(name) + 1;
-
-    char *start = name;
-    for (int len = *name++; len != 0; len = *name++) {
-        if (len > MAX_LABEL_LEN) return PROTO_ERR;
-        if ((size_t)(name+len-start) >= max) return PROTO_ERR;
-
-        for (int j = 0; j < len; ++j, name++) {
-            if (! DnsValidCharTable[(int)(*name)]) {
-                return PROTO_ERR;
-            }
-        }
-    }
-    return (int)(name-start);
 }
 
 #if defined(CDNS_TEST)

@@ -7,18 +7,15 @@
 
 // dump integer to big endian encode string
 static inline void dump16be(uint16_t v, char *buf) {
-    uint16_t *tmp16 = (uint16_t *)buf;
-    *tmp16 = rte_cpu_to_be_16(v);
+    (*((uint16_t *)buf)) = rte_cpu_to_be_16(v);
 }
 
 static inline void dump32be(uint32_t v, char *buf) {
-    uint32_t *tmp32 = (uint32_t *)buf;
-    *tmp32 = rte_cpu_to_be_32(v);
+    (*((uint32_t *)buf)) = rte_cpu_to_be_32(v);
 }
 
 static inline void dump64be(uint64_t v, char *buf) {
-    uint64_t *tmp64 = (uint64_t *)buf;
-    *tmp64 = rte_cpu_to_be_64(v);
+    (*((uint64_t *)buf)) = rte_cpu_to_be_64(v);
 }
 
 // load integer from big endian encode string

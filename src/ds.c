@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <arpa/inet.h>
 
+#include <rte_branch_prediction.h>
+
 #include "endianconv.h"
 #include "zmalloc.h"
 #include "sds.h"
@@ -252,6 +254,20 @@ int dumpCompressedName(struct context *ctx, char *name, compressInfo *cps, size_
     return cur;
 }
 
+/*
+ * dump the common fields(name(compressed), type, class, ttl) of RR
+ */
+static inline int dumpCompressedRRHeader(char *buf, int offset, size_t size, uint16_t nameOffset,
+                                        uint16_t type, uint16_t cls, uint32_t ttl) {
+    if (unlikely(size < (size_t)(offset + 10))) return ERR_CODE;
+    char *start = buf + offset;
+    (*((uint16_t*) start)) = rte_cpu_to_be_16(nameOffset);
+    (*((uint16_t*) (start+2))) = rte_cpu_to_be_16(type);
+    (*((uint16_t*) (start+4))) = rte_cpu_to_be_16(cls);
+    (*((uint32_t*) (start+6))) = rte_cpu_to_be_32(ttl);
+    return offset+10;
+}
+
 /*!
  * dump the RRSet object to response buffer
  *
@@ -289,7 +305,7 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
 
         uint16_t rdlength = load16be(rdata);
 
-        cur = snpack(resp, cur, totallen, ">hhhi", dnsNameOffset, rs->type, DNS_CLASS_IN, rs->ttl);
+        cur = dumpCompressedRRHeader(resp, cur, totallen, dnsNameOffset, rs->type, DNS_CLASS_IN, rs->ttl);
         if (cur == ERR_CODE) return DS_ERR;
 
         // compress the domain name in NS and MX record.
@@ -349,8 +365,9 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
                 }
                 break;
             default:
-                cur = snpack(resp, cur, totallen, "m", rdata, rdlength+2);
-                if (cur == ERR_CODE) return DS_ERR;
+                if (unlikely((int)(totallen-cur) < rdlength+2)) return DS_ERR;
+                rte_memcpy(resp+cur, rdata, rdlength+2);
+                cur += (rdlength+2);
         }
     }
     ctx->cur = cur;

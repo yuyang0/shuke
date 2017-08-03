@@ -14,6 +14,7 @@ long long mstime(void);
 void sortIntArray(int arr[], size_t nitems);
 int intArrayToStr(int arr[], int nitems, char *seps, char *buf, size_t size);
 void bytesToHuman(char *s, unsigned long long n);
+void numberToHuman(char *s, unsigned long long n);
 
 char* readFile(const char *fname);
 char *zreadFile(const char *filename);

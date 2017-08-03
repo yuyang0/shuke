@@ -40,6 +40,9 @@ struct context {
     // name just points to the recv buffer, so never free this pointer
     char *name;
     size_t nameLen;
+    // when finished use dname, you need call resetDname to free the memory.
+    // dname_t dname;
+
     uint16_t qType;
     uint16_t qClass;
 
