@@ -87,7 +87,7 @@ int replaceZoneAllNumaNodes(zone *z) {
     struct cds_lfht *ht = zd->ht;
     struct cds_lfht_node *ht_node;
     unsigned int hash = zoneDictHash(z->origin, z->originLen);
-    rcu_read_lock();
+    zoneDictWLock(zd);
     ht_node = cds_lfht_add_replace(ht, hash, zoneDictHtMatch, z->origin,
                                    &z->htnode);
     if (ht_node) {
@@ -96,7 +96,7 @@ int replaceZoneAllNumaNodes(zone *z) {
         call_rcu(&old_z->rcu_head, zoneDictFreeCallback);
         err = 0;
     }
-    rcu_read_unlock();
+    zoneDictWUnlock(zd);
     return err;
 }
 

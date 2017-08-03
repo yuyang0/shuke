@@ -171,10 +171,10 @@ typedef struct _zoneDict {
     struct cds_lfht *ht;
 } zoneDict;
 
-#define zoneDictRLock(zd) (void)zd; rcu_read_lock()
-#define zoneDictRUnlock(zd) (void)zd; rcu_read_unlock()
-#define zoneDictWLock(zd) (void)zd; rcu_read_lock()
-#define zoneDictWUnlock(zd) (void)zd; rcu_read_unlock()
+#define zoneDictRLock(zd) rcu_read_lock()
+#define zoneDictRUnlock(zd) rcu_read_unlock()
+#define zoneDictWLock(zd) rcu_read_lock()
+#define zoneDictWUnlock(zd) rcu_read_unlock()
 
 RRSet *RRSetCreate(uint16_t type, int socket_id);
 RRSet *RRSetDup(RRSet *rs, int socket_id);

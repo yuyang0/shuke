@@ -735,7 +735,7 @@ void *rcu_ht_fetch_value(struct cds_lfht *ht, void *key) {
     }
 }
 
-/* And a case insensitive hash function (based on djb hash) */
+/* case insensitive hash function (based on djb hash) */
 unsigned int zoneDictHash(char *buf, size_t len) {
     unsigned int hash = (unsigned int)5381;
 
@@ -838,6 +838,7 @@ int zoneDictAdd(zoneDict *zd, zone *z) {
     unsigned int hash = zoneDictHash(key, strlen(key));
     zoneDictWLock(zd);
     htnode = cds_lfht_add_unique(zd->ht, hash, zoneDictHtMatch, z->origin, &z->htnode);
+    // zone already exists
     if (htnode != &z->htnode) {
         err = DICT_ERR;
     }
@@ -873,7 +874,7 @@ int zoneDictEmpty(zoneDict *zd) {
     zone *z;
     int ret;
 
-    zoneDictRLock(zd);
+    zoneDictWLock(zd);
     cds_lfht_for_each_entry(zd->ht, &iter, z, htnode) {
         ht_node = cds_lfht_iter_get_node(&iter);
         ret = cds_lfht_del(zd->ht, ht_node);
@@ -881,7 +882,7 @@ int zoneDictEmpty(zoneDict *zd) {
             call_rcu(&z->rcu_head, zoneDictFreeCallback);
         }
     }
-    zoneDictRUnlock(zd);
+    zoneDictWUnlock(zd);
     return DS_OK;
 }
 
