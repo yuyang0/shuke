@@ -1,3 +1,6 @@
 [submodule "3rd/himongo"]
 	path = 3rd/himongo
 	url = https://github.com/yuyang0/himongo.git
+[submodule "3rd/liburcu"]
+	path = 3rd/liburcu
+	url = https://github.com/yuyang0/userspace-rcu.git

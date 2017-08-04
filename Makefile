@@ -17,7 +17,7 @@ OPTIMIZATION?=-O3
 
 # PROJECT_ROOT:=$(abspath .)
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
-URCU_LIBS:=-lurcu-cds -lurcu
+URCU_STATIC_LIBS:=3rd/liburcu/src/.libs/liburcu-cds.a 3rd/liburcu/src/.libs/liburcu.a
 
 SHUKE_SRC_DIR:=src
 # Default settings
@@ -29,7 +29,9 @@ DEBUG_FLAGS=-g -ggdb
 LIB_DIR_LIST=/usr/local/lib \
 						 $(RTE_SDK)/$(RTE_TARGET)/lib
 INC_DIR_LIST=$(SHUKE_SRC_DIR) \
-				     3rd
+				     3rd     \
+						 3rd/liburcu/include \
+						 3rd/liburcu/src
 				     # $(RTE_SDK)/$(RTE_TARGET)/include
 SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c ds.c debug.c mongo.c \
             protocol.c rbtree.c sds.c shuke.c str.c utils.c zone_parser.c \
@@ -40,7 +42,7 @@ SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
 FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(CFLAGS) $(SHUKE_CFLAGS) $(MACROS)
 FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG_FLAGS)
-FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_LIBS) -pthread -lrt
+FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) -pthread -lrt
 
 # FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
 FINAL_CFLAGS += $(addprefix -I,$(INC_DIR_LIST))
@@ -81,7 +83,7 @@ dep:
 	$(MAKE) Makefile.dep
 .PHONY: dep
 
-$(SHUKE_BUILD_DIR)/shuke-server: $(HIMONGO_STATICLIB) $(SHUKE_OBJ)
+$(SHUKE_BUILD_DIR)/shuke-server: 3rd $(SHUKE_OBJ)
 	$(SHUKE_LD) -o $@ $(SHUKE_OBJ) $(DPDKLIBS) $(FINAL_LIBS)
 
 $(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c
@@ -95,16 +97,26 @@ clean:
 $(SHUKE_BUILD_DIR):
 	mkdir -p $(SHUKE_BUILD_DIR)
 
+3rd: $(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS)
+
+update3rd:
+	rm -rf 3rd/himongo 3rd/liburcu && git submodule update --init
+
 $(HIMONGO_STATICLIB): 3rd/himongo/Makefile
 	cd 3rd/himongo && make
 
 3rd/himongo/Makefile:
 	git submodule update --init
 
-update3rd:
-	rm -rf 3rd/himongo && git submodule update --init
+$(URCU_STATIC_LIBS): 3rd/liburcu/Makefile
+	cd 3rd/liburcu && make
 
-3rd: $(HIMONGO_STATICLIB)
+3rd/liburcu/Makefile: | 3rd/liburcu/bootstrap
+	cd 3rd/liburcu && ./bootstrap && ./configure
+
+3rd/liburcu/bootstrap:
+	git submodule update --init
+
 
 dnsbench: src/bench.c src/ae.c
 	$(SHUKE_CC) -o $@ $^ $(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(SHUKE_CFLAGS) -DUSE_MALLOC
