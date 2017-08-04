@@ -6,6 +6,8 @@ An authority dns server implemented with DPDK
 2. high performance
 
 # buid
+first you need install autoconf and libtool
+
 1. build dpdk, shuke is only tested on dpdk-16.11.1.
 2. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
 
@@ -14,15 +16,15 @@ An authority dns server implemented with DPDK
 2. if you want to see the compiler command, just run `make V=1`
 
 # run
-just run `build/shuke-server -c conf/shuke.conf`, 
+just run `build/shuke-server -c conf/shuke.conf`,
 you may need to change the config in the config file.
 
 # mongo data schema
-every zone should have a collection in mongodb. you can use 
+every zone should have a collection in mongodb. you can use
 `tools/zone2mongo.py` to convert zone data from zone file to mongodb
 
 ## zone collection
-this collection used to track the RR of a zone, 
+this collection used to track the RR of a zone,
 the collection name is the domain of the zone, since mongodb's
 collection name can't end with dot, so the domain should be the
 absolute domain name except the last dot.
@@ -34,12 +36,12 @@ the collection should contain the following fields
         type: "DNS type",
         rdata: "rdata"
     }
-    
+
 the meaning of fields is clear. just like the zone file.
 
 # Admin Commands
 SHUKE has admin tcp server used to execute admin operations
- 
+
 1. `zone`: this command used to manipulate the zone data in memory, it has many subcommands.
     1. `get`: get a zone
     2. `getall`: get all zones
