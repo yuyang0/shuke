@@ -748,11 +748,12 @@ unsigned int zoneDictHash(char *buf, size_t len) {
 }
 
 zoneDict *zoneDictCreate(int socket_id) {
+    long l_socket_id = (long)socket_id;
     zoneDict *zd = socket_calloc(socket_id, 1, sizeof(*zd));
     int max_table_order = (sizeof(long) == 8)? 64 : 32;
     zd->ht = cds_lfht_new_priv(1, 1, 1UL << (max_table_order - 1),
                                CDS_LFHT_AUTO_RESIZE | CDS_LFHT_ACCOUNTING,
-                               &cds_lfht_mm_socket, NULL, (void*)socket_id);
+                               &cds_lfht_mm_socket, NULL, (void*)l_socket_id);
     zd->socket_id = socket_id;
     return zd;
 }

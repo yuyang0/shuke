@@ -30,12 +30,13 @@ const struct cds_lfht_mm_type cds_lfht_mm_socket;
 static
 void cds_lfht_alloc_bucket_table(struct cds_lfht *ht, unsigned long order)
 {
+    long socket_id = (long)ht->privdata;
 	if (order == 0) {
-		ht->tbl_order[0] = socket_calloc((int)ht->privdata, ht->min_nr_alloc_buckets,
+		ht->tbl_order[0] = socket_calloc((int)socket_id, ht->min_nr_alloc_buckets,
 			sizeof(struct cds_lfht_node));
 		assert(ht->tbl_order[0]);
 	} else if (order > ht->min_alloc_buckets_order) {
-		ht->tbl_order[order] = socket_calloc((int)ht->privdata, 1UL << (order -1),
+		ht->tbl_order[order] = socket_calloc((int)socket_id, 1UL << (order -1),
 			sizeof(struct cds_lfht_node));
 		assert(ht->tbl_order[order]);
 	}
@@ -50,10 +51,11 @@ void cds_lfht_alloc_bucket_table(struct cds_lfht *ht, unsigned long order)
 static
 void cds_lfht_free_bucket_table(struct cds_lfht *ht, unsigned long order)
 {
+    long socket_id = (long)ht->privdata;
 	if (order == 0)
-		socket_free((int)ht->privdata, ht->tbl_order[0]);
+		socket_free((int)socket_id, ht->tbl_order[0]);
 	else if (order > ht->min_alloc_buckets_order)
-		socket_free((int)ht->privdata, ht->tbl_order[order]);
+		socket_free((int)socket_id, ht->tbl_order[order]);
 	/* Nothing to do for 0 < order && order <= ht->min_alloc_buckets_order */
 }
 
@@ -82,8 +84,9 @@ struct cds_lfht *alloc_cds_lfht(unsigned long min_nr_alloc_buckets,
 		unsigned long max_nr_buckets, void *privdata)
 {
 	struct cds_lfht *ht;
+    long socket_id = (long)privdata;
 
-	ht = socket_calloc((int)privdata, 1, sizeof(struct cds_lfht));
+	ht = socket_calloc((int)socket_id, 1, sizeof(struct cds_lfht));
 	assert(ht);
 
 	ht->privdata = privdata;
@@ -99,7 +102,8 @@ struct cds_lfht *alloc_cds_lfht(unsigned long min_nr_alloc_buckets,
 
 static
 void mm_free(void *privdata, void *ptr) {
-	socket_free((int)privdata, ptr);
+    long socket_id = (long)privdata;
+	socket_free((int)socket_id, ptr);
 }
 
 const struct cds_lfht_mm_type cds_lfht_mm_socket = {
