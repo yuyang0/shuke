@@ -246,6 +246,7 @@ static inline bool isAbsDotDomain(char *ss) {
 }
 
 extern dictType dnsDictType;
+extern const struct cds_lfht_mm_type cds_lfht_mm_socket;
 
 #if defined(SK_TEST)
 int zoneParserTest(int argc, char *argv[]);
