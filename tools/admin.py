@@ -68,15 +68,19 @@ def main():
     PROMPT = 'shuke %s > ' % parsed.address
     ip, port = parsed.address.split(':')
     s = create_cli_socket(ip, port)
+    retry = False
     while True:
-        data = input(PROMPT)
-        send_msg(s, data)
-        data = recv_msg(s)
-        if data is None:
+        if retry is False:
+            w_data = input(PROMPT)
+        send_msg(s, w_data)
+        r_data = recv_msg(s)
+        if r_data is None:
             # reconnect to server
             s = create_cli_socket(ip, port)
+            retry = True
             continue
-        print(data)
+        print(r_data)
+        retry = False
 
 
 if __name__ == '__main__':
