@@ -70,6 +70,45 @@ void masterRefreshZone(char *origin) {
     rbtreeInsertZone(z);
 }
 
+void zoneUpdateRoundRabinInfo(zone *z) {
+    int nr_rr_idx = 0;
+    struct numaNode_s *node;
+
+    dictIterator *it = dictGetIterator(z->d);
+    dictEntry *de;
+    while((de = dictNext(it)) != NULL) {
+        dnsDictValue *dv = dictGetVal(de);
+        for (int i = 0; i < SUPPORT_TYPE_NUM; ++i) {
+            RRSet *rs = dv->v.rsArr[i];
+            if (rs) {
+                RRSetUpdateOffsets(rs);
+                if (rs->num > 1) {
+                    rs->z_rr_idx = nr_rr_idx++;
+                }
+            }
+        }
+    }
+    dictReleaseIterator(it);
+
+    if (z->socket_id == SOCKET_ID_ANY) node = sk.nodes[sk.master_numa_id];
+    else node = sk.nodes[z->socket_id];
+
+    // to avoid False Share
+    nr_rr_idx = ((nr_rr_idx - 1) / RTE_CACHE_LINE_SIZE + 1) * RTE_CACHE_LINE_SIZE;
+
+    z->start_core_idx = node->min_lcore_id;
+    int arr_len = node->max_lcore_id - node->min_lcore_id + 1;
+    size_t totalsize = sizeof(uint8_t*)*arr_len + node->nr_lcore_ids * nr_rr_idx;
+    z->rr_idx_array = socket_calloc(z->socket_id, 1, totalsize);
+    uint8_t *data = (uint8_t *)z->rr_idx_array + sizeof(uint8_t*)*arr_len;
+
+    for (int i = 0; i < node->nr_lcore_ids; ++i) {
+        int lcore_id = node->lcore_ids[i];
+        int idx = lcore_id - node->min_lcore_id;
+        z->rr_idx_array[idx] = data + i * nr_rr_idx * sizeof(uint8_t);
+    }
+}
+
 /*!
  * add or replace a zone to all numa node's zone dict, we need update new zone's offsets and refresh_ts
  * @param z
@@ -78,7 +117,7 @@ void masterRefreshZone(char *origin) {
 int replaceZoneAllNumaNodes(zone *z) {
     zoneDict *zd = sk.zd;
     z->refresh_ts = sk.unixtime + z->refresh;
-    zoneUpdateRRSetOffsets(z);
+    zoneUpdateRoundRabinInfo(z);
 
     replaceZoneOtherNuma(z);
 
@@ -102,7 +141,7 @@ int replaceZoneAllNumaNodes(zone *z) {
 
 int addZoneAllNumaNodes(zone *z) {
     z->refresh_ts = sk.unixtime + z->refresh;
-    zoneUpdateRRSetOffsets(z);
+    zoneUpdateRoundRabinInfo(z);
 
     addZoneOtherNuma(z);
 
@@ -697,6 +736,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     }
     zoneDictRLock(node->zd);
     z = zoneDictGetZone(node->zd, name);
+    ctx->z = z;
 
     if (z == NULL) {
         // zone is not managed by this server
@@ -720,10 +760,11 @@ end:
 }
 
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *src_addr, uint16_t src_port, bool is_ipv4,
-                       numaNode_t *node)
+                       numaNode_t *node, int lcore_id)
 {
     struct context ctx;
     ctx.node = node;
+    ctx.lcore_id = lcore_id;
     ctx.resp = resp;
     ctx.totallen = respLen;
     ctx.cur = 0;
@@ -751,6 +792,7 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
 
     struct context ctx;
     ctx.node = sk.nodes[sk.master_numa_id];
+    ctx.lcore_id = sk.master_lcore_id;
     ctx.resp = resp;
     ctx.totallen = respLen;
     ctx.cur = 0;

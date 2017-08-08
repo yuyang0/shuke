@@ -130,7 +130,7 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     LOG_DEBUG(MONGO, "RRSET cb %s %d", ctx->dotOrigin, reply->numberReturned);
 
     if (reply->numberReturned > 0) {
-        if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, SOCKET_ID_ANY);
+        if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, sk.master_numa_id);
         if (ctx->psr == NULL) ctx->psr = RRParserCreate("@", 0, ctx->dotOrigin);
 
         for (int i = 0; i < reply->numberReturned; ++i) {
@@ -313,7 +313,7 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
 #ifdef SK_TEST
     zone *z = zoneCreate(dotOrigin, SOCKET_ID_HEAP);
 #else
-    zone *z = zoneCreate(dotOrigin, SOCKET_ID_ANY);
+    zone *z = zoneCreate(dotOrigin, sk.master_numa_id);
 #endif
 
     replies = (mongoReply **)mongoFindAll(c, db, col, NULL, NULL, 0);

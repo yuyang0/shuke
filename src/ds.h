@@ -34,6 +34,8 @@ struct numaNode_s;
 
 struct context {
     struct  numaNode_s *node;
+    int lcore_id;
+    struct _zone *z;
     // information parsed from dns query packet.
     dnsHeader_t hdr;
     // information of question.
@@ -103,11 +105,11 @@ typedef struct {
     uint16_t num;          // the number of RR
     uint16_t type;         // RRSet type
     unsigned int free;     //
-    unsigned int len;      // the bytes of data
+    unsigned int len;      // the bytes of data(actually used size)
     uint32_t ttl;          // every RR in RRSet has same ttl
 
     size_t *offsets;       // offset array, mainly for round rabin
-    rte_atomic32_t rr_idx;         // last round rabin index
+    int z_rr_idx;          // round rabin index position in zone
 
     char data[];
 } RRSet;
@@ -157,6 +159,26 @@ typedef struct _zone {
     int32_t expiry;
     int32_t nx;
 
+    /*
+     * round rabin information for RRSet
+     * in order to avoid atomic operation, we prepare a per-core rr_idx for every rrset object.
+     */
+    int start_core_idx;  // start core of the numa node this zone belongs to
+    /*
+     * the memory layout is
+     * -----------------------------------------------
+     * |  |  |  |  |  |  |      |      |      |      |
+     * -----------------------------------------------
+     * the first half is a pointer array, every pointer should point to the rr_idx array,
+     * every core in the numa node this zone belongs to should has an element in this array,
+     * in order to decrease the array size, we store the start core idx,
+     * so when you fetch the rr_idx array, you should use lcore_id-start_core_idx as the array index.
+     *
+     * the second half is the real rr_idx array, every rrset has a z_rr_idx field, use this field
+     * to get the rr_idx for this rrset.
+     */
+    uint8_t **rr_idx_array;
+
     // timestamp when this zone needs reload
     long refresh_ts;
     struct rb_node rbnode;
@@ -178,6 +200,7 @@ typedef struct _zoneDict {
 
 RRSet *RRSetCreate(uint16_t type, int socket_id);
 RRSet *RRSetDup(RRSet *rs, int socket_id);
+void RRSetUpdateOffsets(RRSet *rs);
 RRSet* RRSetCat(RRSet *rs, char *buf, size_t len);
 RRSet *RRSetRemoveFreeSpace(RRSet *rs);
 
@@ -197,7 +220,6 @@ void dnsDictValueDestroy(dnsDictValue *val, int socket_id);
 zone *zoneCreate(char *origin, int socket_id);
 zone *zoneCopy(zone *z, int socket_id);
 void zoneDestroy(zone *zn);
-void zoneUpdateRRSetOffsets(zone *z);
 dnsDictValue *zoneFetchValueAbs(zone *z, void *key, size_t keyLen);
 dnsDictValue *zoneFetchValueRelative(zone *z, void *key);
 RRSet *zoneFetchTypeVal(zone *z, void *key, uint16_t type);

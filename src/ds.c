@@ -297,9 +297,11 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
     // support round robin
     if (rs->num > 1) {
         //TODO better way to support round rabin
-        // start_idx = rte_atomic32_add_return(&(rs->rr_idx), 1) % rs->num;
-        start_idx = 0;
-        LOG_DEBUG(USER1, "rr idx: %d", rs->rr_idx);
+        zone *z = ctx->z;
+        int idx = ctx->lcore_id - z->start_core_idx;
+        uint8_t *arr = z->rr_idx_array[idx];
+        start_idx = (++ arr[rs->z_rr_idx]) % rs->num;
+        LOG_DEBUG(USER1, "core: %d, rr idx: %d", ctx->lcore_id, arr[rs->z_rr_idx]);
     }
 
     for (int i = 0; i < rs->num; ++i) {
@@ -571,6 +573,7 @@ void zoneDestroy(zone *zn) {
     dictRelease(zn->d);
     socket_free(zn->socket_id, zn->origin);
     socket_free(zn->socket_id, zn->dotOrigin);
+    socket_free(zn->socket_id, zn->rr_idx_array);
     socket_free(zn->socket_id, zn);
 }
 
@@ -691,21 +694,6 @@ sds zoneToStr(zone *z) {
     }
     dictReleaseIterator(it);
     return s;
-}
-
-void zoneUpdateRRSetOffsets(zone *z) {
-    dictIterator *it = dictGetIterator(z->d);
-    dictEntry *de;
-    while((de = dictNext(it)) != NULL) {
-        dnsDictValue *dv = dictGetVal(de);
-        for (int i = 0; i < SUPPORT_TYPE_NUM; ++i) {
-            RRSet *rs = dv->v.rsArr[i];
-            if (rs) {
-                RRSetUpdateOffsets(rs);
-            }
-        }
-    }
-    dictReleaseIterator(it);
 }
 
 /*----------------------------------------------
@@ -981,10 +969,10 @@ int dsTest(int argc, char *argv[]) {
         RRSet *rs2 = RRSetCreate(DNS_TYPE_AAAA, SOCKET_ID_HEAP);
         zoneReplaceTypeVal(z, k, rs1);
         zoneReplaceTypeVal(z, k, rs2);
-        test_cond("zone 1", zoneFetchValue(z, "aaa") == NULL);
+        test_cond("zone 1", zoneFetchValueRelative(z, "aaa") == NULL);
     }
     zfree(zmalloc(100000));
-    dnsDictValue *dv = zoneFetchValue(z, k);
+    dnsDictValue *dv = zoneFetchValueRelative(z, k);
     test_cond("zone 2", dnsDictValueGet(dv, DNS_TYPE_A)->type == DNS_TYPE_A);
     test_cond("zone 3", dnsDictValueGet(dv, DNS_TYPE_AAAA)->type == DNS_TYPE_AAAA);
     // {

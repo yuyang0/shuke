@@ -315,7 +315,7 @@ int mongoAsyncReloadZone(zoneReloadContext *t);
 int mongoAsyncReloadAllZone(void);
 
 int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *src_addr, uint16_t src_port, bool is_ipv4,
-                       numaNode_t *node);
+                       numaNode_t *node, int lcore_id);
 
 int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz);
 

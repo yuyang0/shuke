@@ -72,7 +72,7 @@ int initAdminServer(void) {
     char *host = sk.admin_host;
     int port = sk.admin_port;
 
-    sk.commands = dictCreate(&commandTableDictType, NULL, SOCKET_ID_ANY);
+    sk.commands = dictCreate(&commandTableDictType, NULL, sk.master_numa_id);
     int numcommands = sizeof(adminCommandTable)/sizeof(adminCommand);
     for (int j = 0; j < numcommands; j++) {
         adminCommand *c = adminCommandTable+j;

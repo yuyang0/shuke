@@ -629,8 +629,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m),
-                           src_addr, udp_h->src_port, is_ipv4, qconf->node);
+    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
+                           is_ipv4, qconf->node, qconf->lcore_id);
     if(n == ERR_CODE) goto invalid;
 
     ++qconf->nr_req;
