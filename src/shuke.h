@@ -61,6 +61,9 @@ typedef struct numaNode_s {
     int numa_id;
     int main_lcore_id;
     int nr_lcore_ids;           // enabled lcores belong this numa node;
+    int *lcore_ids;
+    int min_lcore_id;
+    int max_lcore_id;
     zoneDict *zd;
 } numaNode_t;
 

@@ -1402,21 +1402,46 @@ static int get_port_ids(int buf[], int *n) {
 
 int initNumaConfig() {
     int n = 0;
+    numaNode_t *node;
     sk.master_numa_id = rte_lcore_to_socket_id((unsigned)sk.master_lcore_id);
 
     for (int i = 0; i < sk.nr_lcore_ids; ++i) {
         int lcore_id = sk.lcore_ids[i];
         int numa_id = rte_lcore_to_socket_id((unsigned)lcore_id);
-        if (sk.nodes[numa_id] == NULL) {
-            sk.nodes[numa_id] = calloc(1, sizeof(numaNode_t));
-            sk.nodes[numa_id]->numa_id = numa_id;
-            sk.nodes[numa_id]->main_lcore_id = lcore_id;
-            sk.nodes[numa_id]->nr_lcore_ids = 1;
-        } else {
-            sk.nodes[numa_id]->nr_lcore_ids++;
+
+        node = sk.nodes[numa_id];
+        if (node == NULL) {
+            node = calloc(1, sizeof(numaNode_t));
+            node->numa_id = numa_id;
+            node->main_lcore_id = lcore_id;
+            node->nr_lcore_ids = 0;
+            sk.nodes[numa_id] = node;
         }
-        sk.lcore_conf[lcore_id].node = sk.nodes[numa_id];
+        node->nr_lcore_ids++;
+
+        sk.lcore_conf[lcore_id].lcore_id = (uint16_t)lcore_id;
+        sk.lcore_conf[lcore_id].node = node;
     }
+
+    // initialize the lcore id array belongs to this numa node
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        int lcore_id = sk.lcore_ids[i];
+        int numa_id = rte_lcore_to_socket_id((unsigned)lcore_id);
+
+        node = sk.nodes[numa_id];
+        assert(node);
+        if (node->lcore_ids == NULL) {
+            node->lcore_ids = calloc(node->nr_lcore_ids, sizeof(int));
+            node->nr_lcore_ids = 0;
+        }
+        node->lcore_ids[node->nr_lcore_ids++] = lcore_id;
+
+        if (lcore_id < node->min_lcore_id)
+            node->min_lcore_id = lcore_id;
+        if (lcore_id > node->max_lcore_id)
+            node->max_lcore_id = lcore_id;
+    }
+
     if (sk.nodes[sk.master_numa_id]->nr_lcore_ids <= 1) {
         fprintf(stderr, "master lcore (%d) is the only enabled core on numa %d.\n",
                 sk.master_lcore_id, sk.master_numa_id);
