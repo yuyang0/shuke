@@ -11,7 +11,7 @@
 #include <rte_malloc.h>
 #include <rte_memcpy.h>
 
-#define SOCKET_ID_HEAP   -1010
+#define SOCKET_ID_HEAP   (-1010)
 
 static inline void *zalloc(size_t size) {
     return calloc(1, size);

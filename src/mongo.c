@@ -459,12 +459,6 @@ int mongoTest(int argc, char *argv[]) {
     printf("%s\n", s);
     sdsfree(s);
 
-    zoneDict *copy_zd = zoneDictCopy(sk.zd, SOCKET_ID_HEAP);
-    zoneDictDestroy(sk.zd);
-    s = zoneDictToStr(copy_zd);
-
-    printf("\n\nCOPY ZD:\n%s\n", s);
-    sdsfree(s);
     return 0;
 }
 #endif

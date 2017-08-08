@@ -695,7 +695,6 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         // just ignore this packet(don't send response)
         return ERR_CODE;
     }
-    // ATOM_INC(&(server.nr_req));
     dnsHeader_load(buf, sz, &(ctx->hdr));
     ret = parseDnsQuestion(buf+DNS_HDR_SIZE, sz-DNS_HDR_SIZE, &(ctx->name), &(ctx->qType), &(ctx->qClass));
     if (ret == PROTO_ERR) {
