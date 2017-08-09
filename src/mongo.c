@@ -310,11 +310,7 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
     uint32_t ttl;
     char *type, *rdata, *name;
 
-#ifdef SK_TEST
-    zone *z = zoneCreate(dotOrigin, SOCKET_ID_HEAP);
-#else
     zone *z = zoneCreate(dotOrigin, sk.master_numa_id);
-#endif
 
     replies = (mongoReply **)mongoFindAll(c, db, col, NULL, NULL, 0);
 

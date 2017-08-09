@@ -827,6 +827,33 @@ initDpdkEal() {
     config_log();
 }
 
+#ifdef SK_TEST
+/*
+ * init dpdk eal, mainly for test
+ */
+void initTestDpdkEal() {
+    int ret;
+    /* initialize the rte env first*/
+    char *argv[] = {
+            "",
+            "-c",
+            "0x1",
+            "-n",
+            "4",
+            "--"
+    };
+    const int argc = 9;
+    /*
+     * reset optind, because rte_eal_init uses getopt.
+     */
+    optind = 0;
+    /* init EAL */
+    ret = rte_eal_init(argc, argv);
+    if (ret < 0)
+        rte_exit(EXIT_FAILURE, "Invalid EAL parameters\n");
+}
+#endif
+
 int
 initDpdkModule() {
 

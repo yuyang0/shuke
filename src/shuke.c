@@ -477,7 +477,7 @@ static int _getAllZoneFromFile(bool is_first) {
     while((de = dictNext(it)) != NULL) {
         char *dotOrigin = dictGetKey(de);
         char *fname = dictGetVal(de);
-        if (loadZoneFromFile(fname, &z) == DS_ERR) {
+        if (loadZoneFromFile(sk.master_numa_id, fname, &z) == DS_ERR) {
             return ERR_CODE;
         } else {
             if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
@@ -510,7 +510,7 @@ int reloadZoneFromFile(zoneReloadContext *t) {
         dot2lenlabel(t->dotOrigin, origin);
         deleteZoneAllNumaNodes(origin);
     } else {
-        if (loadZoneFromFile(fname, &z) == DS_ERR) {
+        if (loadZoneFromFile(sk.master_numa_id, fname, &z) == DS_ERR) {
             return ERR_CODE;
         } else {
             if (strcasecmp(z->dotOrigin, t->dotOrigin) != 0) {
@@ -1574,6 +1574,8 @@ int main(int argc, char *argv[]) {
 
 #ifdef SK_TEST
     if (argc >= 3 && !strcasecmp(argv[1], "test")) {
+        initTestDpdkEal();
+
         if (!strcasecmp(argv[2], "mongo")) {
             return mongoTest(argc, argv);
         } else if (!strcasecmp(argv[2], "ds")) {

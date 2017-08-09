@@ -174,4 +174,8 @@ int start_kni_tx_threads();
 int kni_ifconfig_all();
 void kni_init_tx_queue();
 
+#ifdef SK_TEST
+void initTestDpdkEal();
+#endif
+
 #endif  /* __DPDK_MODULE_H__ */

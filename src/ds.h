@@ -259,8 +259,8 @@ int RRParserFeedRdata(RRParser *psr, char *rdata, char *name, uint32_t ttl, char
 
 int parseSOASn(char *errstr, char *soa, unsigned long *sn);
 int abs2lenRelative(char domain[], char *dotOrigin);
-int loadZoneFromStr(char *errstr, char *zbuf, zone **zpp);
-int loadZoneFromFile(const char *fname, zone **zpp);
+int loadZoneFromStr(char *errstr, int socket_id, char *zbuf, zone **zpp);
+int loadZoneFromFile(int socket_id, const char *fname, zone **zpp);
 
 sds sdscatpack(sds s, char const *fmt, ...);
 static inline bool isAbsDotDomain(char *ss) {

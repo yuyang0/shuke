@@ -704,7 +704,7 @@ static int readDirectives(char *errstr, char **ssp, char *origin, uint32_t *ttl,
     return err;
 }
 
-int loadZoneFromStr(char *errstr, char *zbuf, zone **zpp) {
+int loadZoneFromStr(char *errstr, int socket_id, char *zbuf, zone **zpp) {
     char dotOrigin[MAX_DOMAIN_LEN+2] = {0};
     char rbuf[RECORD_SIZE];
     uint32_t default_ttl = 1800;
@@ -723,7 +723,7 @@ int loadZoneFromStr(char *errstr, char *zbuf, zone **zpp) {
         goto error;
     }
     psr = RRParserCreate("@", default_ttl, dotOrigin);
-    z = zoneCreate(dotOrigin, SOCKET_ID_ANY);
+    z = zoneCreate(dotOrigin, socket_id);
     z->default_ttl = default_ttl;
 
     while ((err= readFullRecord(errstr, &ss, rbuf, RECORD_SIZE, &line_idx)) == DS_OK) {
@@ -746,7 +746,7 @@ ok:
     return err;
 }
 
-int loadZoneFromFile(const char *fname, zone **zpp) {
+int loadZoneFromFile(int socket_id, const char *fname, zone **zpp) {
     char *zbuf;
     int err;
     char errstr[ERR_STR_LEN];
@@ -756,7 +756,7 @@ int loadZoneFromFile(const char *fname, zone **zpp) {
         LOG_ERROR(USER1, "Can't read zone file %s.", fname);
         return DS_ERR;
     }
-    err = loadZoneFromStr(errstr, zbuf, zpp);
+    err = loadZoneFromStr(errstr, socket_id, zbuf, zpp);
     zfree(zbuf);
     return err;
 }
@@ -802,7 +802,7 @@ int zoneParserTest(int argc, char *argv[]) {
     fprintf(stderr, "\n");
 
     zone *z;
-    loadZoneFromFile(argv[3], &z);
+    loadZoneFromFile(SOCKET_ID_HEAP, argv[3], &z);
     sds s = zoneToStr(z);
     printf("%s\n", s);
     sdsfree(s);

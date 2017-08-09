@@ -12,7 +12,7 @@ plt.plot(x, y, 'r-+', markersize=10, markeredgewidth=2, lw=2)
 for i, j in zip(x, y):
     ax.annotate(str(j)+"M", xy=(i,j), xytext=(2,10), textcoords='offset points')
 
-plt.xlabel('CPU pysical cores')
+plt.xlabel('CPU physical cores')
 plt.ylabel('QPS(million)')
 plt.title('Benchmark (one 10G port)')
 plt.grid(True)

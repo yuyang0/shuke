@@ -16,20 +16,36 @@ An authority-only dns server implemented with DPDK
     
 ### result
 
-1. one 10G port
+1. one 10G port(response size: 50 bytes)
 
     ![benchmark(1 10G port)](doc/static/benchmark_1_port.png)
     
+   pls note when test with 5 cores, shuke actually processed 12.43M request per second,
+   but the client reports 10.7M, this because the NIC doesn't have enough bandwidth.
+   
 ## Quick start
 ### buid
-first you need install autoconf and libtool
 
-1. build dpdk, shuke is only tested on dpdk-16.11.1.
-2. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
+1. build dpdk, shuke is only tested on dpdk-16.11.1. if you use linux x86-64,
+   you can run `bash DPDK_ROOT/tools/dpdk-setup.sh`, then perform the following 
+   instructions.
+   
+        + press `[13]` to compile dpdk for linux x86 target.
+        + press `[16]` to insert UIO
+        + press `[18]` to insert KNI
+        + press `[20]` or `[19]` if your machine is non-NUMA systems to setup huge pages,
+          since shuke use huge page heavily, so allocate as large as possible
+        + press `[22]` to bind NIC device
+        + press `[33]` to quit
+     
+2. need install autoconf and libtool
+3. make sure `RTE_SDK` and `RTE_TARGET` are set properly, 
+   run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
 
 ### tips
 1. if you want to build shuke in DEBUG mode, just run `make DEBUG=1`
 2. if you want to see the compiler command, just run `make V=1`
+3. if you want to remove tcp support, just run `make ONLY_UDP=1`
 
 ### run
 just run `build/shuke-server -c conf/shuke.conf`,
