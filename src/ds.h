@@ -169,15 +169,16 @@ typedef struct _zone {
      * -----------------------------------------------
      * |  |  |  |  |  |  |      |      |      |      |
      * -----------------------------------------------
-     * the first half is a pointer array, every pointer should point to the rr_idx array,
-     * every core in the numa node this zone belongs to should has an element in this array,
+     * the first half is an offset array, every offset should point to the rr_idx array,
+     * every core in the numa node this zone belongs to should have an element in this array,
      * in order to decrease the array size, we store the start core idx,
      * so when you fetch the rr_idx array, you should use lcore_id-start_core_idx as the array index.
      *
      * the second half is the real rr_idx array, every rrset has a z_rr_idx field, use this field
      * to get the rr_idx for this rrset.
      */
-    uint8_t **rr_idx_array;
+    uint32_t *rr_offset_array;
+    size_t rr_mem_size;
 
     // timestamp when this zone needs reload
     long refresh_ts;

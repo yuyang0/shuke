@@ -90,22 +90,22 @@ void zoneUpdateRoundRabinInfo(zone *z) {
     }
     dictReleaseIterator(it);
 
-    if (z->socket_id == SOCKET_ID_ANY) node = sk.nodes[sk.master_numa_id];
-    else node = sk.nodes[z->socket_id];
+    node = sk.nodes[z->socket_id];
 
     // to avoid False Share
     nr_rr_idx = ((nr_rr_idx - 1) / RTE_CACHE_LINE_SIZE + 1) * RTE_CACHE_LINE_SIZE;
 
     z->start_core_idx = node->min_lcore_id;
     int arr_len = node->max_lcore_id - node->min_lcore_id + 1;
-    size_t totalsize = sizeof(uint8_t*)*arr_len + node->nr_lcore_ids * nr_rr_idx;
-    z->rr_idx_array = socket_calloc(z->socket_id, 1, totalsize);
-    uint8_t *data = (uint8_t *)z->rr_idx_array + sizeof(uint8_t*)*arr_len;
+    uint32_t arr_size = sizeof(uint32_t)*arr_len;
+    size_t totalsize = arr_size + node->nr_lcore_ids * nr_rr_idx;
+    z->rr_offset_array = socket_calloc(z->socket_id, 1, totalsize);
+    z->rr_mem_size = totalsize;
 
     for (int i = 0; i < node->nr_lcore_ids; ++i) {
         int lcore_id = node->lcore_ids[i];
         int idx = lcore_id - node->min_lcore_id;
-        z->rr_idx_array[idx] = data + i * nr_rr_idx * sizeof(uint8_t);
+        z->rr_offset_array[idx] = arr_size + i * nr_rr_idx * sizeof(uint8_t);
     }
 }
 
@@ -316,6 +316,8 @@ void replaceZoneOtherNuma(zone *z) {
         numaNode_t *node = sk.nodes[numa_id];
         if (numa_id == sk.master_numa_id) continue;
         zone *new_z = zoneCopy(z, numa_id);
+        zoneUpdateRoundRabinInfo(new_z);
+
         zoneDictReplace(node->zd, new_z);
     }
 }
@@ -327,6 +329,8 @@ void addZoneOtherNuma(zone *z) {
         numaNode_t *node = sk.nodes[numa_id];
         if (numa_id == sk.master_numa_id) continue;
         zone *new_z = zoneCopy(z, numa_id);
+        zoneUpdateRoundRabinInfo(new_z);
+
         err = zoneDictAdd(node->zd, new_z);
         assert(err == DICT_OK);
     }

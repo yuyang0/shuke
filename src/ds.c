@@ -120,10 +120,6 @@ RRSet *RRSetDup(RRSet *rs, int socket_id) {
     rte_memcpy(new, rs, sz);
     new->socket_id = socket_id;
     new->offsets = NULL;
-
-    if (rs->offsets) {
-        new->offsets = socket_memdup(socket_id, rs->offsets, rs->num*sizeof(size_t));
-    }
     return new;
 }
 
@@ -299,7 +295,7 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
         //TODO better way to support round rabin
         zone *z = ctx->z;
         int idx = ctx->lcore_id - z->start_core_idx;
-        uint8_t *arr = z->rr_idx_array[idx];
+        uint8_t *arr = (uint8_t *)(z->rr_offset_array) + z->rr_offset_array[idx];
         start_idx = (++ arr[rs->z_rr_idx]) % rs->num;
         LOG_DEBUG(USER1, "core: %d, rr idx: %d", ctx->lcore_id, arr[rs->z_rr_idx]);
     }
@@ -564,6 +560,8 @@ zone *zoneCopy(zone *z, int socket_id) {
         dictReplace(new_z->d, name, new_dv);
     }
     dictReleaseIterator(it);
+    new_z->rr_offset_array = socket_memdup(socket_id, z->rr_offset_array, z->rr_mem_size);
+    new_z->rr_mem_size = z->rr_mem_size;
     return new_z;
 }
 
@@ -573,7 +571,7 @@ void zoneDestroy(zone *zn) {
     dictRelease(zn->d);
     socket_free(zn->socket_id, zn->origin);
     socket_free(zn->socket_id, zn->dotOrigin);
-    socket_free(zn->socket_id, zn->rr_idx_array);
+    socket_free(zn->socket_id, zn->rr_offset_array);
     socket_free(zn->socket_id, zn);
 }
 
