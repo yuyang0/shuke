@@ -136,6 +136,7 @@ int replaceZoneAllNumaNodes(zone *z) {
         err = 0;
     }
     zoneDictWUnlock(zd);
+    rbtreeInsertZone(z);
     return err;
 }
 
