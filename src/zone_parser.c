@@ -771,7 +771,7 @@ int loadZoneFromFile(int socket_id, const char *fname, zone **zpp) {
 
 int zoneParserTest(int argc, char *argv[]) {
     if (argc < 4) {
-        fprintf(stderr, "need conf file");
+        fprintf(stderr, "need conf file\n");
         exit(1);
     }
     test_cond("parse ttl 1", parsetime("2w3d3M2") == 17*(24*3600)+180 + 2);

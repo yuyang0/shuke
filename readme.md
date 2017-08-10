@@ -29,14 +29,13 @@ An authority-only dns server implemented with DPDK
 1. build dpdk, shuke is only tested on dpdk-16.11.1. if you use linux x86-64,
    you can run `bash DPDK_ROOT/tools/dpdk-setup.sh`, then perform the following 
    instructions.
-   
-        + press `[13]` to compile dpdk for linux x86 target.
-        + press `[16]` to insert UIO
-        + press `[18]` to insert KNI
-        + press `[20]` or `[19]` if your machine is non-NUMA systems to setup huge pages,
-          since shuke use huge page heavily, so allocate as large as possible
-        + press `[22]` to bind NIC device
-        + press `[33]` to quit
+    + press `[13]` to compile dpdk for linux x86 target.
+    + press `[16]` to insert UIO
+    + press `[18]` to insert KNI
+    + press `[20]` or `[19]` if your machine is non-NUMA systems to setup huge pages,
+      since shuke use huge page heavily, so allocate as large as possible
+    + press `[22]` to bind NIC device
+    + press `[33]` to quit
      
 2. need install autoconf and libtool
 3. make sure `RTE_SDK` and `RTE_TARGET` are set properly, 
