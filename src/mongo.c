@@ -206,7 +206,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
 
     if (ctx->sn >= sn) {
         // update zone's ts field
-        LOG_DEBUG(MONGO, "sn is not change.");
+        LOG_INFO(MONGO, "reload zone %s successfully(unchanged).", ctx->dotOrigin);
         dot2lenlabel(ctx->dotOrigin, origin);
         masterRefreshZone(origin);
 
