@@ -425,38 +425,30 @@ static sds genInfoString(char *section) {
     }
 
     // memory
-    // if (allsections || defsections || (strcasecmp(section, "memory") == 0)) {
-    //     char hmem[64];
-    //     char peak_hmem[64];
-    //     size_t zmalloc_used = zmalloc_used_memory();
+    if (allsections || defsections || (strcasecmp(section, "memory") == 0)) {
+        if (sections++) s = sdscat(s, "\r\n");
+        struct rte_malloc_socket_stats stat;
+        for (int i = 0; i < sk.nr_numa_id; ++i) {
+            int numa_id = sk.numa_ids[i];
+            rte_malloc_get_socket_stats(numa_id, &stat);
 
-    //     /* Peak memory is updated from time to time by serverCron() so it
-    //      * may happen that the instantaneous value is slightly bigger than
-    //      * the peak value. This may confuse users, so we update the peak
-    //      * if found smaller than the current memory usage. */
-    //     if (zmalloc_used > sk.peak_memory)
-    //         sk.peak_memory = zmalloc_used;
-
-    //     bytesToHuman(hmem,zmalloc_used);
-    //     bytesToHuman(peak_hmem,sk.peak_memory);
-    //     if (sections++) s = sdscat(s, "\r\n");
-    //     s = sdscatprintf(s,
-    //                      "# Memory\r\n"
-    //                      "used_memory:%zu\r\n"
-    //                      "used_memory_human:%s\r\n"
-    //                      "used_memory_rss:%zu\r\n"
-    //                      "used_memory_peak:%zu\r\n"
-    //                      "used_memory_peak_human:%s\r\n"
-    //                      "mem_fragmentation_ratio:%.2f\r\n"
-    //                      "mem_allocator:%s\r\n",
-    //                      zmalloc_used,
-    //                      hmem,
-    //                      sk.resident_set_size,
-    //                      sk.peak_memory,
-    //                      peak_hmem,
-    //                      zmalloc_get_fragmentation_ratio(sk.resident_set_size),
-    //                      ZMALLOC_LIB);
-    // }
+            s = sdscatprintf(s,
+                             "#Socket %d Memory\r\n"
+                             "total_size:%zu\r\n"
+                             "total_alloc_size:%zu\r\n"
+                             "free_size:%zu\r\n"
+                             "greatest_free_size:%zu\r\n"
+                             "free_count:%u\r\n"
+                             "alloc_count:%u\r\n",
+                             numa_id,
+                             stat.heap_totalsz_bytes,
+                             stat.heap_allocsz_bytes,
+                             stat.heap_freesz_bytes,
+                             stat.greatest_free_size,
+                             stat.free_count,
+                             stat.alloc_count);
+        }
+    }
 
     // statistics
     if (allsections || defsections || (strcasecmp(section, "stats") == 0)) {
