@@ -1577,9 +1577,7 @@ int main(int argc, char *argv[]) {
     if (argc >= 3 && !strcasecmp(argv[1], "test")) {
         initTestDpdkEal();
 
-        if (!strcasecmp(argv[2], "mongo")) {
-            return mongoTest(argc, argv);
-        } else if (!strcasecmp(argv[2], "ds")) {
+        if (!strcasecmp(argv[2], "ds")) {
             return dsTest(argc, argv);
         } else if (!strcasecmp(argv[2], "zone_parser")) {
             return zoneParserTest(argc, argv);

@@ -443,18 +443,3 @@ int mongoAsyncReloadAllZone() {
     sk.last_all_reload_ts = sk.unixtime;
     return OK_CODE;
 }
-
-#if defined(SK_TEST)
-int mongoTest(int argc, char *argv[]) {
-    ((void) argc); ((void) argv);
-    sk.zd = zoneDictCreate(SOCKET_ID_HEAP);
-
-    _mongoGetAllZone("127.0.0.1", 27017, "zone");
-
-    sds s = zoneDictToStr(sk.zd);
-    printf("%s\n", s);
-    sdsfree(s);
-
-    return 0;
-}
-#endif

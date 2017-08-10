@@ -337,8 +337,4 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret);
 void _shukeAssert(char *estr, char *file, int line);
 void _shukePanic(char *msg, char *file, int line);
 
-#ifdef SK_TEST
-int mongoTest(int argc, char *argv[]);
-#endif
-
 #endif /* _SHUKE_H_ */
