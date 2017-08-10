@@ -1462,6 +1462,7 @@ int initNumaConfig() {
 
         sk.lcore_conf[lcore_id].lcore_id = (uint16_t)lcore_id;
         sk.lcore_conf[lcore_id].node = node;
+        sk.lcore_conf[lcore_id].ipv4_packet_id = (uint16_t )i;
     }
 
     // initialize the lcore id array belongs to this numa node

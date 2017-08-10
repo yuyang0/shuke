@@ -640,6 +640,10 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     ether_addr_copy(&eth_addr, &eth_h->d_addr);
 
     if (is_ipv4) {
+        ipv4_h->time_to_live = 64;
+        ipv4_h->packet_id = rte_cpu_to_be_16(qconf->ipv4_packet_id);
+        qconf->ipv4_packet_id += sk.nr_lcore_ids;
+
         ipv4_addr = ipv4_h->src_addr;
         ipv4_h->src_addr = ipv4_h->dst_addr;
         ipv4_h->dst_addr = ipv4_addr;
@@ -651,6 +655,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
 #endif
     } else {
+        ipv6_h->hop_limits = 64;
         rte_memcpy(ipv6_addr, ipv6_h->dst_addr, 16);
         rte_memcpy(ipv6_h->dst_addr, ipv6_h->src_addr, 16);
         rte_memcpy(ipv6_h->src_addr, ipv6_addr, 16);

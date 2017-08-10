@@ -125,6 +125,7 @@ typedef struct lcore_conf {
     struct mbuf_table kni_tx_mbufs[RTE_MAX_ETHPORTS];
 #endif
     struct numaNode_s *node;
+    uint16_t ipv4_packet_id;
     // used to implement time function
     uint64_t tsc_hz;
     uint64_t start_tsc;
