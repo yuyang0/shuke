@@ -13,3 +13,7 @@ endif
 ifdef ONLY_UDP
 MACROS += -DONLY_UDP
 endif
+
+ifdef IP_FRAG
+MACROS += -DIP_DEFRAG -DIP_FRAG
+endif

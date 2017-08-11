@@ -45,6 +45,7 @@ An authority-only dns server implemented with DPDK
 1. if you want to build shuke in DEBUG mode, just run `make DEBUG=1`
 2. if you want to see the compiler command, just run `make V=1`
 3. if you want to remove tcp support, just run `make ONLY_UDP=1`
+4. if you want to support ip fragmentation, just run `make IP_FRAG=1`.
 
 ### run
 just run `build/shuke-server -c conf/shuke.conf`,

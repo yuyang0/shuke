@@ -73,6 +73,10 @@
 #include <rte_timer.h>
 #include <rte_kni.h>
 
+#if defined(IP_DEFRAG) || defined(IP_FRAG)
+#include <rte_ip_frag.h>
+#endif
+
 /*
  * Configurable number of RX/TX ring descriptors
  */
@@ -98,6 +102,14 @@
 
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
+
+#ifdef IP_DEFRAG
+#define	DEFAULT_FLOW_TTL	MS_PER_S
+#define	DEFAULT_FLOW_NUM	0x1000
+
+/* Should be power of two. */
+#define	IP_FRAG_TBL_BUCKET_ENTRIES	16
+#endif
 
 struct mbuf_table {
     uint16_t len;
@@ -130,6 +142,11 @@ typedef struct lcore_conf {
     uint64_t tsc_hz;
     uint64_t start_tsc;
     uint64_t start_us;
+
+#if defined(IP_DEFRAG) || defined(IP_FRAG)
+    struct rte_ip_frag_tbl *frag_tbl;
+    struct rte_ip_frag_death_row death_row;
+#endif
 
     // statistics
     int64_t nr_req;                   // number of processed requests

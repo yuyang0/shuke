@@ -532,6 +532,109 @@ verify_cksum(struct rte_mbuf *m) {
     return ok;
 }
 
+/*----------------------------------------------------------------------------*/
+#ifdef IP_DEFRAG
+static int
+setup_ip_frag_tbl()
+{
+    lcore_conf_t *qconf;
+    uint32_t max_flow_num = DEFAULT_FLOW_NUM;
+    uint32_t max_flow_ttl = DEFAULT_FLOW_TTL;
+    int socket;
+    uint64_t frag_cycles;
+
+    frag_cycles = (rte_get_tsc_hz() + MS_PER_S - 1) / MS_PER_S *
+        max_flow_ttl;
+
+    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+        int lcore_id = sk.lcore_ids[i];
+        qconf = &sk.lcore_conf[lcore_id];
+        socket = rte_lcore_to_socket_id(lcore_id);
+        if (socket == SOCKET_ID_ANY) socket = 0;
+
+        if ((qconf->frag_tbl = rte_ip_frag_table_create(max_flow_num,
+                                                        IP_FRAG_TBL_BUCKET_ENTRIES,
+                                                        max_flow_num, frag_cycles,
+                                                        socket)) == NULL)
+        {
+            RTE_LOG(ERR, DPDK, "ip_frag_tbl_create(%u) on "
+                    "lcore: %u failed\n",
+                    max_flow_num, lcore_id);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+struct rte_mbuf *
+ipv4_reassemble(lcore_conf_t *qconf, struct rte_mbuf *m,
+                struct ether_hdr **eth_hdr_pp,
+                struct ipv4_hdr **ip_hdr_pp)
+{
+    struct ipv4_hdr *ip_hdr = *ip_hdr_pp;
+    struct rte_ip_frag_tbl *tbl;
+    struct rte_ip_frag_death_row *dr;
+
+		/* if it is a fragmented packet, then try to reassemble. */
+		if (rte_ipv4_frag_pkt_is_fragmented(ip_hdr)) {
+        struct rte_mbuf *mo;
+
+        tbl = qconf->frag_tbl;
+        dr = &qconf->death_row;
+
+        /* process this fragment. */
+        mo = rte_ipv4_frag_reassemble_packet(tbl, dr, m, rte_rdtsc(), ip_hdr);
+        if (mo == NULL)
+            /* no packet to send out. */
+            return NULL;
+
+        /* we have our packet reassembled. */
+        if (mo != m) {
+            m = mo;
+            *eth_hdr_pp = rte_pktmbuf_mtod(m, struct ether_hdr *);
+            *ip_hdr_pp = (struct ipv4_hdr *)(*eth_hdr_pp + 1);
+        }
+	 }
+    return m;
+}
+
+struct rte_mbuf *
+ipv6_reassemble(lcore_conf_t *qconf, struct rte_mbuf *m,
+                struct ether_hdr **eth_hdr_pp,
+                struct ipv6_hdr **ip_hdr_pp)
+{
+    struct ether_hdr *eth_hdr = *eth_hdr_pp;
+    struct ipv6_hdr *ip_hdr = *ip_hdr_pp;
+    struct rte_ip_frag_tbl *tbl;
+    struct rte_ip_frag_death_row *dr;
+    struct ipv6_extension_fragment *frag_hdr;
+
+		frag_hdr = rte_ipv6_frag_get_ipv6_fragment_header(ip_hdr);
+
+		if (frag_hdr != NULL) {
+        struct rte_mbuf *mo;
+
+        tbl = qconf->frag_tbl;
+        dr = &qconf->death_row;
+
+        /* prepare mbuf: setup l2_len/l3_len. */
+        m->l2_len = sizeof(*eth_hdr);
+        m->l3_len = sizeof(*ip_hdr) + sizeof(*frag_hdr);
+
+        mo = rte_ipv6_frag_reassemble_packet(tbl, dr, m, rte_rdtsc(), ip_hdr, frag_hdr);
+        if (mo == NULL)
+            return NULL;
+
+        if (mo != m) {
+            m = mo;
+            *eth_hdr_pp = rte_pktmbuf_mtod(m, struct ether_hdr *);
+            *ip_hdr_pp = (struct ipv6_hdr *)(eth_hdr + 1);
+        }
+    }
+    return m;
+}
+#endif
+
 static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
@@ -565,6 +668,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     ether_type = rte_be_to_cpu_16(eth_h->ether_type);
     l3_h = (char *)(eth_h+1);
     l2_len = sizeof(*eth_h);
+    m->l2_len = sizeof(struct ether_hdr);
 
     //TODO: maybe need  remove VLAN support
     if (unlikely(ether_type == ETHER_TYPE_VLAN)) {
@@ -583,14 +687,21 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         case ETHER_TYPE_IPv4:
             is_ipv4 = true;
             ipv4_h = (struct ipv4_hdr *)l3_h;
-
             m->l3_len = (ipv4_h->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
+#ifdef IP_DEFRAG
+            m = ipv4_reassemble(qconf, m, &eth_h, &ipv4_h);
+            if (!m) return;
+#endif
             src_addr = &(ipv4_h->src_addr);
             ipproto = ipv4_h->next_proto_id;
             break;
         case ETHER_TYPE_IPv6:
             ipv6_h = (struct ipv6_hdr *)l3_h;
             m->l3_len = sizeof(*ipv6_h);
+#ifdef IP_DEFRAG
+            m = ipv6_reassemble(qconf, m, &eth_h, &ipv6_h);
+            if (!m) return;
+#endif
             m->ol_flags |= PKT_TX_IPV6;
             src_addr = ipv6_h->src_addr;
             ipproto = ipv6_h->proto;
@@ -620,7 +731,6 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             goto invalid;
     }
 
-    m->l2_len = sizeof(struct ether_hdr);
     m->l4_len = sizeof(struct udp_hdr);
 
     udp_data = (void *) (udp_h + 1);
@@ -1002,6 +1112,10 @@ initDpdkModule() {
     kni_init_tx_queue();
 #endif
 
+#ifdef IP_DEFRAG
+    setup_ip_frag_tbl();
+#endif
+
     /* start ports */
     for (portid = 0; portid < nb_ports; portid++) {
         if ((sk.portmask & (1 << portid)) == 0) {
@@ -1114,4 +1228,3 @@ void initTestDpdkEal() {
         rte_exit(EXIT_FAILURE, "Invalid EAL parameters\n");
 }
 #endif
-
