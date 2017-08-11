@@ -188,6 +188,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (reply == NULL) goto error;
     if (reply->numberReturned == 0) {
         // remove the zone
+        LOG_INFO(MONGO, "zone %s is removed.", ctx->dotOrigin);
         dot2lenlabel(ctx->dotOrigin, origin);
         deleteZoneAllNumaNodes(origin);
         zoneReloadContextDestroy(ctx);

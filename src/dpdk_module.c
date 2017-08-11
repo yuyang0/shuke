@@ -640,6 +640,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
 {
     if (!verify_cksum(m)) {
+        LOG_DEBUG(DPDK, "invalid cksum");
         goto invalid;
     }
 
@@ -707,6 +708,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             ipproto = ipv6_h->proto;
             break;
         default:
+            LOG_DEBUG(DPDK, "invalid l3 proto");
             goto invalid;
     }
     switch (ipproto) {
@@ -714,6 +716,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             udp_h = (struct udp_hdr *) (l3_h + m->l3_len);
             // check the udp port
             if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
+                LOG_DEBUG(DPDK, "invalid udp port");
                 goto invalid;
             }
             break;
@@ -722,12 +725,14 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             tcp_h = (struct tcp_hdr *) (l3_h + m->l3_len);
             // check the tcp port
             if (rte_be_to_cpu_16(tcp_h->dst_port) != sk.port) {
+                LOG_DEBUG(DPDK, "invalid tcp port");
                 goto invalid;
             }
             __send_to_kni(qconf, m, portid);
             return;
 #endif
         default:
+            LOG_DEBUG(DPDK, "invalid l4 proto");
             goto invalid;
     }
 
