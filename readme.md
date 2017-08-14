@@ -16,13 +16,17 @@ An authority-only dns server implemented with DPDK
     
 ### result
 
-1. one 10G port(response size: 50 bytes)
+1. one 10G port
 
     ![benchmark(1 10G port)](doc/static/benchmark_1_port.png)
     
-   pls note when test with 5 cores, shuke actually processed 12.43M request per second,
-   but the client reports 10.7M, this because the NIC doesn't have enough bandwidth.
+   pls note when test with 5 cores, shuke actually processed 12.43M and 11.39M requests per second,
+   but the client reports 10.7M and 9.46M, this is because the NIC doesn't have enough bandwidth.
    
+2. two 10G port
+
+    ![benchmark(2 10G port)](doc/static/benchmark_2_port.png)
+    
 ## Quick start
 ### buid
 
