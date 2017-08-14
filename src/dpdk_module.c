@@ -903,7 +903,8 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             if (nb_rx == 0)
                 continue;
             qconf->received_req += nb_rx;
-            // LOG_INFO(DPDK, "lcore %d receive %d packets", lcore_id, nb_rx);
+            // LOG_DEBUG(DPDK, "lcore %d recv port %d, queue %d, nb_rx: %d\n", qconf->lcore_id, portid, queueid, nb_rx);
+
             handle_packets(nb_rx, pkts_burst, portid, qconf);
         }
     }
