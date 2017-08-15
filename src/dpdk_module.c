@@ -646,7 +646,6 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
     uint16_t ether_type;
     uint8_t ipproto;
-    int l2_len;
     uint32_t ipv4_addr;
     uint16_t udp_port;
     char *l3_h = NULL;
@@ -668,15 +667,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
     ether_type = rte_be_to_cpu_16(eth_h->ether_type);
     l3_h = (char *)(eth_h+1);
-    l2_len = sizeof(*eth_h);
     m->l2_len = sizeof(struct ether_hdr);
-
-    //TODO: maybe need  remove VLAN support
-    if (unlikely(ether_type == ETHER_TYPE_VLAN)) {
-        struct vlan_hdr *vlan_h = (struct vlan_hdr *) ((char *) eth_h + l2_len);
-        ether_type = rte_be_to_cpu_16(vlan_h->eth_proto);
-        l3_h += sizeof(*vlan_h);
-    }
 
     switch (ether_type) {
         case ETHER_TYPE_ARP:
