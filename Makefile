@@ -7,6 +7,13 @@ RTE_TARGET ?= x86_64-native-linuxapp-gcc
 
 include $(RTE_SDK)/mk/rte.vars.mk
 
+# these variables are exported as environment variables in dpdk makefile,
+# but it is useless for himongo(ARCH will cause compile error) and liburcu.
+# so unexport it.
+unexport CFLAGS
+unexport LDFLAGS
+unexport ARCH
+
 ifeq ($(DEBUG), 1)
 SHUKE_CFLAGS=-DSK_TEST
 OPTIMIZATION?=-O0
