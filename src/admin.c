@@ -578,7 +578,7 @@ end:
 sds genDebugInfo() {
     char buf[4096];
     sds s = sdsempty();
-    int ret = intArrayToStr(sk.lcore_ids, sk.nr_lcore_ids, ", ", buf, 4096);
+    int ret = intArrayToStr(sk.lcore_ids, sk.nr_lcore_ids, ",", buf, 4096);
     if (ret < 0) {
         snprintf(buf, 4096, "lcore list is too long");
     }
@@ -594,7 +594,7 @@ sds genDebugInfo() {
     for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
         numaNode_t *node = sk.nodes[numa_id];
-        ret = intArrayToStr(node->lcore_ids, node->nr_lcore_ids, ", ", buf, 4096);
+        ret = intArrayToStr(node->lcore_ids, node->nr_lcore_ids, ",", buf, 4096);
         if (ret < 0) {
             snprintf(buf, 4096, "lcore list is too long");
         }
