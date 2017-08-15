@@ -575,6 +575,66 @@ end:
     return;
 }
 
+sds genDebugInfo() {
+    char buf[4096];
+    sds s = sdsempty();
+    int ret = intArrayToStr(sk.lcore_ids, sk.nr_lcore_ids, ", ", buf, 4096);
+    if (ret < 0) {
+        snprintf(buf, 4096, "lcore list is too long");
+    }
+    s = sdscatprintf(s,
+                     "master_numa_id:   %d\r\n"
+                     "lcore_ids:        %s\r\n"
+                     "total_lcore_list: %s\r\n"
+                     "\r\n",
+                     sk.master_lcore_id,
+                     buf,
+                     sk.total_lcore_list
+        );
+    for (int i = 0; i < sk.nr_numa_id; ++i) {
+        int numa_id = sk.numa_ids[i];
+        numaNode_t *node = sk.nodes[numa_id];
+        ret = intArrayToStr(node->lcore_ids, node->nr_lcore_ids, ", ", buf, 4096);
+        if (ret < 0) {
+            snprintf(buf, 4096, "lcore list is too long");
+        }
+        s = sdscatprintf(s,
+                         "# NUMA NODE:  %d\r\n"
+                         "max_lcore_id: %d\r\n"
+                         "min_lcore_id: %d\r\n"
+                         "nr_lcore_id:  %d\r\n"
+                         "lcore_list:   %s\r\n"
+                         "\r\n",
+                         node->numa_id,
+                         node->max_lcore_id,
+                         node->min_lcore_id,
+                         node->nr_lcore_ids,
+                         buf);
+    }
+    for (int i = 0; i < RTE_MAX_ETHPORTS; ++i) {
+        port_info_t *pinfo = sk.port_info[i];
+        if (!pinfo) continue;
+        s = sdscatprintf(s,
+                         "# PORT:  %d\r\n"
+                         "mac addr: %s\r\n",
+                         pinfo->port_id,
+                         pinfo->eth_addr_s);
+#ifndef ONLY_UDP
+        s = sdscatprintf(s,
+                         "veth_name: %s\r\n"
+                         "kni_lcore_tx: %d\r\n"
+                         "kni_lcore_k: %d\r\n"
+                         "kni_tx_queue_id: %d\r\n",
+                         pinfo->veth_name,
+                         pinfo->kni_lcore_tx,
+                         pinfo->kni_lcore_k,
+                         pinfo->kni_tx_queue_id);
+#endif
+        s = sdscat(s, "\r\n");
+    }
+    return s;
+}
+
 static void debugCommand(int argc, char *argv[], adminConn *c) {
     ((void) argc); ((void) argv);
     adminReply *rep;
@@ -590,6 +650,8 @@ static void debugCommand(int argc, char *argv[], adminConn *c) {
         void *ptr = zmalloc(ULONG_MAX);
         zfree(ptr);
         s = sdsnew("OK");
+    } else if (strcasecmp(argv[1], "info") == 0) {
+        s = genDebugInfo();
     } else {
         s = sdsnewprintf("unknown debug subcommand %s.", argv[1]);
     }
@@ -754,7 +816,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
     } else {
         s = sdsnewprintf("unknown subcommand %s for ZONE.", argv[1]);
     }
-    // else if (strcasecmp(argv[1], "DELETE") == 0) {
+   // else if (strcasecmp(argv[1], "DELETE") == 0) {
     //     if (argc != 3) {
     //         s = sdsnewprintf("ZONE DELETE needs 1 argument, but gives %d.", argc-2);
     //         goto end;
@@ -799,11 +861,3 @@ end:
     rep = adminReplyCreate(s);
     adminConnAppendW(c, rep);
 }
-
-// sds genDebugInfo() {
-//     sds s = sdsempty();
-//     s = sdscatpack(s,
-//                    "master_numa_id: %d\r\n"
-//                    "numa_ids: "
-//     );
-// }
