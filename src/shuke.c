@@ -1460,6 +1460,10 @@ int initNumaConfig() {
             node = calloc(1, sizeof(numaNode_t));
             node->numa_id = numa_id;
             node->main_lcore_id = lcore_id;
+
+            node->max_lcore_id = lcore_id;
+            node->min_lcore_id = lcore_id;
+
             node->nr_lcore_ids = 0;
             sk.nodes[numa_id] = node;
         }
