@@ -797,16 +797,24 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             s = sdsnewprintf("ZONE RELOAD command needs at least 1 arguments but gives  %d.", argc-2);
             goto end;
         }
+        if (sk.checkAsyncContext() == ERR_CODE) {
+            s = sdsnewprintf("%s is not ready to reload zone.", sk.data_store);
+            goto end;
+        }
         for (int i = 2; i < argc; ++i) {
             strncpy(dotOrigin, argv[i], MAX_DOMAIN_LEN);
             if (!isAbsDotDomain(dotOrigin)) strcat(dotOrigin, ".");
             if (asyncReloadZoneRaw(dotOrigin) != OK_CODE) {
-                s = sdsnew("Error");
+                s = sdsnewprintf("Error: %s", sk.errstr);
             }
         }
     } else if (strcasecmp(argv[1], "RELOADALL") == 0) {
         if (argc != 2) {
             s = sdsnewprintf("ZONE RELOADALL command needs 0 argument, but gives %d.", argc-2);
+            goto end;
+        }
+        if (sk.checkAsyncContext() == ERR_CODE) {
+            s = sdsnewprintf("%s is not ready to reload all zone.", sk.data_store);
             goto end;
         }
         triggerReloadAllZone();
