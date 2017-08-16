@@ -282,10 +282,17 @@ static void disconnectCallback(const mongoAsyncContext *c, int status) {
     return;
 }
 
+/*
+ * check if mongo async context is connected.
+ */
 int checkMongo() {
-    return sk.mongo_ctx == NULL? ERR_CODE: OK_CODE;
+    return (sk.mongo_ctx && mongoAsyncIsConnected(sk.mongo_ctx)) ? OK_CODE: ERR_CODE;
 }
 
+/*
+ * issue a connection to mongodb
+ * pls note: async context is connected only after connectCallback is called sunccessfully
+ */
 int initMongo() {
     if (sk.mongo_ctx) return OK_CODE;
     long now = sk.unixtime;

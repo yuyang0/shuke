@@ -222,7 +222,14 @@ struct shuke {
     FILE *log_fp;
 
     int (*syncGetAllZone)(void);
+    /*
+     * create a asyncContext.
+     */
     int (*initAsyncContext)(void);
+    /*
+     * this function is used to check if the context is ready to submit command.
+     * for mongodb, it returns OK_CODE only when the context is in connected state.
+     */
     int (*checkAsyncContext)(void);
     /*
      * these two functions should be called only in mainThreadCron.

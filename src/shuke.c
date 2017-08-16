@@ -217,6 +217,7 @@ static zoneReloadContext* __shiftZoneReloadContext() {
  * @return obj if everything is ok otherwise return NULL
  */
 zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
+    zoneReloadContext *t = NULL;
     zone *old_zn;
     uint32_t sn = 0;
     int32_t refresh=0, expiry=0;
@@ -230,6 +231,14 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
     old_zn = zoneDictFetchVal(sk.zd, origin);
 
     if (old_zn != NULL) {
+        /*
+         * this zone is in reloading state.
+         */
+        if (RB_EMPTY_NODE(&old_zn->rbnode)) {
+            t = NULL;
+            snprintf(sk.errstr, ERR_STR_LEN, "%s is already in reloading state.", dotOrigin);
+            goto invalid;
+        }
         sn = old_zn->sn;
         dotOrigin = old_zn->dotOrigin;
         refresh = old_zn->refresh;
@@ -239,9 +248,8 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
         // the zone is reloading should not in rbtree.
         rbtreeDeleteZone(old_zn);
     }
-    zoneDictRUnlock(sk.zd);
 
-    zoneReloadContext *t = zcalloc(sizeof(*t));
+    t = zcalloc(sizeof(*t));
     t->dotOrigin = zstrdup(dotOrigin);
     t->sn = sn;
     t->refresh = refresh;
@@ -249,6 +257,8 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
     t->refresh_ts = refresh_ts;
     t->zone_exist = zone_exist;
     t->status = TASK_PENDING;
+invalid:
+    zoneDictRUnlock(sk.zd);
     return t;
 }
 
