@@ -816,46 +816,6 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
     } else {
         s = sdsnewprintf("unknown subcommand %s for ZONE.", argv[1]);
     }
-   // else if (strcasecmp(argv[1], "DELETE") == 0) {
-    //     if (argc != 3) {
-    //         s = sdsnewprintf("ZONE DELETE needs 1 argument, but gives %d.", argc-2);
-    //         goto end;
-    //     }
-    //     strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
-    //     if (isAbsDotDomain(dotOrigin) == false) {
-    //         strcat(dotOrigin, ".");
-    //     }
-    //     dot2lenlabel(dotOrigin, origin);
-    //     deleteZoneAllNumaNodes(origin);
-    // } else if (strcasecmp(argv[1], "FLUSHALL") == 0) {
-    //     if (argc != 2) {
-    //         s = sdsnewprintf("ZONE FLUSHALL needs no arguments, but gives %d.", argc-2);
-    //         goto end;
-    //     }
-    //     // delete all zone
-    //     zoneDictEmpty(sk.zd);
-    // } else if (strcasecmp(argv[1], "SET") == 0) {
-    //     if (argc != 4) {
-    //         s = sdsnewprintf("ZONE SET needs 2 argument, but gives %d.", argc-2);
-    //         goto end;
-    //     }
-    //     strncpy(dotOrigin, argv[2], MAX_DOMAIN_LEN);
-    //     if (isAbsDotDomain(dotOrigin) == false) {
-    //         strcat(dotOrigin, ".");
-    //     }
-    //     // set zone
-    //     if (loadZoneFromStr(errstr, argv[3], &z) == DS_ERR) {
-    //         s = sdsnewprintf("Error: %s", errstr);
-    //     } else {
-    //         if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
-    //             zoneDestroy(z);
-    //             s = sdsnewprintf("the origin of the zone loading from string is not %s.", dotOrigin);
-    //             goto end;
-    //         }
-    //         replaceZoneAllNumaNodes(z);
-    //         s = sdsnew("ok");
-    //     }
-    // }
 end:
     if (s == NULL) s = sdsnew("OK");
     rep = adminReplyCreate(s);
