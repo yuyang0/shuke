@@ -178,7 +178,6 @@ typedef struct _zone {
      * to get the rr_idx for this rrset.
      */
     uint32_t *rr_offset_array;
-    size_t rr_mem_size;
 
     // timestamp when this zone needs reload
     long refresh_ts;

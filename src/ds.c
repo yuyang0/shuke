@@ -560,8 +560,6 @@ zone *zoneCopy(zone *z, int socket_id) {
         dictReplace(new_z->d, name, new_dv);
     }
     dictReleaseIterator(it);
-    new_z->rr_offset_array = socket_memdup(socket_id, z->rr_offset_array, z->rr_mem_size);
-    new_z->rr_mem_size = z->rr_mem_size;
     return new_z;
 }
 

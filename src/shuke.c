@@ -90,6 +90,7 @@ void zoneUpdateRoundRabinInfo(zone *z) {
     }
     dictReleaseIterator(it);
 
+    assert(z->rr_offset_array == NULL);
     node = sk.nodes[z->socket_id];
 
     // to avoid False Share
@@ -100,7 +101,6 @@ void zoneUpdateRoundRabinInfo(zone *z) {
     uint32_t arr_size = sizeof(uint32_t)*arr_len;
     size_t totalsize = arr_size + node->nr_lcore_ids * nr_rr_idx;
     z->rr_offset_array = socket_calloc(z->socket_id, 1, totalsize);
-    z->rr_mem_size = totalsize;
 
     for (int i = 0; i < node->nr_lcore_ids; ++i) {
         int lcore_id = node->lcore_ids[i];
