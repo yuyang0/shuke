@@ -353,7 +353,7 @@ int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z) {
     char *tok;
     int err = DS_OK;
     RRParserReset(psr);
-    tokenize(ss, psr->tokens, &(psr->ntokens));
+    tokenize(ss, psr->tokens, &(psr->ntokens), " \t");
     if (name != NULL) {
         check_soa_top = false;
         strncpy(psr->name, name, MAX_DOMAIN_LEN);
@@ -411,7 +411,7 @@ int RRParserFeedRdata(RRParser *psr, char *rdata, char *name, uint32_t ttl, char
     bool check_soa_top = false;
     int err = DS_OK;
     RRParserReset(psr);
-    tokenize(rdata, psr->tokens, &(psr->ntokens));
+    tokenize(rdata, psr->tokens, &(psr->ntokens), " \t");
 
     strncpy(psr->name, name, MAX_DOMAIN_LEN);
     if (abs2lenRelative(psr->name, psr->dotOrigin) == DS_ERR) {
@@ -457,7 +457,7 @@ int parseSOASn(char *errstr, char *soa, unsigned long *sn) {
     } else {
         ptr += strlen(" SOA ");
     }
-    tokenize(ptr, tokens, &ntokens);
+    tokenize(ptr, tokens, &ntokens, " \t");
     if (ntokens != 7) {
         snprintf(errstr, ERR_STR_LEN, "too many tokens in SOA record %s.", soa);
         return PARSER_ERR;
@@ -679,7 +679,7 @@ static int readDirectives(char *errstr, char **ssp, char *origin, uint32_t *ttl,
             *line_idx = prev_idx;
             return DS_OK;
         }
-        tokenize(rbuf, tokens, &ntokens);
+        tokenize(rbuf, tokens, &ntokens, " \t");
 
         if (strcasecmp(tokens[0], "$ORIGIN") == 0) {
             if (ntokens < 2) {

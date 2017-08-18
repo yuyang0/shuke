@@ -164,7 +164,7 @@ static void dispatchCommand(adminConn *c) {
     int argc = 10;
     sds s = NULL;
 
-    if (tokenize(ptr, argv, &argc) < 0) {
+    if (tokenize(ptr, argv, &argc, " \t") < 0) {
         s = sdsnewprintf("command contains too many tokens or syntax error.");
         goto error;
     }

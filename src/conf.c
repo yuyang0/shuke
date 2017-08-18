@@ -154,7 +154,7 @@ int getStrArrayVal(char *errstr, char *buf, char *entry, char **ret, int *n) {
     snprintf(errstr, ERR_STR_LEN, "can't find ']' for entry for %s.", entry);
     return CONF_ERR;
 ok:
-    tokenize(vdata, ret, n);
+    tokenize(vdata, ret, n, " \t");
     for (int i = 0; i < *n; i++) {
         ret[i] = strdup(ret[i]);
     }
@@ -212,7 +212,7 @@ int getBlockVal(char *errstr, char *buf, char *key, blockValProc *proc, void *pr
 
         close = strchr(start, '}');
         if (close) return CONF_OK;
-        tokenize(start, tokens, &ntokens);
+        tokenize(start, tokens, &ntokens, " \t");
         if (proc(errstr, ntokens, tokens, privdata) != CONF_OK) {
             return CONF_ERR;
         }

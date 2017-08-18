@@ -116,12 +116,11 @@ int strsplit(char *str, char *seps, char **ret, int *n) {
  * @param n : store the max size of ret by caller and return real size of ret to caller.
  * @return : 0 for success, -1 for ret size is not enough, -2 for syntax error(unbalanced literal string)
  */
-int tokenize(char *str, char **ret, int *n) {
+int tokenize(char *str, char **ret, int *n, char *seps) {
     char *start = str, *end = NULL;
     int max = *n;
     char *maxEnd = str + strlen(str);
     bool literal = false;
-    char *seps = " \t";
     *n = 0;
 
     while (start < maxEnd) {

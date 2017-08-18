@@ -25,7 +25,7 @@ size_t strcountchr(char *str, char c);
 size_t strcountstr(char *str, char *fstr);
 
 int strsplit(char *str, char *seps, char **ret, int *n);
-int tokenize(char *str, char **ret, int *n);
+int tokenize(char *str, char **ret, int *n, char *seps);
 
 bool str2ipv4(const char *addr, char *val);
 bool str2ipv6(char *addr, char *val);
