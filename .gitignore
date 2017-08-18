@@ -16,3 +16,8 @@ dnsbench
 callgrind*
 .cache
 build
+/GPATH
+/GRTAGS
+/GSYMS
+/GTAGS
+/.clang_complete
