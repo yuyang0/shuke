@@ -380,6 +380,22 @@ end:
     adminConnAppendW(c, rep);
 }
 
+static char* statArrayToStr(uint64_t arr[], int nele) {
+    static char buf[1024];
+    int max = 1024;
+    char human[128];
+    int n = 0;
+    int offset = 0;
+    for (int i = 0; i < nele; ++i) {
+        if (offset >= max-1) break;
+        numberToHuman(human, (unsigned long long)arr[i]);
+        n = snprintf(buf+offset, (size_t)(max-offset), "%d: %s ", i, human);
+        offset += n;
+    }
+
+    return buf;
+}
+
 static sds genInfoString(char *section) {
     time_t uptime = sk.unixtime - sk.starttime;
     struct rusage self_ru;
@@ -514,7 +530,11 @@ static sds genInfoString(char *section) {
                              "output_bytes_per_sec:%llu\r\n"
                              "input_missed:%llu\r\n"
                              "input_errors:%llu\r\n"
-                             "output_errors:%llu\r\n",
+                             "output_errors:%llu\r\n"
+                             "queue_input_packets:%s\r\n"
+                             "queue_output_packets:%s\r\n"
+                             "queue_errors:%s\r\n"
+                             "\r\n",
                              portid,
                              sk.port_info[portid]->eth_addr_s,
                              (long long unsigned) eth_stats.ipackets,
@@ -527,10 +547,12 @@ static sds genInfoString(char *section) {
                              (long long unsigned) eth_stats.obytes/uptime,
                              (long long unsigned) eth_stats.imissed,
                              (long long unsigned) eth_stats.ierrors,
-                             (long long unsigned) eth_stats.oerrors);
+                             (long long unsigned) eth_stats.oerrors,
+                             statArrayToStr(eth_stats.q_ipackets, RTE_ETHDEV_QUEUE_STAT_CNTRS),
+                             statArrayToStr(eth_stats.q_opackets, RTE_ETHDEV_QUEUE_STAT_CNTRS),
+                             statArrayToStr(eth_stats.q_errors, RTE_ETHDEV_QUEUE_STAT_CNTRS));
         }
 
-        s = sdscat(s, "\r\n");
         s = sdscat(s, "# Core received packets\r\n");
 
         for (int i = 0; i < sk.nr_lcore_ids; ++i) {
