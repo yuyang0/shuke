@@ -57,7 +57,7 @@ int getBoolVal(char *errstr, char *buf, char *entry, bool *val);
 int getStrArrayVal(char *errstr, char *buf, char *entry, char **ret, int *n);
 int getBlockVal(char *errstr, char *buf, char *key, blockValProc *proc, void *privdata);
 
-#if defined(CDNS_TEST)
+#if defined(SK_TEST)
 int confTest(int argc, char *argv[]);
 #endif
 #endif /* _CONF_H_ */

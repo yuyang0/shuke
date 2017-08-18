@@ -254,7 +254,7 @@ static char *removeUseless(char *line) {
     return strip(line, " \n\t");
 }
 
-#if defined(CDNS_TEST)
+#if defined(SK_TEST)
 #include <stdio.h>
 #include <stdlib.h>
 #include "utils.h"
