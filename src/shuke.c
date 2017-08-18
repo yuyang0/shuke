@@ -1232,6 +1232,90 @@ static int hexchar_to_int(char c) {
     return (int)strtol(buf, NULL, 16);
 }
 
+static int parseList(char *errstr, char *s, int arr[], int *nrEle) {
+    char *sArr[1024];
+    int n = 1024;
+    int max = *nrEle;
+    char *endptr;
+    long int v;
+
+    *nrEle = 0;
+
+    while(*s == ' ') s++;
+    if (*s == '[') {
+        if (strchr(s, ']') == NULL) {
+            snprintf(errstr, ERR_STR_LEN, "need ] near %s", s);
+            goto invalid;
+        }
+        tokenize(s, sArr, &n, " ,");
+        if (max < n) {
+        }
+        for (int i = 0; i < n; i++) {
+            if (*nrEle >= max) {
+                snprintf(errstr, ERR_STR_LEN, "array size is not enough");
+                goto invalid;
+            }
+            char *subp = strchr(sArr[i], '-');
+            if (subp == NULL) {
+                v = strtol(sArr[i], &endptr, 10);
+                arr[(*nrEle)++] = (int)v;
+            } else {
+                *subp++ = 0;
+                long int lbound = strtol(sArr[i], &endptr, 10);
+                if (endptr != NULL) {
+                    goto invalid;
+                }
+                long int hbound = strtol(subp, &endptr, 10);
+                if (endptr != NULL) {
+                    goto invalid;
+                }
+                for (v=lbound; v<=hbound; ++v) {
+                    if (*nrEle >= max) {
+                        snprintf(errstr, ERR_STR_LEN, "array size is not enough");
+                        goto invalid;
+                    }
+                    arr[(*nrEle)++] = (int)v;
+                }
+            }
+        }
+    } else {
+        long int v = strtol(s, &endptr, 10);
+        if (endptr != NULL) {
+            snprintf(errstr, ERR_STR_LEN, "syntax error %s", s);
+            goto invalid;
+        }
+        arr[0] = (int)v;
+        *nrEle = 1;
+    }
+    return 0;
+invalid:
+    return -1;
+}
+
+int parseQueueConfig(char *errstr, char *s, int cores[], int *nrCores,
+                     int ports[], int *nrPorts) {
+    char buf[4096] = {0};
+    char *cStart, *pStart;
+    char *end = strchr(s, ',');
+    if (end == NULL) end = s + strlen(s);
+    if (end - s >= 4096) return -1;
+    memcpy(buf, s, end-s);
+    cStart = buf;
+    pStart = strchr(buf, '.');
+    if (pStart == NULL) {
+        snprintf(errstr, ERR_STR_LEN, "syntax error %s", buf);
+        return -1;
+    }
+    *pStart++ = 0;
+    if (parseList(errstr, cStart, cores, nrCores) < 0) {
+        return -1;
+    }
+    if (parseList(errstr, pStart, ports, nrPorts) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 #ifndef ONLY_UDP
 static int parse_kni_tx_config() {
     int ids[1024];
@@ -1503,11 +1587,11 @@ int initNumaConfig() {
             node->max_lcore_id = lcore_id;
     }
 
-    if (sk.nodes[sk.master_numa_id]->nr_lcore_ids <= 1) {
-        fprintf(stderr, "master lcore (%d) is the only enabled core on numa %d.\n",
-                sk.master_lcore_id, sk.master_numa_id);
-        exit(-1);
-    }
+    /* if (sk.nodes[sk.master_numa_id]->nr_lcore_ids <= 1) { */
+    /*     fprintf(stderr, "master lcore (%d) is the only enabled core on numa %d.\n", */
+    /*             sk.master_lcore_id, sk.master_numa_id); */
+    /*     exit(-1); */
+    /* } */
     n = 0;
     for (int i = 0; i < MAX_NUMA_NODES; ++i) {
         if (sk.nodes[i] != NULL) {
