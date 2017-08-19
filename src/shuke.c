@@ -1294,7 +1294,7 @@ char *parseQueueConfigPart(char *errstr, char *s, int cores[], int *nrCores,
                      int ports[], int *nrPorts) {
     char buf[4096] = {0};
     char *cStart, *pStart;
-    char *end = strchr(s, ',');
+    char *end = strchr(s, ';');
     if (end == NULL) end = s + strlen(s);
     if (end - s >= 4096) goto invalid;
     memcpy(buf, s, end-s);
