@@ -49,29 +49,6 @@
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
-struct lcore_params {
-    uint8_t port_id;
-    uint8_t queue_id;
-    uint8_t lcore_id;
-} __rte_cache_aligned;
-
-static struct lcore_params lcore_params_array[MAX_LCORE_PARAMS];
-static struct lcore_params lcore_params_array_default[] = {
-    {0, 0, 2},
-    {0, 1, 2},
-    {0, 2, 2},
-    {1, 0, 2},
-    {1, 1, 2},
-    {1, 2, 2},
-    {2, 0, 2},
-    {3, 0, 3},
-    {3, 1, 3},
-};
-
-static struct lcore_params * lcore_params = lcore_params_array_default;
-static uint16_t nb_lcore_params = sizeof(lcore_params_array_default) /
-    sizeof(lcore_params_array_default[0]);
-
 struct rte_eth_conf default_port_conf = {
     .rxmode = {
         .mq_mode = ETH_MQ_RX_RSS,
@@ -141,150 +118,6 @@ static int check_cksum_offload(int portid) {
         LOG_WARN(DPDK, "port %d doesn't support udp cksum offload.");
         return -1;
     }
-    return 0;
-}
-
-static int
-check_lcore_params(void)
-{
-    uint8_t queue, lcore;
-    uint16_t i;
-    int socketid;
-
-    for (i = 0; i < nb_lcore_params; ++i) {
-        queue = lcore_params[i].queue_id;
-        if (queue >= MAX_RX_QUEUE_PER_PORT) {
-            LOG_ERR(DPDK, "invalid queue number: %hhu", queue);
-            return -1;
-        }
-        lcore = lcore_params[i].lcore_id;
-        if (!rte_lcore_is_enabled(lcore)) {
-            LOG_ERR(DPDK, "lcore %hhu is not enabled in lcore mask", lcore);
-            return -1;
-        }
-        if ((socketid = rte_lcore_to_socket_id(lcore) != 0) &&
-            (sk.numa_on == false)) {
-            LOG_WARNING(DPDK, "lcore %hhu is on socket %d with numa off \n",
-                   lcore, socketid);
-        }
-    }
-    return 0;
-}
-
-static int
-check_port_config(const unsigned nb_ports)
-{
-    unsigned portid;
-    uint16_t i;
-
-    for (i = 0; i < nb_lcore_params; ++i) {
-        portid = lcore_params[i].port_id;
-        if ((sk.portmask & (1 << portid)) == 0) {
-            LOG_ERR(DPDK, "port %u is not enabled in port mask", portid);
-            return -1;
-        }
-        if (portid >= nb_ports) {
-            LOG_ERR(DPDK, "port %u is not present on the board.", portid);
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static uint8_t
-get_port_n_rx_queues(const uint8_t port)
-{
-    int queue = -1;
-    uint16_t i;
-
-    for (i = 0; i < nb_lcore_params; ++i) {
-        if (lcore_params[i].port_id == port) {
-            if (lcore_params[i].queue_id == queue+1)
-                queue = lcore_params[i].queue_id;
-            else
-                rte_exit(EXIT_FAILURE, "queue ids of the port %d must be"
-                         " in sequence and must start with 0\n",
-                         lcore_params[i].port_id);
-        }
-    }
-    return (uint8_t)(++queue);
-}
-
-static int
-init_lcore_rx_queues(void)
-{
-    uint16_t i, nb_rx_queue;
-    uint8_t lcore;
-
-    for (i = 0; i < nb_lcore_params; ++i) {
-        lcore = lcore_params[i].lcore_id;
-        nb_rx_queue = sk.lcore_conf[lcore].n_rx_queue;
-        if (nb_rx_queue >= MAX_RX_QUEUE_PER_LCORE) {
-            LOG_ERR(DPDK, "too many queues (%u) for lcore: %u.",
-                   (unsigned)nb_rx_queue + 1, (unsigned)lcore);
-            return -1;
-        } else {
-            sk.lcore_conf[lcore].rx_queue_list[nb_rx_queue].port_id =
-                lcore_params[i].port_id;
-            sk.lcore_conf[lcore].rx_queue_list[nb_rx_queue].queue_id =
-                lcore_params[i].queue_id;
-            sk.lcore_conf[lcore].n_rx_queue++;
-        }
-    }
-    return 0;
-}
-
-static int
-parse_config(const char *q_arg)
-{
-    char s[256];
-    const char *p, *p0 = q_arg;
-    char *end;
-    enum fieldnames {
-        FLD_PORT = 0,
-        FLD_QUEUE,
-        FLD_LCORE,
-        _NUM_FLD
-    };
-    unsigned long int_fld[_NUM_FLD];
-    char *str_fld[_NUM_FLD];
-    int i;
-    unsigned size;
-
-    nb_lcore_params = 0;
-
-    while ((p = strchr(p0,'(')) != NULL) {
-        ++p;
-        if((p0 = strchr(p,')')) == NULL)
-            return -1;
-
-        size = p0 - p;
-        if(size >= sizeof(s))
-            return -1;
-
-        snprintf(s, sizeof(s), "%.*s", size, p);
-        if (rte_strsplit(s, sizeof(s), str_fld, _NUM_FLD, ',') != _NUM_FLD)
-            return -1;
-        for (i = 0; i < _NUM_FLD; i++){
-            errno = 0;
-            int_fld[i] = strtoul(str_fld[i], &end, 0);
-            if (errno != 0 || end == str_fld[i] || int_fld[i] > 255)
-                return -1;
-        }
-        if (nb_lcore_params >= MAX_LCORE_PARAMS) {
-            LOG_WARN(DPDK, "exceeded max number of lcore params: %hu.",
-                   nb_lcore_params);
-            return -1;
-        }
-        lcore_params_array[nb_lcore_params].port_id =
-            (uint8_t)int_fld[FLD_PORT];
-        lcore_params_array[nb_lcore_params].queue_id =
-            (uint8_t)int_fld[FLD_QUEUE];
-        lcore_params_array[nb_lcore_params].lcore_id =
-            (uint8_t)int_fld[FLD_LCORE];
-        ++nb_lcore_params;
-    }
-    lcore_params = lcore_params_array;
     return 0;
 }
 
@@ -395,7 +228,7 @@ send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
     int ret;
     uint16_t queueid;
 
-    queueid = qconf->tx_queue_id[port];
+    queueid = qconf->queue_id_list[port];
     m_table = (struct rte_mbuf **)qconf->tx_mbufs[port].m_table;
 
     ret = rte_eth_tx_burst(port, queueid, m_table, n);
@@ -838,17 +671,17 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 
     init_per_lcore();
 
-    if (qconf->n_rx_queue == 0) {
+    if (qconf->nr_ports == 0) {
         LOG_INFO(DPDK, "lcore %u has nothing to do.", lcore_id);
         return 0;
     }
 
     LOG_INFO(DPDK, "entering main loop on lcore %u.", lcore_id);
 
-    for (i = 0; i < qconf->n_rx_queue; i++) {
+    for (i = 0; i < qconf->nr_ports; i++) {
 
-        portid = qconf->rx_queue_list[i].port_id;
-        queueid = qconf->rx_queue_list[i].queue_id;
+        portid = (uint8_t )qconf->port_id_list[i];
+        queueid = (uint8_t )qconf->queue_id_list[i];
         LOG_INFO(DPDK,
                 " -- lcoreid=%u portid=%hhu rxqueueid=%hhu.",
                 lcore_id, portid, queueid);
@@ -863,8 +696,8 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
          */
         diff_tsc = cur_tsc - prev_tsc;
         if (unlikely(diff_tsc > drain_tsc)) {
-            for (i = 0; i < qconf->n_tx_port; ++i) {
-                portid = (uint8_t )qconf->tx_port_id[i];
+            for (i = 0; i < qconf->nr_ports; ++i) {
+                portid = (uint8_t )qconf->port_id_list[i];
                 if (qconf->tx_mbufs[portid].len > 0) {
                     send_burst(qconf,
                                qconf->tx_mbufs[portid].len,
@@ -887,9 +720,10 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         /*
          * Read packet from RX queues
          */
-        for (i = 0; i < qconf->n_rx_queue; ++i) {
-            portid = qconf->rx_queue_list[i].port_id;
-            queueid = qconf->rx_queue_list[i].queue_id;
+        for (i = 0; i < qconf->nr_ports; i++) {
+
+            portid = (uint8_t )qconf->port_id_list[i];
+            queueid = (uint8_t )qconf->queue_id_list[i];
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
             if (nb_rx == 0)
                 continue;
@@ -963,7 +797,7 @@ initDpdkModule() {
     uint16_t queueid;
     unsigned lcore_id;
     uint32_t n_tx_queue, nb_lcores;
-    uint8_t portid, nb_rx_queue, queue, socketid;
+    uint8_t portid, nb_rx_queue, socketid;
 
     /* parse application arguments (after the EAL ones) */
     if (sk.jumbo_on) {
@@ -976,19 +810,7 @@ initDpdkModule() {
         default_port_conf.rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
     }
 
-    parse_config(sk.rx_queue_config);
-
-    if (check_lcore_params() < 0)
-        rte_exit(EXIT_FAILURE, "check_lcore_params failed\n");
-
-    ret = init_lcore_rx_queues();
-    if (ret < 0)
-        rte_exit(EXIT_FAILURE, "init_lcore_rx_queues failed\n");
-
     nb_ports = rte_eth_dev_count();
-
-    if (check_port_config(nb_ports) < 0)
-        rte_exit(EXIT_FAILURE, "check_port_config failed\n");
 
     nb_lcores = rte_lcore_count();
     LOG_INFO(DPDK, "found %d cores, master cores: %d, %d", nb_lcores, rte_get_master_lcore(), rte_lcore_id());
@@ -997,22 +819,23 @@ initDpdkModule() {
     /* initialize all ports */
     for (int i = 0; i < sk.nr_ports; i++) {
         portid = (uint8_t )sk.port_ids[i];
+        port_info_t *pinfo = sk.port_info[portid];
         /* init port */
         LOG_INFO(DPDK, "Initializing port %d ... ", portid );
         fflush(stdout);
 
-        nb_rx_queue = get_port_n_rx_queues(portid);
+        nb_rx_queue = (uint8_t )pinfo->nr_lcore;
 #ifdef ONLY_UDP
         /*
          * every core should has a tx queue except master core
          */
-        n_tx_queue = (uint32_t )(sk.nr_lcore_ids-1);
+        n_tx_queue = (uint32_t )(pinfo->nr_tx_lcore);
 #else
         /*
          * every core should has a tx queue except master core
          * every port should preserve a tx queue for kni tx thread
          */
-        n_tx_queue = (uint32_t )sk.nr_lcore_ids;
+        n_tx_queue = (uint32_t )(pinfo->nr_lcore + 1);
 #endif
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
@@ -1039,9 +862,10 @@ initDpdkModule() {
             rte_exit(EXIT_FAILURE, "init_mem failed\n");
 
         /* init one TX queue per couple (lcore,port) */
-        queueid = 0;
         for (int i = 0; i < sk.nr_lcore_ids; ++i) {
             lcore_id = (unsigned )sk.lcore_ids[i];
+            qconf = &sk.lcore_conf[lcore_id];
+            queueid = qconf->queue_id_list[portid];
             if (lcore_id == rte_get_master_lcore()) continue;
             assert(rte_lcore_is_enabled(lcore_id));
 
@@ -1064,36 +888,7 @@ initDpdkModule() {
                          "rte_eth_tx_queue_setup: err=%d, "
                          "port=%d\n", ret, portid);
 
-            qconf = &sk.lcore_conf[lcore_id];
-            qconf->tx_queue_id[portid] = queueid;
-            queueid++;
-
-            qconf->tx_port_id[qconf->n_tx_port] = portid;
-            qconf->n_tx_port++;
-        }
-    }
-
-    for (int i = 0; i < sk.nr_lcore_ids; ++i) {
-        lcore_id = (unsigned )sk.lcore_ids[i];
-        if (lcore_id == rte_get_master_lcore()) continue;
-        assert(rte_lcore_is_enabled(lcore_id));
-
-        qconf = &sk.lcore_conf[lcore_id];
-        LOG_INFO(DPDK, "Initializing rx queues on lcore %u ... ", lcore_id );
-        fflush(stdout);
-        /* init RX queues */
-        for(queue = 0; queue < qconf->n_rx_queue; ++queue) {
-            portid = qconf->rx_queue_list[queue].port_id;
-            queueid = qconf->rx_queue_list[queue].queue_id;
-
-            if (sk.numa_on)
-                socketid =
-                    (uint8_t)rte_lcore_to_socket_id(lcore_id);
-            else
-                socketid = 0;
-
             LOG_INFO(DPDK, "   rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
-
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
                                          socketid,
                                          &rx_conf,
@@ -1104,6 +899,7 @@ initDpdkModule() {
                          ret, portid);
         }
     }
+
 
 #ifndef ONLY_UDP
     kni_init_tx_queue();

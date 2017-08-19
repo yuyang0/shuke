@@ -1046,9 +1046,9 @@ static void initConfigFromFile(int argc, char **argv) {
     CHECK_CONF_ERR(conf_err, sk.errstr);
     conf_err = getIntVal(sk.errstr, cbuf, "max_pkt_len", &sk.max_pkt_len);
     CHECK_CONF_ERR(conf_err, sk.errstr);
-    sk.rx_queue_config = getStrVal(cbuf, "rx_queue_config", NULL);
-    CHECK_CONFIG("rx_queue_config", sk.rx_queue_config != NULL,
-                 "Config Error: rx_queue_config can't be empty");
+    sk.queue_config = getStrVal(cbuf, "queue_config", NULL);
+    CHECK_CONFIG("queue_config", sk.queue_config != NULL,
+                 "Config Error: queue_config can't be empty");
 
     /* printf("cmsk: %s, pmsk: %d" */
     /*        " config: %s, promiscuous: %d" */
@@ -1248,8 +1248,6 @@ static int parseList(char *errstr, char *s, int arr[], int *nrEle) {
             goto invalid;
         }
         tokenize(s, sArr, &n, " ,");
-        if (max < n) {
-        }
         for (int i = 0; i < n; i++) {
             if (*nrEle >= max) {
                 snprintf(errstr, ERR_STR_LEN, "array size is not enough");
@@ -1292,28 +1290,93 @@ invalid:
     return -1;
 }
 
-int parseQueueConfig(char *errstr, char *s, int cores[], int *nrCores,
+char *parseQueueConfigPart(char *errstr, char *s, int cores[], int *nrCores,
                      int ports[], int *nrPorts) {
     char buf[4096] = {0};
     char *cStart, *pStart;
     char *end = strchr(s, ',');
     if (end == NULL) end = s + strlen(s);
-    if (end - s >= 4096) return -1;
+    if (end - s >= 4096) goto invalid;
     memcpy(buf, s, end-s);
     cStart = buf;
     pStart = strchr(buf, '.');
     if (pStart == NULL) {
         snprintf(errstr, ERR_STR_LEN, "syntax error %s", buf);
-        return -1;
+        goto invalid;
     }
     *pStart++ = 0;
     if (parseList(errstr, cStart, cores, nrCores) < 0) {
-        return -1;
+        goto invalid;
     }
     if (parseList(errstr, pStart, ports, nrPorts) < 0) {
-        return -1;
+        goto invalid;
     }
-    return 0;
+    return end+1;
+invalid:
+    return NULL;
+}
+
+int parseQueueConfig(char *errstr, char *s) {
+    char *end = s + strlen(s);
+    char *next = s;
+    int cores[1024];
+    int ports[1024];
+    int nrCores = 1024;
+    int nrPorts = 1024;
+    while (next < end) {
+        next = parseQueueConfigPart(errstr, next, cores, &nrCores,
+                                    ports, &nrPorts);
+        if (next == NULL) {
+            goto invalid;
+        }
+        sortIntArray(cores, nrCores);
+        sortIntArray(ports, nrPorts);
+
+        if (nrCores <= 0 || nrPorts <= 0) {
+            snprintf(errstr, ERR_STR_LEN, "invalid queue config.");
+            goto invalid;
+        }
+        for (int i = 0; i < nrPorts; i++) {
+            int port_id = ports[i];
+            if (port_id < 0 || port_id >= RTE_MAX_ETHPORTS) {
+                snprintf(errstr, ERR_STR_LEN, "portid should in 0-%d, but gives %d.", RTE_MAX_ETHPORTS, port_id);
+                goto invalid;
+            }
+            port_info_t *pinfo = sk.port_info[port_id];
+            if (!pinfo) {
+                snprintf(errstr, ERR_STR_LEN, "queue config: port %d is disabled.", port_id);
+                goto invalid;
+            }
+            if (!pinfo->lcore_list) {
+                snprintf(errstr, ERR_STR_LEN, "duplicate rx queue cofnig for port %d.", port_id);
+                goto invalid;
+            }
+            pinfo->lcore_list = memdup(cores, sizeof(int)*nrCores);
+            pinfo->nr_lcore = nrCores;
+            for (int j = 0; j < nrCores; ++j) {
+                int lcore_id = cores[j];
+                if (lcore_id < 0 || lcore_id >= RTE_MAX_LCORE) {
+                    snprintf(errstr, ERR_STR_LEN, "lcore should in 0-%d, but gives %d.", RTE_MAX_LCORE, lcore_id);
+                    goto invalid;
+                }
+                if (lcore_id == sk.master_lcore_id) {
+                    snprintf(errstr, ERR_STR_LEN, "queue config should not contain master lcore id.");
+                    goto invalid;
+                }
+                lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
+                if (qconf->lcore_id >= RTE_MAX_LCORE) {
+                    snprintf(errstr, ERR_STR_LEN, "queue config: lcore %d is not enabled.", lcore_id);
+                    goto invalid;
+                }
+                qconf->port_id_list[qconf->nr_ports] = port_id;
+                qconf->queue_id_list[qconf->nr_ports] = j;
+                qconf->nr_ports++;
+            }
+        }
+    }
+    return OK_CODE;
+invalid:
+    return ERR_CODE;
 }
 
 #ifndef ONLY_UDP
@@ -1664,12 +1727,21 @@ int initOtherConfig() {
         }
     }
 #endif
+    // parse queue config
+    if (parseQueueConfig(sk.errstr, sk.queue_config) != OK_CODE) {
+        fprintf(stderr, "queue config: %s\n", sk.errstr);
+        exit(-1);
+    }
 
     return OK_CODE;
 }
 
 int main(int argc, char *argv[]) {
     memset(&sk, 0, sizeof(sk));
+    // set lcore_id to invalid id
+    for (int i = 0; i < RTE_MAX_LCORE; ++i) {
+        sk.lcore_conf[i].lcore_id = RTE_MAX_LCORE + 1;
+    }
 
     struct timeval tv;
     srand(time(NULL)^getpid());

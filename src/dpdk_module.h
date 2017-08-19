@@ -116,20 +116,19 @@ struct mbuf_table {
     struct rte_mbuf *m_table[MAX_PKT_BURST];
 };
 
-struct lcore_rx_queue {
-    uint8_t port_id;
-    uint8_t queue_id;
-} __rte_cache_aligned;
-
 struct numaNode_s;
 
 typedef struct lcore_conf {
     uint16_t lcore_id;
-    uint16_t n_rx_queue;
-    struct lcore_rx_queue rx_queue_list[MAX_RX_QUEUE_PER_LCORE];
-    uint16_t n_tx_port;
-    uint16_t tx_port_id[RTE_MAX_ETHPORTS];
-    uint16_t tx_queue_id[RTE_MAX_ETHPORTS];
+
+    /*
+     * one port one rx queue and one tx queue
+     * rx queue id is equal to tx queue id
+     */
+    uint16_t nr_ports;
+    uint16_t port_id_list[RTE_MAX_ETHPORTS];
+    uint16_t queue_id_list[RTE_MAX_ETHPORTS];
+
     struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
 
 #ifndef ONLY_UDP
@@ -161,6 +160,9 @@ typedef struct port_info {
     // ethernet address(string format)
     char eth_addr_s[ETHER_ADDR_FMT_SIZE];
     uint8_t port_id;
+
+    int nr_lcore;
+    int *lcore_list;
 
 #ifndef ONLY_UDP
     // kni config

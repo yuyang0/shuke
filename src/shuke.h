@@ -151,7 +151,7 @@ struct shuke {
     bool numa_on;
     bool jumbo_on;
     int max_pkt_len;
-    char *rx_queue_config;
+    char *queue_config;
 
     char *bindaddr[CONFIG_BINDADDR_MAX];
     int bindaddr_count;
