@@ -1247,6 +1247,7 @@ static int parseList(char *errstr, char *s, int arr[], int *nrEle) {
             snprintf(errstr, ERR_STR_LEN, "need ] near %s", s);
             goto invalid;
         }
+        s = strip(s, "[] ");
         tokenize(s, sArr, &n, " ,");
         for (int i = 0; i < n; i++) {
             if (*nrEle >= max) {
@@ -1260,11 +1261,13 @@ static int parseList(char *errstr, char *s, int arr[], int *nrEle) {
             } else {
                 *subp++ = 0;
                 long int lbound = strtol(sArr[i], &endptr, 10);
-                if (endptr != NULL) {
+                if (*endptr != '\0') {
+                    snprintf(errstr, ERR_STR_LEN, "%s is not a integer.", sArr[i]);
                     goto invalid;
                 }
                 long int hbound = strtol(subp, &endptr, 10);
-                if (endptr != NULL) {
+                if (*endptr != '\0') {
+                    snprintf(errstr, ERR_STR_LEN, "%s is not a integer.", subp);
                     goto invalid;
                 }
                 for (v=lbound; v<=hbound; ++v) {
@@ -1278,7 +1281,7 @@ static int parseList(char *errstr, char *s, int arr[], int *nrEle) {
         }
     } else {
         long int v = strtol(s, &endptr, 10);
-        if (endptr != NULL) {
+        if (*endptr != '\0') {
             snprintf(errstr, ERR_STR_LEN, "syntax error %s", s);
             goto invalid;
         }
@@ -1296,7 +1299,10 @@ char *parseQueueConfigPart(char *errstr, char *s, int cores[], int *nrCores,
     char *cStart, *pStart;
     char *end = strchr(s, ';');
     if (end == NULL) end = s + strlen(s);
-    if (end - s >= 4096) goto invalid;
+    if (end - s >= 4096) {
+        snprintf(errstr, ERR_STR_LEN, "%s is too long.", s);
+        goto invalid;
+    }
     memcpy(buf, s, end-s);
     cStart = buf;
     pStart = strchr(buf, '.');
@@ -1347,8 +1353,8 @@ int parseQueueConfig(char *errstr, char *s) {
                 snprintf(errstr, ERR_STR_LEN, "queue config: port %d is disabled.", port_id);
                 goto invalid;
             }
-            if (!pinfo->lcore_list) {
-                snprintf(errstr, ERR_STR_LEN, "duplicate rx queue cofnig for port %d.", port_id);
+            if (pinfo->lcore_list) {
+                snprintf(errstr, ERR_STR_LEN, "duplicate queue config for port %d.", port_id);
                 goto invalid;
             }
             pinfo->lcore_list = memdup(cores, sizeof(int)*nrCores);
