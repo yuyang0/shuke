@@ -21,3 +21,4 @@ build
 /GSYMS
 /GTAGS
 /.clang_complete
+/cscope*
