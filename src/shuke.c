@@ -1232,45 +1232,56 @@ static int hexchar_to_int(char c) {
     return (int)strtol(buf, NULL, 16);
 }
 
-static int parseList(char *errstr, char *s, int arr[], int *nrEle) {
-    char *sArr[1024];
-    int n = 1024;
+static int parseQueueConfigNumList(char *errstr, char *s, int arr[], int *nrEle) {
+    char *tokens[1024];
+    int nrTokens = 1024;
     int max = *nrEle;
     char *endptr;
     long int v;
 
     *nrEle = 0;
 
-    while(*s == ' ') s++;
+    s = strip(s, " ");
     if (*s == '[') {
         if (strchr(s, ']') == NULL) {
             snprintf(errstr, ERR_STR_LEN, "need ] near %s", s);
             goto invalid;
         }
         s = strip(s, "[] ");
-        tokenize(s, sArr, &n, " ,");
-        for (int i = 0; i < n; i++) {
-            if (*nrEle >= max) {
-                snprintf(errstr, ERR_STR_LEN, "array size is not enough");
-                goto invalid;
-            }
-            char *subp = strchr(sArr[i], '-');
+        if (tokenize(s, tokens, &nrTokens, ",") < 0) {
+            snprintf(errstr, ERR_STR_LEN, "%s has too many tokens", s);
+            goto invalid;
+        }
+        for (int i = 0; i < nrTokens; i++) {
+            char *subp = strchr(tokens[i], '-');
+
             if (subp == NULL) {
-                v = strtol(sArr[i], &endptr, 10);
+                tokens[i] = strip(tokens[i], " ");
+                v = strtol(tokens[i], &endptr, 10);
+                if (*endptr != '\0') {
+                    snprintf(errstr, ERR_STR_LEN, "%s is not a integer.", tokens[i]);
+                    goto invalid;
+                }
+                if (*nrEle >= max) {
+                    snprintf(errstr, ERR_STR_LEN, "array size is not enough");
+                    goto invalid;
+                }
                 arr[(*nrEle)++] = (int)v;
             } else {
                 *subp++ = 0;
-                long int lbound = strtol(sArr[i], &endptr, 10);
+                tokens[i] = strip(tokens[i], " ");
+                subp = strip(subp, " ");
+                long int lbound = strtol(tokens[i], &endptr, 10);
                 if (*endptr != '\0') {
-                    snprintf(errstr, ERR_STR_LEN, "%s is not a integer.", sArr[i]);
+                    snprintf(errstr, ERR_STR_LEN, "%s is not a integer.", tokens[i]);
                     goto invalid;
                 }
-                long int hbound = strtol(subp, &endptr, 10);
+                long int rbound = strtol(subp, &endptr, 10);
                 if (*endptr != '\0') {
                     snprintf(errstr, ERR_STR_LEN, "%s is not a integer.", subp);
                     goto invalid;
                 }
-                for (v=lbound; v<=hbound; ++v) {
+                for (v=lbound; v<=rbound; ++v) {
                     if (*nrEle >= max) {
                         snprintf(errstr, ERR_STR_LEN, "array size is not enough");
                         goto invalid;
@@ -1293,46 +1304,46 @@ invalid:
     return -1;
 }
 
-char *parseQueueConfigPart(char *errstr, char *s, int cores[], int *nrCores,
+int parseQueueConfigPart(char *errstr, char *s, int cores[], int *nrCores,
                      int ports[], int *nrPorts) {
-    char buf[4096] = {0};
     char *cStart, *pStart;
-    char *end = strchr(s, ';');
-    if (end == NULL) end = s + strlen(s);
-    if (end - s >= 4096) {
-        snprintf(errstr, ERR_STR_LEN, "%s is too long.", s);
-        goto invalid;
-    }
-    memcpy(buf, s, end-s);
-    cStart = buf;
-    pStart = strchr(buf, '.');
+    cStart = s;
+    pStart = strchr(s, '.');
     if (pStart == NULL) {
-        snprintf(errstr, ERR_STR_LEN, "syntax error %s", buf);
+        snprintf(errstr, ERR_STR_LEN, "syntax error %s", s);
         goto invalid;
     }
     *pStart++ = 0;
-    if (parseList(errstr, cStart, cores, nrCores) < 0) {
+    if (parseQueueConfigNumList(errstr, cStart, cores, nrCores) < 0) {
         goto invalid;
     }
-    if (parseList(errstr, pStart, ports, nrPorts) < 0) {
+    if (parseQueueConfigNumList(errstr, pStart, ports, nrPorts) < 0) {
         goto invalid;
     }
-    return end+1;
+    return OK_CODE;
 invalid:
-    return NULL;
+    return ERR_CODE;
 }
 
 int parseQueueConfig(char *errstr, char *s) {
-    char *end = s + strlen(s);
-    char *next = s;
+    char *ss = strdup(s);
+    char *tokens[4096];
+    int nrTokens = 4096;
     int cores[1024];
     int ports[1024];
     int nrCores = 1024;
     int nrPorts = 1024;
-    while (next < end) {
-        next = parseQueueConfigPart(errstr, next, cores, &nrCores,
+    int ret;
+
+    if (tokenize(ss, tokens, &nrTokens, ";") < 0) {
+        snprintf(errstr, ERR_STR_LEN, "queue config has syntax error or is too long");
+        goto invalid;
+    }
+
+    for (int j = 0; j < nrTokens; ++j) {
+        ret = parseQueueConfigPart(errstr, tokens[j], cores, &nrCores,
                                     ports, &nrPorts);
-        if (next == NULL) {
+        if (ret != OK_CODE) {
             goto invalid;
         }
         sortIntArray(cores, nrCores);
@@ -1380,8 +1391,11 @@ int parseQueueConfig(char *errstr, char *s) {
             }
         }
     }
+
+    free(ss);
     return OK_CODE;
 invalid:
+    free(ss);
     return ERR_CODE;
 }
 
