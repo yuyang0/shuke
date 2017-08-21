@@ -16,11 +16,11 @@ unexport ARCH
 
 ifeq ($(DEBUG), 1)
 SHUKE_CFLAGS=-DSK_TEST
-OPTIMIZATION?=-O0
+OPTIMIZATION ?=-O0
 endif
 
 SHUKE_BUILD_DIR ?= build
-OPTIMIZATION?=-O3
+OPTIMIZATION ?=-O3
 
 # PROJECT_ROOT:=$(abspath .)
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
@@ -40,9 +40,9 @@ INC_DIR_LIST=$(SHUKE_SRC_DIR) \
 						 3rd/liburcu/include \
 						 3rd/liburcu/src
 				     # $(RTE_SDK)/$(RTE_TARGET)/include
-SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c ds.c debug.c mongo.c \
-            protocol.c rbtree.c rculfhash-mm-socket.c sds.c shuke.c str.c utils.c zone_parser.c \
-            zmalloc.c tcpserver.c
+SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c \
+						ds.c debug.c mongo.c protocol.c rbtree.c rculfhash-mm-socket.c \
+						sds.c shuke.c str.c utils.c zone_parser.c zmalloc.c tcpserver.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
@@ -90,19 +90,48 @@ dep:
 	$(MAKE) Makefile.dep
 .PHONY: dep
 
+-include .make-settings
+
+persist-settings: distclean
+	echo PREV_FINAL_CFLAGS=$(FINAL_CFLAGS) >> .make-settings
+	echo PREV_FINAL_LDFLAGS=$(FINAL_LDFLAGS) >> .make-settings
+	# -(cd ../deps && $(MAKE) $(DEPENDENCY_TARGETS))
+
+.PHONY: persist-settings
+
+# Prerequisites target
+.make-prerequisites:
+	@touch $@
+
+# Clean everything, persist settings and build dependencies if anything changed
+ifneq ($(strip $(PREV_FINAL_CFLAGS)), $(strip $(FINAL_CFLAGS)))
+.make-prerequisites: persist-settings
+endif
+
+ifneq ($(strip $(PREV_FINAL_LDFLAGS)), $(strip $(FINAL_LDFLAGS)))
+.make-prerequisites: persist-settings
+endif
+
 $(SHUKE_BUILD_DIR)/shuke-server: 3rd $(SHUKE_OBJ)
 	$(SHUKE_LD) -o $@ $(SHUKE_OBJ) $(DPDKLIBS) $(FINAL_LIBS)
 
-$(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c
+$(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c .make-prerequisites
 	$(SHUKE_CC) -c $< -o $@
 
-.PHONY:clean
 clean:
 	-rm -f $(SHUKE_BUILD_DIR)/shuke-server $(SHUKE_BUILD_DIR)/*.o dnsbench
 
-@PHONY: $(SHUKE_BUILD_DIR)
+.PHONY:clean
+
+distclean: clean
+	- (rm -f .make-*)
+
+.PHONY: distclean
+
 $(SHUKE_BUILD_DIR):
 	mkdir -p $(SHUKE_BUILD_DIR)
+
+@PHONY: $(SHUKE_BUILD_DIR)
 
 3rd: $(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS)
 
