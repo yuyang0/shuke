@@ -829,7 +829,7 @@ initDpdkModule() {
         /*
          * every core should has a tx queue except master core
          */
-        n_tx_queue = (uint32_t )(pinfo->nr_tx_lcore);
+        n_tx_queue = (uint32_t )(pinfo->nr_lcore);
 #else
         /*
          * every core should has a tx queue except master core
@@ -875,7 +875,8 @@ initDpdkModule() {
             else
                 socketid = 0;
 
-            LOG_INFO(DPDK, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
+            LOG_INFO(DPDK, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>",
+                     lcore_id, portid, queueid, socketid);
 
             rte_eth_dev_info_get(portid, &dev_info);
             txconf = &dev_info.default_txconf;
@@ -888,7 +889,8 @@ initDpdkModule() {
                          "rte_eth_tx_queue_setup: err=%d, "
                          "port=%d\n", ret, portid);
 
-            LOG_INFO(DPDK, "   rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
+            LOG_INFO(DPDK, "rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>",
+                     lcore_id, portid, queueid, socketid);
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
                                          socketid,
                                          &rx_conf,

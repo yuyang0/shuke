@@ -636,11 +636,17 @@ sds genDebugInfo() {
     for (int i = 0; i < RTE_MAX_ETHPORTS; ++i) {
         port_info_t *pinfo = sk.port_info[i];
         if (!pinfo) continue;
+        ret = intArrayToStr(pinfo->lcore_list, pinfo->nr_lcore, ",", buf, 4096);
+        if (ret < 0) {
+            snprintf(buf, 4096, "lcore list is too long");
+        }
         s = sdscatprintf(s,
                          "# PORT:  %d\r\n"
-                         "mac addr: %s\r\n",
+                         "mac addr: %s\r\n"
+                         "lcore_list: %s\r\n",
                          pinfo->port_id,
-                         pinfo->eth_addr_s);
+                         pinfo->eth_addr_s,
+                         buf);
 #ifndef ONLY_UDP
         s = sdscatprintf(s,
                          "veth_name: %s\r\n"
