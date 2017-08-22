@@ -73,7 +73,7 @@
 #include <rte_timer.h>
 #include <rte_kni.h>
 
-#if defined(IP_DEFRAG) || defined(IP_FRAG)
+#ifdef IP_FRAG
 #include <rte_ip_frag.h>
 #endif
 
@@ -103,7 +103,7 @@
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
 
-#ifdef IP_DEFRAG
+#ifdef IP_FRAG
 #define	DEFAULT_FLOW_TTL	MS_PER_S
 #define	DEFAULT_FLOW_NUM	0x1000
 
@@ -142,7 +142,7 @@ typedef struct lcore_conf {
     uint64_t start_tsc;
     uint64_t start_us;
 
-#if defined(IP_DEFRAG) || defined(IP_FRAG)
+#ifdef IP_FRAG
     struct rte_ip_frag_tbl *frag_tbl;
     struct rte_ip_frag_death_row death_row;
 #endif

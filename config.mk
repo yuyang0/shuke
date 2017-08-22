@@ -15,5 +15,5 @@ MACROS += -DONLY_UDP
 endif
 
 ifdef IP_FRAG
-MACROS += -DIP_DEFRAG -DIP_FRAG
+MACROS += -DIP_FRAG
 endif

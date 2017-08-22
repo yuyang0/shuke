@@ -44,6 +44,7 @@
         (unsigned)8192)
 
 /* #define NB_MBUF 8192 */
+#define IP_FRAG_NB_MBUF 8192
 
 /* Static global variables used within this file. */
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
@@ -97,6 +98,21 @@ static const struct rte_eth_txconf tx_conf = {
 
 static struct rte_mempool * pktmbuf_pool[NB_SOCKETS];
 
+#ifdef IP_FRAG
+/*
+ * Default byte size for the IPv6 Maximum Transfer Unit (MTU).
+ * This value includes the size of IPv6 header.
+ */
+#define	IPV4_MTU_DEFAULT	ETHER_MTU
+#define	IPV6_MTU_DEFAULT	ETHER_MTU
+
+#define	MAX_PACKET_FRAG RTE_LIBRTE_IP_FRAG_MAX_FRAG
+#define MBUF_TABLE_SIZE  (2 * MAX(MAX_PKT_BURST, MAX_PACKET_FRAG))
+
+static struct rte_mempool *socket_direct_pool[RTE_MAX_NUMA_NODES];
+static struct rte_mempool *socket_indirect_pool[RTE_MAX_NUMA_NODES];
+#endif
+
 static void
 init_per_lcore() {
     lcore_conf_t *qconf;
@@ -125,6 +141,7 @@ static int
 init_mem(unsigned nb_mbuf)
 {
     int socketid;
+    struct rte_mempool *mp;
     unsigned lcore_id;
     char s[64];
 
@@ -157,6 +174,37 @@ init_mem(unsigned nb_mbuf)
                 LOG_INFO(DPDK, "Allocated mbuf pool on socket %d.", socketid);
 
         }
+
+#ifdef IP_FRAG
+        if (socket_direct_pool[socketid] == NULL) {
+            LOG_INFO(DPDK, "Creating direct mempool on socket %i\n",
+                    socketid);
+            snprintf(s, sizeof(s), "pool_direct_%i", socketid);
+
+            mp = rte_pktmbuf_pool_create(s, IP_FRAG_NB_MBUF, 32,
+                                         0, RTE_MBUF_DEFAULT_BUF_SIZE, socketid);
+            if (mp == NULL) {
+                LOG_ERR(DPDK, "Cannot create direct mempool\n");
+                return -1;
+            }
+            socket_direct_pool[socketid] = mp;
+        }
+
+        if (socket_indirect_pool[socketid] == NULL) {
+            LOG_INFO(DPDK, "Creating indirect mempool on socket %i\n",
+                    socketid);
+            snprintf(s, sizeof(s), "pool_indirect_%i", socketid);
+
+            mp = rte_pktmbuf_pool_create(s, IP_FRAG_NB_MBUF, 32, 0, 0,
+                                         socketid);
+            if (mp == NULL) {
+                LOG_ERR(DPDK, "Cannot create indirect mempool\n");
+                return -1;
+            }
+            socket_indirect_pool[socketid] = mp;
+        }
+#endif
+
     }
     return 0;
 }
@@ -366,7 +414,7 @@ verify_cksum(struct rte_mbuf *m) {
 }
 
 /*----------------------------------------------------------------------------*/
-#ifdef IP_DEFRAG
+#ifdef IP_FRAG
 static int
 setup_ip_frag_tbl()
 {
@@ -466,6 +514,74 @@ ipv6_reassemble(lcore_conf_t *qconf, struct rte_mbuf *m,
     }
     return m;
 }
+
+void
+ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port, bool is_ipv4) {
+    struct ether_hdr * eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
+    struct rte_mbuf *m2;
+    uint16_t len;
+    int len2;
+    struct rte_mempool *direct_pool = socket_direct_pool[qconf->node->numa_id];
+    struct rte_mempool *indirect_pool = socket_indirect_pool[qconf->node->numa_id];
+
+    len = qconf->tx_mbufs[port].len;
+
+    if (is_ipv4) {
+        if (likely(IPV4_MTU_DEFAULT + sizeof(struct ether_hdr) >= m->pkt_len)) {
+            send_single_packet(qconf, m, port);
+            return;
+        } else {
+            rte_pktmbuf_adj(m, (uint16_t)sizeof(struct ether_hdr));
+
+            len2 = rte_ipv4_fragment_packet(m,
+                                            &qconf->tx_mbufs[port].m_table[len],
+                                            (uint16_t)(MBUF_TABLE_SIZE - len),
+                                            IPV4_MTU_DEFAULT,
+                                            direct_pool, indirect_pool);
+            /* If we fail to fragment the packet */
+            if (unlikely (len2 < 0))
+                goto end;
+        }
+    } else {
+        if (likely (IPV6_MTU_DEFAULT + sizeof(struct ether_hdr) >= m->pkt_len)) {
+            send_single_packet(qconf, m, port);
+            return;
+        } else {
+            rte_pktmbuf_adj(m, (uint16_t)sizeof(struct ether_hdr));
+            len2 = rte_ipv6_fragment_packet(m,
+                                            &qconf->tx_mbufs[port].m_table[len],
+                                            (uint16_t)(MBUF_TABLE_SIZE - len),
+                                            IPV6_MTU_DEFAULT,
+                                            direct_pool, indirect_pool);
+            /* If we fail to fragment the packet */
+            if (unlikely (len2 < 0))
+                goto end;
+        }
+    }
+
+    for (int i = len; i < len + len2; i ++) {
+        m2 = qconf->tx_mbufs[port].m_table[i];
+        struct ether_hdr *eth_hdr = (struct ether_hdr *)
+            rte_pktmbuf_prepend(m2, (uint16_t)sizeof(struct ether_hdr));
+        if (eth_hdr == NULL) {
+            rte_panic("No headroom in mbuf.\n");
+        }
+        rte_memcpy(eth_hdr, eth_h, sizeof(struct ether_hdr));
+        m2->l2_len = sizeof(struct ether_hdr);
+    }
+    len += len2;
+    if (likely(len < MAX_PKT_BURST)) {
+        qconf->tx_mbufs[port].len = (uint16_t)len;
+        return;
+    }
+
+    /* Transmit packets */
+    send_burst(qconf, (uint16_t)len, port);
+    qconf->tx_mbufs[port].len = 0;
+end:
+    /* Free input packet */
+    rte_pktmbuf_free(m);
+}
 #endif
 
 static inline __attribute__((always_inline)) void
@@ -513,7 +629,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             is_ipv4 = true;
             ipv4_h = (struct ipv4_hdr *)l3_h;
             m->l3_len = (ipv4_h->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
-#ifdef IP_DEFRAG
+#ifdef IP_FRAG
             m = ipv4_reassemble(qconf, m, &eth_h, &ipv4_h);
             if (!m) return;
 #endif
@@ -523,7 +639,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         case ETHER_TYPE_IPv6:
             ipv6_h = (struct ipv6_hdr *)l3_h;
             m->l3_len = sizeof(*ipv6_h);
-#ifdef IP_DEFRAG
+#ifdef IP_FRAG
             m = ipv6_reassemble(qconf, m, &eth_h, &ipv6_h);
             if (!m) return;
 #endif
@@ -620,7 +736,11 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     rte_pktmbuf_append(m, (uint16_t)n);
     LOG_DEBUG(DPDK, "pkt_len: %u, udp len: %zu, port: %d",
               rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
+#ifdef IP_FRAG
+    ip_fragmentation(qconf, m, portid, is_ipv4);
+#else
     send_single_packet(qconf, m, portid);
+#endif
     return;
 
 invalid:
@@ -907,7 +1027,7 @@ initDpdkModule() {
     kni_init_tx_queue();
 #endif
 
-#ifdef IP_DEFRAG
+#ifdef IP_FRAG
     setup_ip_frag_tbl();
 #endif
 
