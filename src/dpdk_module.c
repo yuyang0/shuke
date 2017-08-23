@@ -801,7 +801,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     for (i = 0; i < qconf->nr_ports; i++) {
 
         portid = (uint8_t )qconf->port_id_list[i];
-        queueid = (uint8_t )qconf->queue_id_list[i];
+        queueid = (uint8_t )qconf->queue_id_list[portid];
         LOG_INFO(DPDK,
                 " -- lcoreid=%u portid=%hhu rxqueueid=%hhu.",
                 lcore_id, portid, queueid);
@@ -843,7 +843,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         for (i = 0; i < qconf->nr_ports; i++) {
 
             portid = (uint8_t )qconf->port_id_list[i];
-            queueid = (uint8_t )qconf->queue_id_list[i];
+            queueid = (uint8_t )qconf->queue_id_list[portid];
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
             if (nb_rx == 0)
                 continue;

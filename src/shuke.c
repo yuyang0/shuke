@@ -1385,8 +1385,9 @@ int parseQueueConfig(char *errstr, char *s) {
                     snprintf(errstr, ERR_STR_LEN, "queue config: lcore %d is not enabled.", lcore_id);
                     goto invalid;
                 }
+                qconf->queue_id_list[port_id] = j;
+
                 qconf->port_id_list[qconf->nr_ports] = port_id;
-                qconf->queue_id_list[qconf->nr_ports] = j;
                 qconf->nr_ports++;
             }
         }
