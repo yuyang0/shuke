@@ -140,6 +140,7 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
             type = bson_extract_string(b, "type");
             rdata = bson_extract_string(b, "rdata");
             if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, ctx->new_zn) == DS_ERR) {
+                LOG_ERR(MONGO, "parse rdata error %d.", ctx->psr->errstr);
                 goto error;
             }
         }
@@ -376,6 +377,9 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
         RRParserSetDotOrigin(psr, dotOrigin);
 
         zone *z = _mongoGetZone(c, psr, db, col, dotOrigin);
+        if (z == NULL) {
+            goto error;
+        }
         if (z->soa == NULL) {
             LOG_ERROR(MONGO, "zone %s must contains a SOA record.", z->dotOrigin);
             zoneDestroy(z);

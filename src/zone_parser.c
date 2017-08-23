@@ -74,6 +74,23 @@ int RRParserSetDotOrigin(RRParser *psr, char *dotOrigin) {
     return DS_OK;
 }
 
+static int RRParserTokenize(RRParser *psr, char *s) {
+    char *tokens[4096];
+    int ntokens = 4096;
+    int maxTokens = (int)(sizeof(psr->tokens)/sizeof(char*));
+    if (tokenize(s, tokens, &ntokens, " \t") < 0) {
+        LOG_ERR(USER1, "parser error");
+        return -1;
+    }
+    if (ntokens > maxTokens) {
+        psr->tokens = zmemdup(tokens, sizeof(char *)*ntokens);
+    } else {
+        rte_memcpy(psr->tokens, tokens, sizeof(char*) *ntokens);
+    }
+    psr->ntokens = ntokens;
+    return 0;
+}
+
 int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
     int err = DS_OK;
     uint16_t type = psr->type;
@@ -171,6 +188,10 @@ int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
             size_t txtLen = strlen(tok);
             if (txtLen > 255) {
                 snprintf(psr->errstr, ERR_STR_LEN, "txt string is too long %zu", txtLen);
+                goto error;
+            }
+            if (ptr+txtLen+1 - buf >= (int)sizeof(buf)) {
+                snprintf(psr->errstr, ERR_STR_LEN, "TXT records is too long");
                 goto error;
             }
             *ptr = (uint8_t)txtLen;
@@ -353,7 +374,9 @@ int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z) {
     char *tok;
     int err = DS_OK;
     RRParserReset(psr);
-    tokenize(ss, psr->tokens, &(psr->ntokens), " \t");
+    if (RRParserTokenize(psr, ss) < 0) {
+        goto error;
+    }
     if (name != NULL) {
         check_soa_top = false;
         strncpy(psr->name, name, MAX_DOMAIN_LEN);
@@ -411,8 +434,9 @@ int RRParserFeedRdata(RRParser *psr, char *rdata, char *name, uint32_t ttl, char
     bool check_soa_top = false;
     int err = DS_OK;
     RRParserReset(psr);
-    tokenize(rdata, psr->tokens, &(psr->ntokens), " \t");
-
+    if (RRParserTokenize(psr, rdata) < 0) {
+        goto error;
+    }
     strncpy(psr->name, name, MAX_DOMAIN_LEN);
     if (abs2lenRelative(psr->name, psr->dotOrigin) == DS_ERR) {
         snprintf(psr->errstr, ERR_STR_LEN, "syntax error: invalid domain name(%s), dotOrigin(%s)", name, psr->dotOrigin);
