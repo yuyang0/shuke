@@ -23,7 +23,7 @@ int rbtreeInsertZone(zone *z) {
 
     /* Figure out where to put new node */
     while (*new) {
-        zone *this = container_of(*new, zone, rbnode);
+        zone *this = sk_container_of(*new, zone, rbnode);
         long result = z->refresh_ts - this->refresh_ts;
 
         parent = *new;

@@ -110,7 +110,7 @@ static inline void list_del(struct list_head *entry)
  * @member:	the name of the list_head within the struct.
  */
 #define list_entry(ptr, type, member)           \
-    container_of(ptr, type, member)
+    sk_container_of(ptr, type, member)
 /**
  * list_for_each	-	iterate over a list
  * @pos:	the &struct list_head to use as a loop cursor.
