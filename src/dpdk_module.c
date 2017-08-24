@@ -647,6 +647,7 @@ ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port, bool is_
         new_m->l2_len = sizeof(struct ether_hdr);
 
 #ifdef SOFT_CKSUM
+        struct ipv4_hdr *ipv4_h = (struct ipv4_hdr*)(eth_hdr+1);
         if (is_ipv4) {
             new_m->ol_flags &= (~(PKT_TX_IPV4 | PKT_TX_IP_CKSUM));
             ipv4_h->hdr_checksum = 0;
