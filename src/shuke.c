@@ -369,7 +369,7 @@ void config_log() {
     FILE *fp = sk.log_fp;
 
     uint32_t level = str2loglevel(sk.logLevelStr);
-    rte_set_log_level(level);
+    rte_log_set_global_level(level);
 
     if (fp == NULL) {
         fp = stdout;

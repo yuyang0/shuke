@@ -5,9 +5,9 @@ DEBUG ?= 0
 MACROS := -DSOFT_CKSUM
 # change value to RTE_LOG_INFO to remove LOG_DEBUG statments in source code.
 ifeq ($(DEBUG), 1)
-MACROS += -D RTE_LOG_DP_LEVEL=RTE_LOG_DEBUG
+MACROS += -D SK_LOG_DP_LEVEL=RTE_LOG_DEBUG
 else
-MACROS += -D RTE_LOG_DP_LEVEL=RTE_LOG_INFO
+MACROS += -D SK_LOG_DP_LEVEL=RTE_LOG_INFO
 endif
 
 ifdef ONLY_UDP

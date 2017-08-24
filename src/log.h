@@ -10,8 +10,8 @@
 
 #include <rte_log.h>
 
-#ifndef RTE_LOG_DP_LEVEL
-#define RTE_LOG_DP_LEVEL RTE_LOG_DEBUG
+#ifndef SK_LOG_DP_LEVEL
+#define SK_LOG_DP_LEVEL RTE_LOG_DEBUG
 #endif
 
 static inline int __rte_log(uint32_t level, uint32_t logtype, const char *tstr, const char *lstr, const char *fmt, ...) {
@@ -36,7 +36,7 @@ static inline int __rte_log(uint32_t level, uint32_t logtype, const char *tstr, 
 }
 
 #define LOG_DEBUG(t, ...)                                          \
-    (void)((RTE_LOG_DEBUG <= RTE_LOG_DP_LEVEL)?                         \
+    (void)((RTE_LOG_DEBUG <= SK_LOG_DP_LEVEL)?                         \
            __rte_log(RTE_LOG_DEBUG, RTE_LOGTYPE_ ## t, #t, "[debug]: ", ##__VA_ARGS__): \
            0)
 
