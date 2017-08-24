@@ -4,10 +4,7 @@ include config.mk
 
 RTE_TARGET ?= x86_64-native-linuxapp-gcc
 RTE_SDK ?= $(TOPDIR)/3rd/dpdk-stable-17.05.1
-ifeq ($(shell test -e $(RTE_SDK)/$(RTE_TARGET) && echo -n yes),yes)
-$(warning DPDK is ready)
-else
-
+ifeq ($(shell test -e $(RTE_SDK)/$(RTE_TARGET) || echo -n no),no)
 $(warning building DPDK(SDK: $(RTE_SDK), TARGET: $(RTE_TARGET)), it will cost a few minutes, please wait.)
 $(shell make -C $(RTE_SDK) install T=$(RTE_TARGET))
 endif
@@ -166,53 +163,4 @@ dnsbench: src/bench.c src/ae.c
 
 
 #Libraries of dpdk
-DPDKLIBS += -Wl,-lrte_kni
-DPDKLIBS += -Wl,-lrte_pipeline
-DPDKLIBS += -Wl,-lrte_table
-DPDKLIBS += -Wl,-lrte_port
-DPDKLIBS += -Wl,-lrte_pdump
-DPDKLIBS += -Wl,-lrte_distributor
-DPDKLIBS += -Wl,-lrte_reorder
-DPDKLIBS += -Wl,-lrte_ip_frag
-DPDKLIBS += -Wl,-lrte_meter
-DPDKLIBS += -Wl,-lrte_sched
-DPDKLIBS += -Wl,-lrte_lpm
-DPDKLIBS += -Wl,--whole-archive
-DPDKLIBS += -Wl,-lrte_acl
-DPDKLIBS += -Wl,--no-whole-archive
-DPDKLIBS += -Wl,-lrte_jobstats
-DPDKLIBS += -Wl,-lrte_power
-DPDKLIBS += -Wl,--whole-archive
-DPDKLIBS += -Wl,-lrte_timer
-DPDKLIBS += -Wl,-lrte_hash
-DPDKLIBS += -Wl,-lrte_vhost
-DPDKLIBS += -Wl,-lrte_kvargs
-DPDKLIBS += -Wl,-lrte_mbuf
-DPDKLIBS += -Wl,-lrte_net
-DPDKLIBS += -Wl,-lrte_ethdev
-DPDKLIBS += -Wl,-lrte_cryptodev
-DPDKLIBS += -Wl,-lrte_mempool
-DPDKLIBS += -Wl,-lrte_ring
-DPDKLIBS += -Wl,-lrte_eal
-DPDKLIBS += -Wl,-lrte_cmdline
-DPDKLIBS += -Wl,-lrte_cfgfile
-DPDKLIBS += -Wl,-lrte_pmd_bond
-DPDKLIBS += -Wl,-lrte_pmd_af_packet
-DPDKLIBS += -Wl,-lrte_pmd_bnxt
-DPDKLIBS += -Wl,-lrte_pmd_cxgbe
-DPDKLIBS += -Wl,-lrte_pmd_e1000
-DPDKLIBS += -Wl,-lrte_pmd_ena
-DPDKLIBS += -Wl,-lrte_pmd_enic
-DPDKLIBS += -Wl,-lrte_pmd_fm10k
-DPDKLIBS += -Wl,-lrte_pmd_i40e
-DPDKLIBS += -Wl,-lrte_pmd_ixgbe
-DPDKLIBS += -Wl,-lrte_pmd_null
-DPDKLIBS += -Wl,-lrte_pmd_qede
-DPDKLIBS += -Wl,-lrte_pmd_ring
-DPDKLIBS += -Wl,-lrte_pmd_virtio
-DPDKLIBS += -Wl,-lrte_pmd_vhost
-DPDKLIBS += -Wl,-lrte_pmd_vmxnet3_uio
-DPDKLIBS += -Wl,-lrte_pmd_null_crypto
-DPDKLIBS += -Wl,--no-whole-archive
-DPDKLIBS += -Wl,-lrt
-DPDKLIBS += -Wl,-lm -Wl,-ldl -Wl,-export-dynamic
+DPDKLIBS = -Wl,-lrte_pipeline -Wl,-lrte_table -Wl,-lrte_port -Wl,-lrte_pdump -Wl,-lrte_distributor -Wl,-lrte_ip_frag -Wl,-lrte_meter -Wl,-lrte_sched -Wl,-lrte_lpm -Wl,--whole-archive -Wl,-lrte_acl -Wl,--no-whole-archive -Wl,-lrte_jobstats -Wl,-lrte_metrics -Wl,-lrte_bitratestats -Wl,-lrte_latencystats -Wl,-lrte_power -Wl,-lrte_timer -Wl,-lrte_efd -Wl,-lrte_cfgfile -Wl,--whole-archive -Wl,-lrte_hash -Wl,-lrte_vhost -Wl,-lrte_kvargs -Wl,-lrte_mbuf -Wl,-lrte_net -Wl,-lrte_ethdev -Wl,-lrte_cryptodev -Wl,-lrte_eventdev -Wl,-lrte_mempool -Wl,-lrte_mempool_ring -Wl,-lrte_ring -Wl,-lrte_eal -Wl,-lrte_cmdline -Wl,-lrte_reorder -Wl,-lrte_kni -Wl,-lrte_mempool_stack -Wl,-lrte_pmd_af_packet -Wl,-lrte_pmd_ark -Wl,-lrte_pmd_avp -Wl,-lrte_pmd_bnxt -Wl,-lrte_pmd_bond -Wl,-lrte_pmd_cxgbe -Wl,-lrte_pmd_e1000 -Wl,-lrte_pmd_ena -Wl,-lrte_pmd_enic -Wl,-lrte_pmd_fm10k -Wl,-lrte_pmd_i40e -Wl,-lrte_pmd_ixgbe -Wl,-lrte_pmd_kni -Wl,-lrte_pmd_lio -Wl,-lrte_pmd_nfp -Wl,-lrte_pmd_null -Wl,-lrte_pmd_qede -Wl,-lrte_pmd_ring -Wl,-lrte_pmd_sfc_efx -Wl,-lrte_pmd_tap -Wl,-lrte_pmd_thunderx_nicvf -Wl,-lrte_pmd_virtio -Wl,-lrte_pmd_vhost -Wl,-lrte_pmd_vmxnet3_uio -Wl,-lrte_pmd_null_crypto -Wl,-lrte_pmd_crypto_scheduler -Wl,-lrte_pmd_skeleton_event -Wl,-lrte_pmd_sw_event -Wl,-lrte_pmd_octeontx_ssovf -Wl,--no-whole-archive -Wl,-lrt -Wl,-lm -Wl,-ldl -Wl,-export-dynamic -Wl,-export-dynamic
