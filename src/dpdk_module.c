@@ -6,13 +6,12 @@
 #include "shuke.h"
 #include "utils.h"
 
-#define MAX_LCORE_PARAMS 1024
-
 #define MAX_JUMBO_PKT_LEN  9600
 #define MEMPOOL_CACHE_SIZE 256
 /*
  * RX and TX Prefetch, Host, and Write-back threshold values should be
  * carefully set for optimal performance. Consult the network
+
  * controller's datasheet and supporting DPDK documentation for guidance
  * on how these parameters should be set.
  */
@@ -44,7 +43,6 @@
         (unsigned)8192)
 
 /* #define NB_MBUF 8192 */
-#define IP_FRAG_NB_MBUF 8192
 
 /* Static global variables used within this file. */
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
@@ -99,6 +97,8 @@ static const struct rte_eth_txconf tx_conf = {
 static struct rte_mempool * pktmbuf_pool[NB_SOCKETS];
 
 #ifdef IP_FRAG
+
+#define IP_FRAG_NB_MBUF 8192
 /*
  * Default byte size for the IPv6 Maximum Transfer Unit (MTU).
  * This value includes the size of IPv6 header.
@@ -106,11 +106,95 @@ static struct rte_mempool * pktmbuf_pool[NB_SOCKETS];
 #define	IPV4_MTU_DEFAULT	ETHER_MTU
 #define	IPV6_MTU_DEFAULT	ETHER_MTU
 
-#define	MAX_PACKET_FRAG RTE_LIBRTE_IP_FRAG_MAX_FRAG
-#define MBUF_TABLE_SIZE  (2 * MAX(MAX_PKT_BURST, MAX_PACKET_FRAG))
-
 static struct rte_mempool *socket_direct_pool[RTE_MAX_NUMA_NODES];
 static struct rte_mempool *socket_indirect_pool[RTE_MAX_NUMA_NODES];
+#endif
+
+#if RTE_LOG_DEBUG <= SK_LOG_DP_LEVEL
+static void log_packet(struct rte_mbuf *m) {
+    char buf[4096];
+    int offset = 0;
+    int n;
+    uint16_t ether_type;
+    uint8_t ipproto;
+    char *l3_h = NULL;
+    struct ether_hdr *eth_h;
+    struct ipv4_hdr *ipv4_h = NULL;
+    struct ipv6_hdr *ipv6_h = NULL;
+    struct udp_hdr  *udp_h = NULL;
+    struct tcp_hdr  *tcp_h = NULL;
+    char ip_src_str[INET6_ADDRSTRLEN];
+    char ip_dst_str[INET6_ADDRSTRLEN];
+
+    eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
+    ether_format_addr(buf+offset, ETHER_ADDR_FMT_SIZE, &eth_h->s_addr);
+    offset += ETHER_ADDR_FMT_SIZE-1;
+
+    strcpy(buf+offset, " -> ");
+    offset += strlen(" -> ");
+
+    ether_format_addr(buf+offset, ETHER_ADDR_FMT_SIZE, &eth_h->d_addr);
+    offset += ETHER_ADDR_FMT_SIZE-1;
+
+    strcpy(buf+offset, "\n");
+    offset += strlen("\n");
+
+    ether_type = rte_be_to_cpu_16(eth_h->ether_type);
+
+    l3_h = (char *)(eth_h + 1);
+
+    switch (ether_type) {
+    case ETHER_TYPE_ARP:
+        return;
+    case ETHER_TYPE_IPv4:
+        ipv4_h = (struct ipv4_hdr *)l3_h;
+        ipproto = ipv4_h->next_proto_id;
+        inet_ntop(AF_INET, &(ipv4_h->src_addr), ip_src_str, INET6_ADDRSTRLEN);
+        inet_ntop(AF_INET, &(ipv4_h->dst_addr), ip_dst_str, INET6_ADDRSTRLEN);
+        n = snprintf(buf+offset, 4096-offset,
+                     "  IPV4 %s -> %s (ttl %d, id %d, tlen: %d, offset %d, flags(%s%s))\n",
+                     ip_src_str, ip_dst_str, ipv4_h->time_to_live,
+                     rte_be_to_cpu_16(ipv4_h->packet_id),
+                     rte_be_to_cpu_16(ipv4_h->total_length),
+                     (rte_be_to_cpu_16(ipv4_h->fragment_offset) & \
+                      IPV4_HDR_OFFSET_MASK) * IPV4_HDR_OFFSET_UNITS,
+                     (rte_be_to_cpu_16(ipv4_h->fragment_offset) & IPV4_HDR_DF_FLAG)? "DF":"",
+                     (rte_be_to_cpu_16(ipv4_h->fragment_offset) & IPV4_HDR_MF_FLAG)? "MF":"");
+        offset += n;
+        break;
+    case ETHER_TYPE_IPv6:
+        ipv6_h = (struct ipv6_hdr *)l3_h;
+        ipproto = ipv6_h->proto;
+
+        inet_ntop(AF_INET6, &(ipv6_h->src_addr), ip_src_str, INET6_ADDRSTRLEN);
+        inet_ntop(AF_INET6, &(ipv6_h->dst_addr), ip_dst_str, INET6_ADDRSTRLEN);
+        n = snprintf(buf+offset, 4096-offset,
+                     "  IPV6 %s -> %s (ttl %d)\n",
+                     ip_src_str, ip_dst_str, ipv6_h->hop_limits);
+        offset += n;
+        break;
+    default:
+        return;
+    }
+    switch (ipproto) {
+    case IPPROTO_UDP:
+        udp_h = (struct udp_hdr *) (l3_h + m->l3_len);
+        snprintf(buf+offset, 4096-offset, "    UDP %d -> %d\n",
+                 rte_be_to_cpu_16(udp_h->src_port),
+                 rte_be_to_cpu_16(udp_h->dst_port));
+        break;
+    case IPPROTO_TCP:
+        tcp_h = (struct tcp_hdr *) (l3_h + m->l3_len);
+        snprintf(buf+offset, 4096-offset, "    TCP %d -> %d\n",
+                 rte_be_to_cpu_16(tcp_h->src_port),
+                 rte_be_to_cpu_16(tcp_h->dst_port));
+    default:
+        return;
+    }
+    LOG_RAW(DEBUG, DPDK, "%s", buf);
+}
+#else
+#define log_packet(m)
 #endif
 
 static void
@@ -280,6 +364,7 @@ send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
     m_table = (struct rte_mbuf **)qconf->tx_mbufs[port].m_table;
 
     ret = rte_eth_tx_burst(port, queueid, m_table, n);
+    LOG_DEBUG(DPDK, "burst send %d packets", ret);
     if (unlikely(ret < n)) {
         do {
             rte_pktmbuf_free(m_table[ret]);
@@ -360,8 +445,6 @@ __send_to_kni(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t portid)
 }
 #endif
 
-#ifdef SOFT_CKSUM
-
 static uint16_t
 get_udptcp_checksum(void *l3_hdr, void *l4_hdr, bool is_ipv4)
 {
@@ -370,7 +453,6 @@ get_udptcp_checksum(void *l3_hdr, void *l4_hdr, bool is_ipv4)
     else /* assume ethertype == ETHER_TYPE_IPv6 */
         return rte_ipv6_udptcp_cksum(l3_hdr, l4_hdr);
 }
-#else
 
 static uint16_t
 get_psd_sum(void *l3_hdr, bool is_ipv4, uint64_t ol_flags)
@@ -380,7 +462,6 @@ get_psd_sum(void *l3_hdr, bool is_ipv4, uint64_t ol_flags)
     else /* assume ethertype == ETHER_TYPE_IPv6 */
         return rte_ipv6_phdr_cksum(l3_hdr, ol_flags);
 }
-#endif
 
 // return 1 if the cksum is correct, otherwise return 0
 static int
@@ -515,59 +596,68 @@ ipv6_reassemble(lcore_conf_t *qconf, struct rte_mbuf *m,
     return m;
 }
 
+/*
+ * when you call this function, you must be sure that the packet size is bigger than MTU
+ */
 void
 ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port, bool is_ipv4) {
-    struct ether_hdr * eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
-    struct rte_mbuf *m2;
+    struct ether_hdr * origin_eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
+
+    struct rte_mbuf *new_m;
     uint16_t len;
     int len2;
     struct rte_mempool *direct_pool = socket_direct_pool[qconf->node->numa_id];
     struct rte_mempool *indirect_pool = socket_indirect_pool[qconf->node->numa_id];
 
     len = qconf->tx_mbufs[port].len;
+    LOG_DEBUG(DPDK, "ip fragmentation %d", m->pkt_len);
+
+    rte_pktmbuf_adj(m, (uint16_t)sizeof(struct ether_hdr));
 
     if (is_ipv4) {
-        if (likely(IPV4_MTU_DEFAULT + sizeof(struct ether_hdr) >= m->pkt_len)) {
-            send_single_packet(qconf, m, port);
-            return;
-        } else {
-            rte_pktmbuf_adj(m, (uint16_t)sizeof(struct ether_hdr));
-
-            len2 = rte_ipv4_fragment_packet(m,
-                                            &qconf->tx_mbufs[port].m_table[len],
-                                            (uint16_t)(MBUF_TABLE_SIZE - len),
-                                            IPV4_MTU_DEFAULT,
-                                            direct_pool, indirect_pool);
-            /* If we fail to fragment the packet */
-            if (unlikely (len2 < 0))
-                goto end;
-        }
+        len2 = rte_ipv4_fragment_packet(m,
+                                        &qconf->tx_mbufs[port].m_table[len],
+                                        (uint16_t)(MBUF_TABLE_SIZE - len),
+                                        IPV4_MTU_DEFAULT,
+                                        direct_pool, indirect_pool);
+        /* If we fail to fragment the packet */
+        if (unlikely (len2 < 0))
+            goto end;
     } else {
-        if (likely (IPV6_MTU_DEFAULT + sizeof(struct ether_hdr) >= m->pkt_len)) {
-            send_single_packet(qconf, m, port);
-            return;
-        } else {
-            rte_pktmbuf_adj(m, (uint16_t)sizeof(struct ether_hdr));
-            len2 = rte_ipv6_fragment_packet(m,
-                                            &qconf->tx_mbufs[port].m_table[len],
-                                            (uint16_t)(MBUF_TABLE_SIZE - len),
-                                            IPV6_MTU_DEFAULT,
-                                            direct_pool, indirect_pool);
-            /* If we fail to fragment the packet */
-            if (unlikely (len2 < 0))
-                goto end;
-        }
+        len2 = rte_ipv6_fragment_packet(m,
+                                        &qconf->tx_mbufs[port].m_table[len],
+                                        (uint16_t)(MBUF_TABLE_SIZE - len),
+                                        IPV6_MTU_DEFAULT,
+                                        direct_pool, indirect_pool);
+        /* If we fail to fragment the packet */
+        if (unlikely (len2 < 0))
+            goto end;
     }
 
+    LOG_DEBUG(DPDK, "response splits to %d fragments.", len2);
+
     for (int i = len; i < len + len2; i ++) {
-        m2 = qconf->tx_mbufs[port].m_table[i];
+        new_m = qconf->tx_mbufs[port].m_table[i];
         struct ether_hdr *eth_hdr = (struct ether_hdr *)
-            rte_pktmbuf_prepend(m2, (uint16_t)sizeof(struct ether_hdr));
+            rte_pktmbuf_prepend(new_m, (uint16_t)sizeof(struct ether_hdr));
         if (eth_hdr == NULL) {
             rte_panic("No headroom in mbuf.\n");
         }
-        rte_memcpy(eth_hdr, eth_h, sizeof(struct ether_hdr));
-        m2->l2_len = sizeof(struct ether_hdr);
+        rte_memcpy(eth_hdr, origin_eth_h, sizeof(struct ether_hdr));
+        new_m->l2_len = sizeof(struct ether_hdr);
+
+#ifdef SOFT_CKSUM
+        if (is_ipv4) {
+            new_m->ol_flags &= (~(PKT_TX_IPV4 | PKT_TX_IP_CKSUM));
+            ipv4_h->hdr_checksum = 0;
+            ipv4_h->hdr_checksum = rte_ipv4_cksum(ipv4_h);
+        }
+#else
+        if (is_ipv4) {
+            new_m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
+        }
+#endif
+        log_packet(new_m);
     }
     len += len2;
     if (likely(len < MAX_PKT_BURST)) {
@@ -605,6 +695,9 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 #ifndef ONLY_UDP
     struct tcp_hdr  *tcp_h = NULL;
 #endif
+#ifdef IP_FRAG
+    int mtu;
+#endif
     bool is_ipv4 = false;
     struct ether_addr eth_addr;
     char ipv6_addr[16];
@@ -632,6 +725,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 #ifdef IP_FRAG
             m = ipv4_reassemble(qconf, m, &eth_h, &ipv4_h);
             if (!m) return;
+            mtu = IPV4_MTU_DEFAULT;
 #endif
             src_addr = &(ipv4_h->src_addr);
             ipproto = ipv4_h->next_proto_id;
@@ -642,6 +736,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 #ifdef IP_FRAG
             m = ipv6_reassemble(qconf, m, &eth_h, &ipv6_h);
             if (!m) return;
+            mtu = IPV6_MTU_DEFAULT;
 #endif
             m->ol_flags |= PKT_TX_IPV6;
             src_addr = ipv6_h->src_addr;
@@ -684,9 +779,17 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
+    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data,
+                           rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
                            is_ipv4, qconf->node, qconf->lcore_id);
     if(n == ERR_CODE) goto invalid;
+
+    // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
+    total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
+    if (n + total_h_len < 60) n = 60 - total_h_len;
+    rte_pktmbuf_append(m, (uint16_t)n);
+    LOG_DEBUG(DPDK, "pkt_len: %u, udp len: %zu, port: %d",
+              rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
 
     ++qconf->nr_req;
 
@@ -725,19 +828,22 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     udp_h->dgram_cksum = 0;
 #ifdef SOFT_CKSUM
     udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
+    LOG_DEBUG(DPDK, "udp checksum: 0x%x.", udp_h->dgram_cksum);
 #else
     m->ol_flags |= PKT_TX_UDP_CKSUM;
     udp_h->dgram_cksum = get_psd_sum(l3_h, is_ipv4, m->ol_flags);
-#endif
     LOG_DEBUG(DPDK, "udp psd checksum: 0x%x.", udp_h->dgram_cksum);
-    // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
-    total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
-    if (n + total_h_len < 60) n = 60 - total_h_len;
-    rte_pktmbuf_append(m, (uint16_t)n);
-    LOG_DEBUG(DPDK, "pkt_len: %u, udp len: %zu, port: %d",
-              rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
+#endif
+
 #ifdef IP_FRAG
-    ip_fragmentation(qconf, m, portid, is_ipv4);
+    if (likely(mtu + sizeof(struct ether_hdr) >= m->pkt_len)) {
+        send_single_packet(qconf, m, portid);
+    } else {
+        // we must calculate the udp cksum when ip fragmentation is needed.
+        udp_h->dgram_cksum = 0;
+        udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
+        ip_fragmentation(qconf, m, portid, is_ipv4);
+    }
 #else
     send_single_packet(qconf, m, portid);
 #endif
@@ -981,7 +1087,7 @@ initDpdkModule() {
         if (ret < 0)
             rte_exit(EXIT_FAILURE, "init_mem failed\n");
 
-        /* init one TX queue per couple (lcore,port) */
+        /* init one RX, TX queue per couple (lcore,port) */
         for (int i = 0; i < sk.nr_lcore_ids; ++i) {
             lcore_id = (unsigned )sk.lcore_ids[i];
             qconf = &sk.lcore_conf[lcore_id];

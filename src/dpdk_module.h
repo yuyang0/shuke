@@ -41,6 +41,8 @@
 #include <errno.h>
 #include <stdbool.h>
 
+#include <arpa/inet.h>
+
 #include <rte_common.h>
 #include <rte_vect.h>
 #include <rte_byteorder.h>
@@ -93,11 +95,6 @@
 
 #define MAX_RX_QUEUE_PER_LCORE 16
 
-/*
- * Try to avoid TX buffering if we have at least MAX_TX_BURST packets to send.
- */
-#define	MAX_TX_BURST	  (MAX_PKT_BURST / 2)
-
 #define NB_SOCKETS        8
 
 /* Configure how many packets ahead to prefetch, when reading packets */
@@ -106,6 +103,11 @@
 #ifdef IP_FRAG
 #define	DEFAULT_FLOW_TTL	MS_PER_S
 #define	DEFAULT_FLOW_NUM	0x1000
+
+#define SK_MAX(x1, x2) (x1) > (x2)? (x1): (x2)
+
+#define	MAX_PACKET_FRAG RTE_LIBRTE_IP_FRAG_MAX_FRAG
+#define MBUF_TABLE_SIZE  (2 * SK_MAX(MAX_PKT_BURST, MAX_PACKET_FRAG))
 
 /* Should be power of two. */
 #define	IP_FRAG_TBL_BUCKET_ENTRIES	16
