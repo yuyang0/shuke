@@ -1561,10 +1561,6 @@ static int parse_kni_kernel_config() {
 
 int initKniConfig() {
     // initialize kni config
-    if (sk.bindaddr_count != sk.nr_ports) {
-        fprintf(stderr, "the number of ip address should equal to number of ports.\n");
-        exit(-1);
-    }
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
         assert(sk.port_info[portid]);
@@ -1714,12 +1710,21 @@ int initOtherConfig() {
     sk.port_ids = memdup(ids, nr_id * sizeof(int));
     sk.nr_ports = nr_id;
 
+    if (sk.bindaddr_count != sk.nr_ports) {
+        fprintf(stderr, "the number of ip address should equal to number of ports.\n");
+        exit(-1);
+    }
+
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
         assert(sk.port_info[portid] == NULL);
         sk.port_info[portid] = calloc(1, sizeof(port_info_t));
         assert(sk.port_info[portid]);
         sk.port_info[portid]->port_id = (uint8_t)portid;
+        if (!str2ipv4(sk.bindaddr[i], &sk.port_info[portid]->ipv4_addr)) {
+            fprintf(stderr, "invalid ipv4 address %s\n", sk.bindaddr[i]);
+            exit(-1);
+        }
     }
 
 #ifndef ONLY_UDP

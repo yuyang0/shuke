@@ -174,6 +174,7 @@ typedef struct port_info {
     uint16_t kni_tx_queue_id;
     struct rte_kni *kni;
 #endif
+    uint32_t ipv4_addr;
 } __rte_cache_aligned port_info_t;
 
 extern struct rte_eth_conf default_port_conf;

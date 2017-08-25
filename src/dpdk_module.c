@@ -1,6 +1,7 @@
 //
 // Created by Yu Yang <yyangplus@NOSPAM.gmail.com> on 2017-05-02
 //
+#include <rte_arp.h>
 
 #include "dpdk_module.h"
 #include "shuke.h"
@@ -675,6 +676,35 @@ end:
 }
 #endif
 
+int sk_handle_arp_request(struct rte_mbuf *m, int portid) {
+    struct ether_hdr *eth_h;
+    struct arp_hdr *arp_h;
+    port_info_t *pinfo = sk.port_info[portid];
+
+    eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
+    arp_h = (struct arp_hdr*)(eth_h + 1);
+
+    uint16_t arp_op_type = rte_be_to_cpu_16(arp_h->arp_op);
+    if (arp_op_type == ARP_OP_REQUEST) {
+        if (memcmp(&arp_h->arp_data.arp_tip, &pinfo->ipv4_addr, 4) == 0) {
+            LOG_DEBUG(DPDK, "got arp request for port %d.", portid);
+            arp_h->arp_op = rte_cpu_to_be_16(ARP_OP_REPLY);
+
+            struct arp_ipv4 *arp_data = &arp_h->arp_data;
+            arp_data->arp_tip = arp_data->arp_sip;
+            ether_addr_copy(&arp_data->arp_sha, &arp_data->arp_tha);
+
+            arp_data->arp_sip = pinfo->ipv4_addr;
+            ether_addr_copy(&pinfo->eth_addr, &arp_data->arp_sha);
+
+            ether_addr_copy(&eth_h->s_addr, &eth_h->d_addr);
+            ether_addr_copy(&pinfo->eth_addr, &eth_h->s_addr);
+            return OK_CODE;
+        }
+    }
+    return ERR_CODE;
+}
+
 static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
@@ -715,8 +745,14 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     switch (ether_type) {
         case ETHER_TYPE_ARP:
             LOG_DEBUG(DPDK, "%d got a arp packet.", portid);
+            if (sk_handle_arp_request(m, portid) == OK_CODE) {
+                send_single_packet(qconf, m, portid);
+                return;
+            }
 #ifndef ONLY_UDP
             __send_to_kni(qconf, m, portid);
+#else
+            rte_pktmbuf_free(m);
 #endif
             return;
         case ETHER_TYPE_IPv4:
