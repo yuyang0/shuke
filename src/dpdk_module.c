@@ -226,7 +226,6 @@ static int
 init_mem(unsigned nb_mbuf)
 {
     int socketid;
-    struct rte_mempool *mp;
     unsigned lcore_id;
     char s[64];
 
@@ -261,6 +260,8 @@ init_mem(unsigned nb_mbuf)
         }
 
 #ifdef IP_FRAG
+        struct rte_mempool *mp;
+
         if (socket_direct_pool[socketid] == NULL) {
             LOG_INFO(DPDK, "Creating direct mempool on socket %i\n",
                     socketid);
@@ -395,56 +396,6 @@ send_single_packet(lcore_conf_t *qconf,
     qconf->tx_mbufs[port].len = len;
     return 0;
 }
-
-#ifndef ONLY_UDP
-/* Send burst of packets on an output interface */
-static inline int
-kni_send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
-{
-    port_info_t *kconf = sk.port_info[port];
-    struct rte_mbuf **m_table;
-    int ret;
-
-    m_table = (struct rte_mbuf **)qconf->kni_tx_mbufs[port].m_table;
-    ret = rte_kni_tx_burst(kconf->kni, m_table, n);
-    if (unlikely(ret < n)) {
-        do {
-            rte_pktmbuf_free(m_table[ret]);
-        } while (++ret < n);
-    }
-
-    qconf->kni_tx_mbufs[port].len = 0;
-    return 0;
-}
-
-/* Enqueue a single packet, and send burst if queue is filled */
-static inline int
-kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port)
-{
-    int ret = 0;
-    uint16_t len;
-
-    len = qconf->kni_tx_mbufs[port].len;
-    qconf->kni_tx_mbufs[port].m_table[len] = m;
-    len++;
-
-    /* enough pkts to be sent */
-    if (unlikely(len == MAX_PKT_BURST)) {
-        kni_send_burst(qconf, MAX_PKT_BURST, port);
-        len = 0;
-    }
-
-    qconf->kni_tx_mbufs[port].len = len;
-    return ret;
-}
-
-static inline __attribute__((always_inline)) void
-__send_to_kni(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t portid)
-{
-    /* Burst tx to kni */
-    kni_send_single_packet(qconf, m, portid);
-}
-#endif
 
 static uint16_t
 get_udptcp_checksum(void *l3_hdr, void *l4_hdr, bool is_ipv4)
@@ -750,7 +701,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 return;
             }
 #ifndef ONLY_UDP
-            __send_to_kni(qconf, m, portid);
+            sk_kni_enqueue(portid, m);
 #else
             rte_pktmbuf_free(m);
 #endif
@@ -800,7 +751,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 LOG_DEBUG(DPDK, "invalid tcp port");
                 goto invalid;
             }
-            __send_to_kni(qconf, m, portid);
+            sk_kni_enqueue(portid, m);
             return;
 #endif
         default:
@@ -967,15 +918,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
                                portid);
                     qconf->tx_mbufs[portid].len = 0;
                 }
-#ifndef ONLY_UDP
-                // TODO: loop on rx port of this lcore
-                if (qconf->kni_tx_mbufs[portid].len > 0) {
-                    kni_send_burst(qconf,
-                                   qconf->kni_tx_mbufs[portid].len,
-                                   portid);
-                    qconf->kni_tx_mbufs[portid].len = 0;
-                }
-#endif
             }
 
             prev_tsc = cur_tsc;
@@ -987,6 +929,11 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 
             portid = (uint8_t )qconf->port_id_list[i];
             queueid = (uint8_t )qconf->queue_id_list[portid];
+
+#ifndef ONLY_UDP
+            sk_kni_process(portid, queueid, pkts_burst, MAX_PKT_BURST);
+#endif
+
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
             if (nb_rx == 0)
                 continue;
@@ -1088,18 +1035,10 @@ initDpdkModule() {
         fflush(stdout);
 
         nb_rx_queue = (uint8_t )pinfo->nr_lcore;
-#ifdef ONLY_UDP
         /*
          * every core should has a tx queue except master core
          */
         n_tx_queue = (uint32_t )(pinfo->nr_lcore);
-#else
-        /*
-         * every core should has a tx queue except master core
-         * every port should preserve a tx queue for kni tx thread
-         */
-        n_tx_queue = (uint32_t )(pinfo->nr_lcore + 1);
-#endif
         if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
             n_tx_queue = MAX_TX_QUEUE_PER_PORT;
         LOG_INFO(DPDK, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
@@ -1165,10 +1104,6 @@ initDpdkModule() {
         }
     }
 
-
-#ifndef ONLY_UDP
-    kni_init_tx_queue();
-#endif
 
 #ifdef IP_FRAG
     setup_ip_frag_tbl();
@@ -1239,6 +1174,13 @@ int cleanupDpdkModule(void) {
         LOG_INFO(DPDK, "port %d Done.", portid);
     }
     return 0;
+}
+
+void
+init_kni_module(void) {
+    unsigned socket_id = sk.master_numa_id;
+    struct rte_mempool *mbuf_pool = pktmbuf_pool[socket_id];
+    sk_init_kni_module(socket_id, mbuf_pool);
 }
 
 /*

@@ -143,8 +143,6 @@ struct shuke {
 
     char *coremask;
     int master_lcore_id;
-    char *kni_tx_config;
-    char *kni_kernel_config;
     char *mem_channels;
     int portmask;
     bool promiscuous_on;
@@ -203,10 +201,7 @@ struct shuke {
 
     int *lcore_ids;
     int nr_lcore_ids;
-#ifndef ONLY_UDP
-    int *kni_tx_lcore_ids;
-    int nr_kni_tx_lcore_id;
-#endif
+
     int *port_ids;
     int nr_ports;
     // char *total_coremask;

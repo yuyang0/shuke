@@ -647,17 +647,6 @@ sds genDebugInfo() {
                          pinfo->port_id,
                          pinfo->eth_addr_s,
                          buf);
-#ifndef ONLY_UDP
-        s = sdscatprintf(s,
-                         "veth_name: %s\r\n"
-                         "kni_lcore_tx: %d\r\n"
-                         "kni_lcore_k: %d\r\n"
-                         "kni_tx_queue_id: %d\r\n",
-                         pinfo->veth_name,
-                         pinfo->kni_lcore_tx,
-                         pinfo->kni_lcore_k,
-                         pinfo->kni_tx_queue_id);
-#endif
         s = sdscat(s, "\r\n");
     }
     return s;

@@ -100,6 +100,8 @@
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
 
+#define KNI_QUEUE_SIZE 2048
+
 #ifdef IP_FRAG
 #define	DEFAULT_FLOW_TTL	MS_PER_S
 #define	DEFAULT_FLOW_NUM	0x1000
@@ -133,10 +135,6 @@ typedef struct lcore_conf {
 
     struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
 
-#ifndef ONLY_UDP
-    // used for kni
-    struct mbuf_table kni_tx_mbufs[RTE_MAX_ETHPORTS];
-#endif
     struct numaNode_s *node;
     uint16_t ipv4_packet_id;
     // used to implement time function
@@ -166,14 +164,6 @@ typedef struct port_info {
     int nr_lcore;
     int *lcore_list;
 
-#ifndef ONLY_UDP
-    // kni config
-    char veth_name[RTE_KNI_NAMESIZE];
-    int kni_lcore_tx;
-    int kni_lcore_k;
-    uint16_t kni_tx_queue_id;
-    struct rte_kni *kni;
-#endif
     uint32_t ipv4_addr;
 } __rte_cache_aligned port_info_t;
 
@@ -191,11 +181,14 @@ uint64_t rte_tsc_time();
 /*----------------------------------------------
  *     kni
  *---------------------------------------------*/
+void sk_init_kni_module(unsigned socket_id, struct rte_mempool *mbuf_pool);
 void init_kni_module(void);
 int cleanup_kni_module();
-int start_kni_tx_threads();
 int kni_ifconfig_all();
-void kni_init_tx_queue();
+
+void sk_kni_process(uint8_t port_id, uint16_t queue_id,
+                    struct rte_mbuf **pkts_burst, unsigned count);
+int sk_kni_enqueue(uint8_t portid, struct rte_mbuf *pkt);
 
 #ifdef SK_TEST
 void initTestDpdkEal();

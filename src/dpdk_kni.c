@@ -11,52 +11,30 @@
 
 #include "shuke.h"
 
-/* Macros for printing using RTE_LOG */
-// #define RTE_LOGTYPE_KNI RTE_LOGTYPE_USER1
-
-/* Max size of a single packet */
-#define MAX_PACKET_SZ           2048
-
-/* Size of the data buffer in each mbuf */
-#define MBUF_DATA_SZ (MAX_PACKET_SZ + RTE_PKTMBUF_HEADROOM)
-
-/* Number of mbufs in mempool that is created */
-#define NB_MBUF                 (8192 * 16)
-
-/* How many objects (mbufs) to keep in per-lcore mempool cache */
-#define MEMPOOL_CACHE_SZ        MAX_PKT_BURST
-
 /* Total octets in ethernet header */
 #define KNI_ENET_HEADER_SIZE    14
 
 /* Total octets in the FCS */
 #define KNI_ENET_FCS_SIZE       4
 
-#define KNI_US_PER_SECOND       1000000
-#define KNI_SECOND_PER_DAY      86400
+typedef struct {
+    struct rte_kni *kni;
+    struct rte_ring *kni_rp;
 
-#define KNI_MAX_KTHREAD 32
-
-/* Mempool for mbufs */
-static struct rte_mempool * pktmbuf_pool = NULL;
-
-/* Structure type for recording kni interface specific stats */
-struct kni_interface_stats {
     /* number of pkts received from NIC, and sent to KNI */
     uint64_t rx_packets;
-
     /* number of pkts received from NIC, but failed to send to KNI */
     uint64_t rx_dropped;
-
     /* number of pkts received from KNI, and sent to NIC */
     uint64_t tx_packets;
-
     /* number of pkts received from KNI, but failed to send to NIC */
     uint64_t tx_dropped;
-};
+
+    char veth_name[RTE_KNI_NAMESIZE];
+} sk_kni_conf_t;
 
 /* kni device statistics array */
-static struct kni_interface_stats kni_stats[RTE_MAX_ETHPORTS];
+static sk_kni_conf_t *kni_conf_list[RTE_MAX_ETHPORTS];
 
 static int kni_change_mtu(uint8_t port_id, unsigned new_mtu);
 static int kni_config_network_interface(uint8_t port_id, uint8_t if_up);
@@ -107,172 +85,17 @@ int kni_ifconfig_all()
 {
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        port_info_t *kconf = sk.port_info[portid];
+        sk_kni_conf_t *kconf = kni_conf_list[portid];
         kni_ifconfig(kconf->veth_name, sk.bindaddr[i]);
     }
     return OK_CODE;
-}
-
-static void
-kni_burst_free_mbufs(struct rte_mbuf **pkts, unsigned num)
-{
-    unsigned i;
-
-    if (pkts == NULL)
-        return;
-
-    for (i = 0; i < num; i++) {
-        rte_pktmbuf_free(pkts[i]);
-        pkts[i] = NULL;
-    }
-}
-
-void kni_init_tx_queue() {
-    int ret;
-    int portid;
-    uint16_t queueid;
-    unsigned lcore_id;
-    uint8_t socketid;
-
-    struct rte_eth_dev_info dev_info;
-    struct rte_eth_txconf *txconf;
-
-    uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
-
-    for (int i = 0; i < sk.nr_ports; ++i) {
-        portid = sk.port_ids[i];
-        port_info_t *kconf = sk.port_info[portid];
-
-        queueid = kconf->kni_tx_queue_id;
-        lcore_id = (unsigned )kconf->kni_lcore_tx;
-        assert(rte_lcore_is_enabled(lcore_id));
-
-        if (sk.numa_on)
-            socketid =
-                    (uint8_t)rte_lcore_to_socket_id(lcore_id);
-        else
-            socketid = 0;
-
-        LOG_INFO(KNI, "kni txq=<< lcore:%u, port:%d, queue:%d, socket:%d >>", lcore_id, portid, queueid, socketid);
-
-        rte_eth_dev_info_get(portid, &dev_info);
-        txconf = &dev_info.default_txconf;
-        if (default_port_conf.rxmode.jumbo_frame)
-            txconf->txq_flags = 0;
-        ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
-                                     socketid, txconf);
-        if (ret < 0)
-            rte_exit(EXIT_FAILURE,
-                     "rte_eth_tx_queue_setup: err=%d, "
-                             "port=%d\n", ret, portid);
-    }
-}
-
-/**
- * Interface to dequeue mbufs from tx_q and burst tx
- */
-static void
-kni_egress(port_info_t *p)
-{
-    uint8_t port_id;
-    unsigned nb_tx, num;
-    struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
-
-    if (p == NULL)
-        return;
-
-    port_id = p->port_id;
-
-    /* Burst rx from kni */
-    num = rte_kni_rx_burst(p->kni, pkts_burst, MAX_PKT_BURST);
-    if (unlikely(num > MAX_PKT_BURST)) {
-        LOG_ERR(KNI, "Error receiving from KNI\n");
-        return;
-    }
-    if (num > 0) {
-        /* Burst tx to eth */
-        nb_tx = rte_eth_tx_burst(port_id, p->kni_tx_queue_id, pkts_burst, (uint16_t)num);
-        kni_stats[port_id].tx_packets += nb_tx;
-
-        if (unlikely(nb_tx < num)) {
-            /* Free mbufs not tx to NIC */
-            kni_burst_free_mbufs(&pkts_burst[nb_tx], num - nb_tx);
-            kni_stats[port_id].tx_dropped += num - nb_tx;
-        }
-    }
-}
-
-static int
-main_loop(__rte_unused void *arg)
-{
-    const unsigned lcore_id = rte_lcore_id();
-    port_info_t *kconf_list[RTE_MAX_ETHPORTS];
-    int nr_kconf = 0;
-    port_info_t *kconf;
-
-    for (int i = 0; i < sk.nr_ports; i++) {
-        int portid = sk.port_ids[i];
-        if (sk.port_info[portid]->kni_lcore_tx == (int)lcore_id) {
-            kconf_list[nr_kconf++] = sk.port_info[portid];
-            LOG_INFO(KNI, "lcore %u is writing to port %d.", lcore_id, portid);
-        }
-    }
-    if (nr_kconf == 0) {
-        LOG_INFO(KNI, "lcore %d has nothing to do.", lcore_id);
-        return 0;
-    }
-    while (1) {
-        if (sk.force_quit)
-            break;
-        for (int i = 0; i < nr_kconf; ++i) {
-            kconf = kconf_list[i];
-            kni_egress(kconf);
-            rte_kni_handle_request(kconf->kni);
-        }
-    }
-    return 0;
 }
 
 /* Callback for request of changing MTU */
 static int
 kni_change_mtu(uint8_t port_id, unsigned new_mtu)
 {
-    int ret;
-    struct rte_eth_conf conf;
-
-    if (port_id >= rte_eth_dev_count()) {
-        LOG_ERR(KNI, "Invalid port id %d\n", port_id);
-        return -EINVAL;
-    }
-
-    LOG_INFO(KNI, "Change MTU of port %d to %u\n", port_id, new_mtu);
-
-    /* Stop specific port */
-    rte_eth_dev_stop(port_id);
-
-    memcpy(&conf, &default_port_conf, sizeof(conf));
-    /* Set new MTU */
-    if (new_mtu > ETHER_MAX_LEN)
-        conf.rxmode.jumbo_frame = 1;
-    else
-        conf.rxmode.jumbo_frame = 0;
-
-    /* mtu + length of header + length of FCS = max pkt length */
-    conf.rxmode.max_rx_pkt_len = new_mtu + KNI_ENET_HEADER_SIZE +
-                                 KNI_ENET_FCS_SIZE;
-    ret = rte_eth_dev_configure(port_id, 1, 1, &conf);
-    if (ret < 0) {
-        LOG_ERR(KNI, "Fail to reconfigure port %d\n", port_id);
-        return ret;
-    }
-
-    /* Restart specific port */
-    ret = rte_eth_dev_start(port_id);
-    if (ret < 0) {
-        LOG_ERR(KNI, "Fail to restart port %d\n", port_id);
-        return ret;
-    }
-
+    (void)port_id, (void)new_mtu;
     return 0;
 }
 
@@ -294,10 +117,13 @@ kni_config_network_interface(uint8_t port_id, uint8_t if_up)
 }
 
 static int
-kni_alloc(uint8_t port_id)
+kni_alloc(uint8_t port_id, struct rte_mempool *mbuf_pool)
 {
-    port_info_t *kconf = sk.port_info[port_id];
+    sk_kni_conf_t *kconf = kni_conf_list[port_id];
     struct rte_kni *kni;
+
+    struct rte_kni_ops ops;
+    struct rte_eth_dev_info dev_info;
     struct rte_kni_conf conf;
 
     assert(port_id < RTE_MAX_ETHPORTS);
@@ -305,19 +131,18 @@ kni_alloc(uint8_t port_id)
     /* Clear conf at first */
     memset(&conf, 0, sizeof(conf));
     strncpy(conf.name, kconf->veth_name, RTE_KNI_NAMESIZE);
-    if (kconf->kni_lcore_k >= 0) {
-        conf.core_id = (uint32_t )kconf->kni_lcore_k;
-        conf.force_bind = 1;
-    }
+    conf.core_id = (uint32_t )sk.master_lcore_id;
+    conf.force_bind = 1;
     conf.group_id = (uint16_t)port_id;
-    conf.mbuf_size = MAX_PACKET_SZ;
+
+    uint16_t mtu;
+    rte_eth_dev_get_mtu(port_id, &mtu);
+    conf.mbuf_size = mtu + KNI_ENET_HEADER_SIZE + KNI_ENET_FCS_SIZE;
     /*
      * The first KNI device associated to a port
      * is the master, for multiple kernel thread
      * environment.
      */
-    struct rte_kni_ops ops;
-    struct rte_eth_dev_info dev_info;
 
     memset(&dev_info, 0, sizeof(dev_info));
     rte_eth_dev_info_get(port_id, &dev_info);
@@ -329,44 +154,120 @@ kni_alloc(uint8_t port_id)
     ops.change_mtu = kni_change_mtu;
     ops.config_network_if = kni_config_network_interface;
 
-    kni = rte_kni_alloc(pktmbuf_pool, &conf, &ops);
+    kni = rte_kni_alloc(mbuf_pool, &conf, &ops);
 
     if (!kni)
         rte_exit(EXIT_FAILURE, "Fail to create kni for "
                 "port: %d\n", port_id);
-    sk.port_info[port_id]->kni = kni;
+    kconf->kni = kni;
+
+    return 0;
+}
+
+static int
+kni_process_tx(uint8_t port_id, uint16_t queue_id,
+               struct rte_mbuf **pkts_burst, unsigned count)
+{
+    (void)queue_id;
+    sk_kni_conf_t *kconf = kni_conf_list[port_id];
+    /* read packet from kni ring(phy port) and transmit to kni */
+    uint16_t nb_tx, nb_kni_tx;
+    nb_tx = rte_ring_dequeue_burst(kconf->kni_rp, (void **)pkts_burst, count, NULL);
+
+    /* NB.
+     * if nb_tx is 0,it must call rte_kni_tx_burst
+     * must Call regularly rte_kni_tx_burst(kni, NULL, 0).
+     * detail https://embedded.communities.intel.com/thread/6668
+     */
+    nb_kni_tx = rte_kni_tx_burst(kconf->kni, pkts_burst, nb_tx);
+    rte_kni_handle_request(kconf->kni);
+    if(nb_kni_tx < nb_tx) {
+        uint16_t i;
+        for(i = nb_kni_tx; i < nb_tx; ++i)
+            rte_pktmbuf_free(pkts_burst[i]);
+
+        kconf->rx_dropped += (nb_tx - nb_kni_tx);
+    }
+
+    kconf->rx_packets += nb_kni_tx;
+    return 0;
+}
+
+static int
+kni_process_rx(uint8_t port_id, uint16_t queue_id,
+               struct rte_mbuf **pkts_burst, unsigned count)
+{
+    sk_kni_conf_t *kconf = kni_conf_list[port_id];
+    uint16_t nb_kni_rx, nb_rx;
+
+    /* read packet from kni, and transmit to phy port */
+    nb_kni_rx = rte_kni_rx_burst(kconf->kni, pkts_burst, count);
+    if (nb_kni_rx > 0) {
+        nb_rx = rte_eth_tx_burst(port_id, queue_id, pkts_burst, nb_kni_rx);
+        if (nb_rx < nb_kni_rx) {
+            uint16_t i;
+            for(i = nb_rx; i < nb_kni_rx; ++i)
+                rte_pktmbuf_free(pkts_burst[i]);
+
+            kconf->tx_dropped += (nb_kni_rx - nb_rx);
+        }
+
+        kconf->tx_packets += nb_rx;
+    }
+    return 0;
+}
+
+void
+sk_kni_process(uint8_t port_id, uint16_t queue_id,
+               struct rte_mbuf **pkts_burst, unsigned count)
+{
+    kni_process_tx(port_id, queue_id, pkts_burst, count);
+    kni_process_rx(port_id, queue_id, pkts_burst, count);
+}
+
+/* enqueue the packet, and own it */
+int sk_kni_enqueue(uint8_t portid, struct rte_mbuf *pkt)
+{
+    sk_kni_conf_t *kconf = kni_conf_list[portid];
+    int ret = rte_ring_enqueue(kconf->kni_rp, pkt);
+    if (ret < 0)
+        rte_pktmbuf_free(pkt);
 
     return 0;
 }
 
 /* Initialize KNI subsystem */
 void
-init_kni_module(void)
+sk_init_kni_module(unsigned socket_id, struct rte_mempool *mbuf_pool)
 {
-    int portid = sk.port_ids[0];
-    int lcore_id = sk.port_info[portid]->kni_lcore_tx;
-    int socket_id = rte_lcore_to_socket_id((unsigned) lcore_id);
-    /* Create the mbuf pool */
-    pktmbuf_pool = rte_pktmbuf_pool_create("kni_mbuf_pool", NB_MBUF,
-                                           MEMPOOL_CACHE_SZ, 0, MBUF_DATA_SZ, socket_id);
-    if (pktmbuf_pool == NULL) {
-        rte_exit(EXIT_FAILURE, "Could not initialise mbuf pool\n");
-    }
-
     rte_kni_init(sk.nr_ports);
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        kni_alloc(portid);
+        assert(kni_conf_list[portid] == NULL);
+        kni_conf_list[portid] = rte_zmalloc("kni:conf",
+                                            sizeof(sk_kni_conf_t),
+                                            RTE_CACHE_LINE_SIZE);
+        sk_kni_conf_t *kconf = kni_conf_list[portid];
+        snprintf(kconf->veth_name, RTE_KNI_NAMESIZE, "vEth%u", portid);
+        kni_alloc(portid, mbuf_pool);
+
+        char ring_name[RTE_KNI_NAMESIZE];
+        snprintf((char*)ring_name, RTE_KNI_NAMESIZE, "kni_ring_%u", portid);
+
+        kconf->kni_rp = rte_ring_create(ring_name, KNI_QUEUE_SIZE,
+                                        socket_id, RING_F_SC_DEQ);
     }
 }
 
 int
 cleanup_kni_module()
 {
+    sk_kni_conf_t *kconf;
     /* Release resources */
     for (int i = 0; i < sk.nr_ports; i++) {
         int portid = sk.port_ids[i];
-        if (rte_kni_release(sk.port_info[portid]->kni))
+        kconf = kni_conf_list[portid];
+        if (rte_kni_release(kconf->kni))
             LOG_ERR(KNI, "Fail to release kni\n");
     }
 #ifdef RTE_LIBRTE_XEN_DOM0
@@ -374,22 +275,6 @@ cleanup_kni_module()
 #endif
 
     // rte_eth_dev_stop(port_id);
-    return 0;
-}
-
-/* Initialise ports/queues etc. and start main loop on each core */
-int
-start_kni_tx_threads()
-{
-    int ret;
-    /* Launch per-lcore function on every lcore */
-    for (int i=0; i < sk.nr_kni_tx_lcore_id; ++i) {
-        unsigned lcore_id = (unsigned)sk.kni_tx_lcore_ids[i];
-        ret = rte_eal_remote_launch(main_loop, NULL, lcore_id);
-        if (ret != 0) {
-            rte_exit(EXIT_FAILURE, "Failed to start kni tx lcore %d, return %d", lcore_id, ret);
-        }
-    }
     return 0;
 }
 

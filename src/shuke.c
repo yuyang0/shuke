@@ -1028,11 +1028,6 @@ static void initConfigFromFile(int argc, char **argv) {
     conf_err = getIntVal(sk.errstr, cbuf, "master_lcore_id", &sk.master_lcore_id);
     CHECK_CONF_ERR(conf_err, sk.errstr);
 
-    sk.kni_tx_config = getStrVal(cbuf, "kni_tx_config", NULL);
-    CHECK_CONFIG("kni_tx_config", sk.kni_tx_config != NULL,
-                 "Config Error: kni_tx_config can't be empty");
-    sk.kni_kernel_config = getStrVal(cbuf, "kni_kernel_config", NULL);
-
     sk.mem_channels = getStrVal(cbuf, "mem_channels", NULL);
     CHECK_CONFIG("mem_channels", sk.mem_channels != NULL,
                  "Config Error: mem_channels can't be empty");
@@ -1215,14 +1210,6 @@ static int construct_lcore_list() {
         offset += n;
     }
 
-#ifndef ONLY_UDP
-    for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
-        if (offset >= 4096) return ERR_CODE;
-        n = snprintf(buffer+offset, 4096-offset, ",%d", sk.kni_tx_lcore_ids[i]);
-        offset += n;
-    }
-#endif
-
     sk.total_lcore_list = strdup(buffer);
     return OK_CODE;
 }
@@ -1400,191 +1387,6 @@ invalid:
     return ERR_CODE;
 }
 
-#ifndef ONLY_UDP
-static int parse_kni_tx_config() {
-    int ids[1024];
-    int nr_id = 0;
-    bool found;
-
-    char s[256];
-    const char *p, *p0 = sk.kni_tx_config;
-    char *end;
-    enum fieldnames {
-        FLD_PORT = 0,
-        FLD_LCORE,
-        _NUM_FLD
-    };
-    unsigned long int_fld[_NUM_FLD];
-    char *str_fld[_NUM_FLD];
-    int nr_fld = _NUM_FLD;
-    int i;
-    unsigned size;
-
-    int nb_params = 0;
-
-    while ((p = strchr(p0,'(')) != NULL) {
-        ++p;
-        if((p0 = strchr(p,')')) == NULL) {
-            snprintf(sk.errstr, ERR_STR_LEN, "unbalanced parens.");
-            return ERR_CODE;
-        }
-
-        size = (unsigned)(p0 - p);
-        if(size >= sizeof(s)) {
-            snprintf(sk.errstr, ERR_STR_LEN, "config part is too long(%d chars).", size);
-            return ERR_CODE;
-        }
-
-        snprintf(s, sizeof(s), "%.*s", size, p);
-        if (strsplit(s, " ,", str_fld, &nr_fld) < 0 || nr_fld != _NUM_FLD) {
-            snprintf(sk.errstr, ERR_STR_LEN, "every part should contain %d token.", _NUM_FLD);
-            return ERR_CODE;
-        }
-        for (i = 0; i < _NUM_FLD; i++){
-            errno = 0;
-            int_fld[i] = strtoul(str_fld[i], &end, 0);
-            if (errno != 0 || end == str_fld[i] || int_fld[i] > 255) {
-                snprintf(sk.errstr, ERR_STR_LEN, "token %s is not a number.", str_fld[i]);
-                return ERR_CODE;
-            }
-        }
-        if (nb_params >= sk.nr_ports) {
-            snprintf(sk.errstr, ERR_STR_LEN, "config number should equal to port number.");
-            return ERR_CODE;
-        }
-        unsigned long portid = int_fld[FLD_PORT];
-        int lcore_id = (int)int_fld[FLD_LCORE];
-        found = false;
-        for (int i = 0; i < nr_id; ++i) {
-            if (ids[i] == lcore_id) {
-                found = true;
-                break;
-            }
-        }
-        if (!sk.port_info[portid]) {
-            snprintf(sk.errstr, ERR_STR_LEN, "port %lu is not enabled.", portid);
-            return ERR_CODE;
-        }
-        if (found == false) ids[nr_id++] = lcore_id;
-        if (sk.port_info[portid]->kni_lcore_tx >= 0) {
-            snprintf(sk.errstr, ERR_STR_LEN, "duplicate config for port %lu.", portid);
-            return ERR_CODE;
-        }
-        sk.port_info[portid]->kni_lcore_tx = lcore_id;
-        ++nb_params;
-    }
-    // check if every port contains kni_lcore_tx
-    for (int i = 0; i < sk.nr_ports; ++i) {
-        int portid = sk.port_ids[i];
-        if (sk.port_info[portid]->kni_lcore_tx < 0) {
-            snprintf(sk.errstr, ERR_STR_LEN, "port %d doesn't have kni tx lcore config.", portid);
-            return ERR_CODE;
-        }
-    }
-    sk.kni_tx_lcore_ids = memdup(ids, nr_id * sizeof(int));
-    sk.nr_kni_tx_lcore_id = nr_id;
-    sortIntArray(sk.kni_tx_lcore_ids, (size_t)sk.nr_kni_tx_lcore_id);
-    return OK_CODE;
-}
-
-static int parse_kni_kernel_config() {
-    char s[256];
-    const char *p, *p0 = sk.kni_kernel_config;
-    char *end;
-    enum fieldnames {
-        FLD_PORT = 0,
-        FLD_LCORE,
-        _NUM_FLD
-    };
-    unsigned long int_fld[_NUM_FLD];
-    char *str_fld[_NUM_FLD];
-    int nr_fld = _NUM_FLD;
-    int i;
-    unsigned size;
-
-    int nb_params = 0;
-
-    while ((p = strchr(p0,'(')) != NULL) {
-        ++p;
-        if((p0 = strchr(p,')')) == NULL) {
-            snprintf(sk.errstr, ERR_STR_LEN, "unbalanced parens.");
-            return ERR_CODE;
-        }
-
-        size = (unsigned )(p0 - p);
-        if(size >= sizeof(s)) {
-            snprintf(sk.errstr, ERR_STR_LEN, "config part is too long(%d chars).", size);
-            return ERR_CODE;
-        }
-
-        snprintf(s, sizeof(s), "%.*s", size, p);
-        if (strsplit(s, " ,", str_fld, &nr_fld) < 0 || nr_fld != _NUM_FLD) {
-            snprintf(sk.errstr, ERR_STR_LEN, "every part should contain %d token.", _NUM_FLD);
-            return ERR_CODE;
-        }
-
-        for (i = 0; i < _NUM_FLD; i++){
-            errno = 0;
-            int_fld[i] = strtoul(str_fld[i], &end, 0);
-            if (errno != 0 || end == str_fld[i] || int_fld[i] > 255) {
-                snprintf(sk.errstr, ERR_STR_LEN, "token %s is not a number.", str_fld[i]);
-                return ERR_CODE;
-            }
-        }
-        if (nb_params >= sk.nr_ports) {
-            snprintf(sk.errstr, ERR_STR_LEN, "config number should equal to port number.");
-            return ERR_CODE;
-        }
-        unsigned long portid = int_fld[FLD_PORT];
-        int lcore_id = (int)int_fld[FLD_LCORE];
-        if (!sk.port_info[portid]) {
-            snprintf(sk.errstr, ERR_STR_LEN, "port %lu is not enabled.", portid);
-            return ERR_CODE;
-        }
-        if (sk.port_info[portid]->kni_lcore_k >= 0) {
-            snprintf(sk.errstr, ERR_STR_LEN, "duplicate config for port %lu.", portid);
-            return ERR_CODE;
-        }
-        sk.port_info[portid]->kni_lcore_k = lcore_id;
-        ++nb_params;
-    }
-    // check if every port contains kni_lcore_k
-    for (int i = 0; i < sk.nr_ports; ++i) {
-        int portid = sk.port_ids[i];
-        if (sk.port_info[portid]->kni_lcore_k < 0) {
-            snprintf(sk.errstr, ERR_STR_LEN, "port %d doesn't have kni kernel lcore config.", portid);
-            return ERR_CODE;
-        }
-    }
-    return OK_CODE;
-}
-
-int initKniConfig() {
-    // initialize kni config
-    for (int i = 0; i < sk.nr_ports; ++i) {
-        int portid = sk.port_ids[i];
-        assert(sk.port_info[portid]);
-        snprintf(sk.port_info[portid]->veth_name, RTE_KNI_NAMESIZE, "vEth%u", portid);
-        sk.port_info[portid]->kni_lcore_tx = -1;
-        sk.port_info[portid]->kni_lcore_k = -1;
-        sk.port_info[portid]->kni_tx_queue_id = (uint16_t )(sk.nr_lcore_ids - 1);
-    }
-
-    if (parse_kni_tx_config() != OK_CODE) {
-        fprintf(stderr, "kni_tx_config error: %s\n", sk.errstr);
-        exit(-1);
-    }
-
-    if (sk.kni_kernel_config) {
-        if (parse_kni_kernel_config() != OK_CODE) {
-            fprintf(stderr, "kni_kernel_config error: %s.\n", sk.errstr);
-            exit(-1);
-        }
-    }
-    return OK_CODE;
-}
-#endif
-
 static int parse_str_coremask(char *coremask, int buf[], int *n) {
     int max = *n;
     int nr_id = 0;
@@ -1727,10 +1529,6 @@ int initOtherConfig() {
         }
     }
 
-#ifndef ONLY_UDP
-    initKniConfig();
-#endif
-
     if (construct_lcore_list() == ERR_CODE) {
         fprintf(stderr, "error: lcore list is too long\n");
         exit(-1);
@@ -1743,16 +1541,6 @@ int initOtherConfig() {
 
     initNumaConfig();
 
-#ifndef ONLY_UDP
-    // all kni tx lcores should stay in one socket
-    unsigned kni_socket_id = rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[0]);
-    for (int i = 0; i < sk.nr_kni_tx_lcore_id; ++i) {
-        if (kni_socket_id != rte_lcore_to_socket_id((unsigned) sk.kni_tx_lcore_ids[i])) {
-            fprintf(stderr, "all kni tx lcores should stay in one socket");
-            exit(-1);
-        }
-    }
-#endif
     // parse queue config
     if (parseQueueConfig(sk.errstr, sk.queue_config) != OK_CODE) {
         fprintf(stderr, "queue config: %s\n", sk.errstr);
@@ -1814,7 +1602,6 @@ int main(int argc, char *argv[]) {
 
 #ifndef ONLY_UDP
     if (! sk.only_udp) {
-        start_kni_tx_threads();
         kni_ifconfig_all();
 
         sleep(4);
