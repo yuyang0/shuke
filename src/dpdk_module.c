@@ -744,7 +744,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
     switch (ether_type) {
         case ETHER_TYPE_ARP:
-            LOG_DEBUG(DPDK, "%d got a arp packet.", portid);
+            LOG_DEBUG(DPDK, "port %d got a arp packet.", portid);
             if (sk_handle_arp_request(m, portid) == OK_CODE) {
                 send_single_packet(qconf, m, portid);
                 return;
