@@ -225,7 +225,7 @@ size_t strcountstr(char *str, char *fstr) {
 
 // convert ipv4 address to binary form, `val` should be a 4 byte buffer.
 // return true if the format of the address is valid, otherwise return false
-bool str2ipv4(const char *addr, char *val) {
+bool str2ipv4(const char *src, void *dst) {
     /* uint32_t tv[4] = {0}, idx = 0; */
     /* size_t i, n = strlen(addr); */
     /* for (i = 0; i < n; i++) { */
@@ -245,12 +245,12 @@ bool str2ipv4(const char *addr, char *val) {
     /*     val[i] = (char)(tv[i]); */
     /* } */
     /* return true; */
-    return inet_pton(AF_INET, addr, val) == 1;
+    return inet_pton(AF_INET, src, dst) == 1;
 }
 
 // convert ipv6 address to binary form, `val` should be a 16 byte buffer.
-bool str2ipv6(char *addr, char *val) {
-    return inet_pton(AF_INET6, addr, val) == 1;
+bool str2ipv6(const char *src, void *dst) {
+    return inet_pton(AF_INET6, src, dst) == 1;
 }
 
 int dot2lenlabel(char *human, char *label) {
