@@ -100,6 +100,7 @@
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
 
+#define KNI_MBUF_MAX 2048
 #define KNI_QUEUE_SIZE 2048
 
 #ifdef IP_FRAG

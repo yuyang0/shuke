@@ -29,22 +29,6 @@
 #define TX_HTHRESH			0  /**< Default values of TX host threshold reg. */
 #define TX_WTHRESH			0  /**< Default values of TX write-back threshold reg. */
 
-/*
- * This expression is used to calculate the number of mbufs needed
- * depending on user input, taking  into account memory for rx and
- * tx hardware rings, cache per lcore and mtable per port per lcore.
- * RTE_MAX is used to ensure that NB_MBUF never goes below a minimum
- * value of 8192
- */
-#define NB_MBUF RTE_MAX(                                  \
-        (nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +	\
-         nb_ports*nb_lcores*MAX_PKT_BURST +               \
-         nb_ports*n_tx_queue*RTE_TEST_TX_DESC_DEFAULT +		\
-         nb_lcores*MEMPOOL_CACHE_SIZE),                   \
-        (unsigned)8192)
-
-/* #define NB_MBUF 8192 */
-
 /* Static global variables used within this file. */
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
@@ -1002,7 +986,7 @@ initDpdkModule() {
     unsigned nb_ports;
     uint16_t queueid;
     unsigned lcore_id;
-    uint32_t n_tx_queue, nb_lcores;
+    uint32_t nb_tx_queue, nb_lcores;
     uint8_t portid, nb_rx_queue, socketid;
 
     /* parse application arguments (after the EAL ones) */
@@ -1034,13 +1018,13 @@ initDpdkModule() {
         /*
          * every core should has a tx queue except master core
          */
-        n_tx_queue = (uint32_t )(pinfo->nr_lcore);
-        if (n_tx_queue > MAX_TX_QUEUE_PER_PORT)
-            n_tx_queue = MAX_TX_QUEUE_PER_PORT;
+        nb_tx_queue = (uint32_t )(pinfo->nr_lcore);
+        if (nb_tx_queue > MAX_TX_QUEUE_PER_PORT)
+            nb_tx_queue = MAX_TX_QUEUE_PER_PORT;
         LOG_INFO(DPDK, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
-                 portid, nb_rx_queue, (unsigned)n_tx_queue );
+                 portid, nb_rx_queue, (unsigned)nb_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
-                                    (uint16_t)n_tx_queue, &default_port_conf);
+                                    (uint16_t)nb_tx_queue, &default_port_conf);
         if (ret < 0)
             rte_exit(EXIT_FAILURE,
                      "Cannot configure device: err=%d, port=%d\n",
@@ -1055,7 +1039,16 @@ initDpdkModule() {
         LOG_INFO(DPDK, "port %d mac address: %s.", portid, sk.port_info[portid]->eth_addr_s);
 
         /* init memory */
-        ret = init_mem(NB_MBUF);
+        unsigned nb_mbuf = RTE_MAX(
+            (nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +
+             nb_ports*nb_lcores*MAX_PKT_BURST +
+             nb_ports*nb_tx_queue*RTE_TEST_TX_DESC_DEFAULT +
+             nb_lcores*MEMPOOL_CACHE_SIZE  +
+             nb_ports*KNI_MBUF_MAX     +
+             nb_ports*KNI_QUEUE_SIZE),
+            (unsigned)8192);
+        ret = init_mem(nb_mbuf);
+
         if (ret < 0)
             rte_exit(EXIT_FAILURE, "init_mem failed\n");
 
