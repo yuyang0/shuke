@@ -10,10 +10,6 @@ else
 MACROS += -D SK_LOG_DP_LEVEL=RTE_LOG_INFO
 endif
 
-ifdef ONLY_UDP
-MACROS += -DONLY_UDP
-endif
-
 ifdef IP_FRAG
 MACROS += -DIP_FRAG
 endif

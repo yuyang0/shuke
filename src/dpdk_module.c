@@ -674,9 +674,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     struct ipv4_hdr *ipv4_h = NULL;
     struct ipv6_hdr *ipv6_h = NULL;
     struct udp_hdr  *udp_h = NULL;
-#ifndef ONLY_UDP
     struct tcp_hdr  *tcp_h = NULL;
-#endif
 #ifdef IP_FRAG
     int mtu;
 #endif
@@ -700,11 +698,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 send_single_packet(qconf, m, portid);
                 return;
             }
-#ifndef ONLY_UDP
-            sk_kni_enqueue(portid, m);
-#else
-            rte_pktmbuf_free(m);
-#endif
+            if (!sk.only_udp) sk_kni_enqueue(portid, m);
+            else rte_pktmbuf_free(m);
             return;
         case ETHER_TYPE_IPv4:
             is_ipv4 = true;
@@ -743,8 +738,9 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 goto invalid;
             }
             break;
-#ifndef ONLY_UDP
         case IPPROTO_TCP:
+            if(sk.only_udp) goto invalid;
+
             tcp_h = (struct tcp_hdr *) (l3_h + m->l3_len);
             // check the tcp port
             if (rte_be_to_cpu_16(tcp_h->dst_port) != sk.port) {
@@ -753,7 +749,6 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             }
             sk_kni_enqueue(portid, m);
             return;
-#endif
         default:
             LOG_DEBUG(DPDK, "invalid l4 proto");
             goto invalid;
@@ -770,7 +765,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     n = processUDPDnsQuery(udp_data, udp_data_len, udp_data,
                            rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
                            is_ipv4, qconf->node, qconf->lcore_id);
-    if(n == ERR_CODE) goto invalid;
+    if(n == ERR_CODE) goto dropped;
 
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
@@ -837,9 +832,10 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 #endif
     return;
 
-invalid:
+dropped:
     // LOG_DEBUG(DPDK, "drop packet.");
     ++qconf->nr_dropped;
+invalid:
     rte_pktmbuf_free(m);
 }
 
@@ -930,9 +926,9 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             portid = (uint8_t )qconf->port_id_list[i];
             queueid = (uint8_t )qconf->queue_id_list[portid];
 
-#ifndef ONLY_UDP
-            sk_kni_process(portid, queueid, pkts_burst, MAX_PKT_BURST);
-#endif
+            if (!sk.only_udp) {
+                sk_kni_process(portid, queueid, pkts_burst, MAX_PKT_BURST);
+            }
 
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
             if (nb_rx == 0)

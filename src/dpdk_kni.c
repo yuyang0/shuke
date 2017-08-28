@@ -2,8 +2,6 @@
 // Created by yangyu on 17-6-15.
 //
 
-#ifndef ONLY_UDP
-
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -277,5 +275,3 @@ cleanup_kni_module()
     // rte_eth_dev_stop(port_id);
     return 0;
 }
-
-#endif

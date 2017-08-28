@@ -854,12 +854,10 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         }
     }
 
-#ifndef ONLY_UDP
     if (! sk.only_udp) {
         // run tcp dns server cron
         tcpServerCron(el, id, (void *)sk.tcp_srv);
     }
-#endif
 
     return TIME_INTERVAL;
 }
@@ -1590,9 +1588,7 @@ int main(int argc, char *argv[]) {
     sk.force_quit = false;
     initDpdkModule();
 
-#ifndef ONLY_UDP
     if (!sk.only_udp) init_kni_module();
-#endif
 
     rcu_register_thread();
 
@@ -1600,7 +1596,6 @@ int main(int argc, char *argv[]) {
 
     startDpdkThreads();
 
-#ifndef ONLY_UDP
     if (! sk.only_udp) {
         kni_ifconfig_all();
 
@@ -1609,13 +1604,9 @@ int main(int argc, char *argv[]) {
         sk.tcp_srv = tcpServerCreate();
         assert(sk.tcp_srv);
     }
-#endif
-
     aeMain(sk.el);
 
-#ifndef ONLY_UDP
     if (! sk.only_udp) cleanup_kni_module();
-#endif
 
     cleanupDpdkModule();
 

@@ -497,17 +497,17 @@ static sds genInfoString(char *section) {
         prev_nr_req = nr_req;
         prev_nr_dropped = nr_dropped;
 
-#ifndef ONLY_UDP
-        s = sdscat(s, "\r\n");
-        s = sdscatprintf(s,
-                         "# Tcp stats\r\n"
-                         "num_tcp_conn: %llu\r\n"
-                         "total_tcp_conn: %llu\r\n"
-                         "rejected_tcp_conn: %llu\r\n",
-                         (long long unsigned)sk.num_tcp_conn,
-                         (long long unsigned)sk.total_tcp_conn,
-                         (long long unsigned)sk.rejected_tcp_conn);
-#endif
+        if (!sk.only_udp) {
+            s = sdscat(s, "\r\n");
+            s = sdscatprintf(s,
+                             "# Tcp stats\r\n"
+                             "num_tcp_conn: %llu\r\n"
+                             "total_tcp_conn: %llu\r\n"
+                             "rejected_tcp_conn: %llu\r\n",
+                             (long long unsigned)sk.num_tcp_conn,
+                             (long long unsigned)sk.total_tcp_conn,
+                             (long long unsigned)sk.rejected_tcp_conn);
+        }
 
         struct rte_eth_stats eth_stats;
         for (int i = 0; i < sk.nr_ports; i++) {
