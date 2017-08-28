@@ -181,7 +181,7 @@ static int tcpBindAddrs(tcpServer *srv) {
             return ERR_CODE;
         }
 
-        LOG_DEBUG(TCP, "dns tcp server listening %s.", bindaddr[j]);
+        LOG_DEBUG(TCP, "dns tcp server listening %s:%d.", bindaddr[j], port);
 
         anetNonBlock(NULL, fds[*count]);
         (*count)++;
