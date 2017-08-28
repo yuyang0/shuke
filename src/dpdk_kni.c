@@ -18,7 +18,6 @@
 
 typedef struct {
     struct rte_kni *kni;
-    struct rte_ring *kni_rp;
 
     /* number of pkts received from NIC, and sent to KNI */
     uint64_t rx_packets;
@@ -171,32 +170,69 @@ kni_alloc(uint8_t port_id, struct rte_mempool *mbuf_pool)
     return 0;
 }
 
-static int
-kni_process_tx(uint8_t port_id, uint16_t queue_id,
-               struct rte_mbuf **pkts_burst, unsigned count)
+/* Send burst of packets on an output interface */
+static inline int
+kni_send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
 {
-    (void)queue_id;
-    sk_kni_conf_t *kconf = kni_conf_list[port_id];
-    /* read packet from kni ring(phy port) and transmit to kni */
-    uint16_t nb_tx, nb_kni_tx;
-    nb_tx = rte_ring_dequeue_burst(kconf->kni_rp, (void **)pkts_burst, count, NULL);
 
-    /* NB.
-     * if nb_tx is 0,it must call rte_kni_tx_burst
-     * must Call regularly rte_kni_tx_burst(kni, NULL, 0).
-     * detail https://embedded.communities.intel.com/thread/6668
-     */
-    nb_kni_tx = rte_kni_tx_burst(kconf->kni, pkts_burst, nb_tx);
-    rte_kni_handle_request(kconf->kni);
-    if(nb_kni_tx < nb_tx) {
-        uint16_t i;
-        for(i = nb_kni_tx; i < nb_tx; ++i)
-            rte_pktmbuf_free(pkts_burst[i]);
+    sk_kni_conf_t *kconf = kni_conf_list[port];
+    struct rte_mbuf **m_table;
+    int nb_kni_tx = 0;
 
-        kconf->rx_dropped += (nb_tx - nb_kni_tx);
+    m_table = (struct rte_mbuf **)qconf->kni_tx_mbufs[port].m_table;
+    nb_kni_tx = rte_kni_tx_burst(kconf->kni, m_table, n);
+    if (unlikely(nb_kni_tx < n)) {
+        for (int i = nb_kni_tx; i < n; ++i) {
+            rte_pktmbuf_free(m_table[i]);
+        }
     }
 
-    kconf->rx_packets += nb_kni_tx;
+    qconf->kni_tx_mbufs[port].len = 0;
+    return nb_kni_tx;
+}
+
+/* Enqueue a single packet, and send burst if queue is filled */
+int
+kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port)
+{
+    int ret = 0;
+    uint16_t len;
+
+    len = qconf->kni_tx_mbufs[port].len;
+    qconf->kni_tx_mbufs[port].m_table[len] = m;
+    len++;
+
+    /* enough pkts to be sent */
+    if (unlikely(len == MAX_PKT_BURST)) {
+        kni_send_burst(qconf, MAX_PKT_BURST, port);
+        len = 0;
+    }
+
+    qconf->kni_tx_mbufs[port].len = len;
+    return ret;
+}
+
+static int
+kni_process_tx(lcore_conf_t *qconf, uint8_t port_id)
+{
+    sk_kni_conf_t *kconf = kni_conf_list[port_id];
+    /* read packet from kni ring(phy port) and transmit to kni */
+    uint16_t nb_tx=0;
+    int nb_kni_tx=0;
+    nb_tx = qconf->kni_tx_mbufs[port_id].len;
+    if (nb_tx > 0) {
+        nb_kni_tx = kni_send_burst(qconf,
+                                   qconf->kni_tx_mbufs[port_id].len,
+                                   port_id);
+        qconf->kni_tx_mbufs[port_id].len = 0;
+        if(nb_kni_tx < nb_tx) {
+            kconf->rx_dropped += (nb_tx - nb_kni_tx);
+        }
+        kconf->rx_packets += nb_kni_tx;
+
+        LOG_DEBUG(KNI, "port %d got %d packets and send %d packets to kni.", port_id, nb_tx, nb_kni_tx);
+    }
+    rte_kni_handle_request(kconf->kni);
     return 0;
 }
 
@@ -209,8 +245,10 @@ kni_process_rx(uint8_t port_id, uint16_t queue_id,
 
     /* read packet from kni, and transmit to phy port */
     nb_kni_rx = rte_kni_rx_burst(kconf->kni, pkts_burst, count);
+
     if (nb_kni_rx > 0) {
         nb_rx = rte_eth_tx_burst(port_id, queue_id, pkts_burst, nb_kni_rx);
+        LOG_DEBUG(KNI, "recieve %d packets from KNI and send %d packet to port %d, queue %d.", nb_kni_rx, nb_rx, port_id, queue_id);
         if (nb_rx < nb_kni_rx) {
             uint16_t i;
             for(i = nb_rx; i < nb_kni_rx; ++i)
@@ -225,29 +263,17 @@ kni_process_rx(uint8_t port_id, uint16_t queue_id,
 }
 
 void
-sk_kni_process(uint8_t port_id, uint16_t queue_id,
-               struct rte_mbuf **pkts_burst, unsigned count)
+sk_kni_process(lcore_conf_t *qconf, uint8_t port_id, uint16_t queue_id, struct rte_mbuf **pkts_burst, unsigned count)
 {
-    kni_process_tx(port_id, queue_id, pkts_burst, count);
+    kni_process_tx(qconf, port_id);
     kni_process_rx(port_id, queue_id, pkts_burst, count);
-}
-
-/* enqueue the packet, and own it */
-int sk_kni_enqueue(uint8_t portid, struct rte_mbuf *pkt)
-{
-    sk_kni_conf_t *kconf = kni_conf_list[portid];
-    int ret = rte_ring_enqueue(kconf->kni_rp, pkt);
-    if (ret < 0)
-        rte_pktmbuf_free(pkt);
-
-    return 0;
 }
 
 /* Initialize KNI subsystem */
 void
-sk_init_kni_module(unsigned socket_id, struct rte_mempool *mbuf_pool)
+sk_init_kni_module(struct rte_mempool *mbuf_pool)
 {
-    rte_kni_init(sk.nr_ports);
+    rte_kni_init(rte_eth_dev_count());
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
         assert(kni_conf_list[portid] == NULL);
@@ -260,9 +286,6 @@ sk_init_kni_module(unsigned socket_id, struct rte_mempool *mbuf_pool)
 
         char ring_name[RTE_KNI_NAMESIZE];
         snprintf((char*)ring_name, RTE_KNI_NAMESIZE, "kni_ring_%u", portid);
-
-        kconf->kni_rp = rte_ring_create(ring_name, KNI_QUEUE_SIZE,
-                                        socket_id, RING_F_SC_DEQ);
     }
 }
 

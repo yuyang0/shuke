@@ -682,7 +682,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 send_single_packet(qconf, m, portid);
                 return;
             }
-            if (!sk.only_udp) sk_kni_enqueue(portid, m);
+            if (!sk.only_udp) kni_send_single_packet(qconf, m ,portid);
             else rte_pktmbuf_free(m);
             return;
         case ETHER_TYPE_IPv4:
@@ -731,7 +731,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
                 LOG_DEBUG(DPDK, "invalid tcp port");
                 goto invalid;
             }
-            sk_kni_enqueue(portid, m);
+            LOG_DEBUG(DPDK, "port %d got a tcp packet.", portid);
+            kni_send_single_packet(qconf, m ,portid);
             return;
         default:
             LOG_DEBUG(DPDK, "invalid l4 proto");
@@ -911,7 +912,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             queueid = (uint8_t )qconf->queue_id_list[portid];
 
             if (!sk.only_udp) {
-                sk_kni_process(portid, queueid, pkts_burst, MAX_PKT_BURST);
+                sk_kni_process(qconf, portid, queueid, pkts_burst, MAX_PKT_BURST);
             }
 
             nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
@@ -933,8 +934,12 @@ initDpdkEal() {
     int ret;
     char master_lcore_cmd[128];
     char log_cmd[128];
+    int log_level = RTE_LOG_INFO;
+    if ((int)str2loglevel(sk.logLevelStr) < log_level) {
+        log_level = str2loglevel(sk.logLevelStr);
+    }
     snprintf(master_lcore_cmd, 128, "--master-lcore=%d", sk.master_lcore_id);
-    snprintf(log_cmd, 128, "--log-level=%d", str2loglevel(sk.logLevelStr));
+    snprintf(log_cmd, 128, "--log-level=%d", log_level);
     /* initialize the rte env first*/
     char *argv[] = {
             "",
@@ -1003,7 +1008,8 @@ initDpdkModule() {
     nb_ports = rte_eth_dev_count();
 
     nb_lcores = rte_lcore_count();
-    LOG_INFO(DPDK, "found %d cores, master cores: %d, %d", nb_lcores, rte_get_master_lcore(), rte_lcore_id());
+    LOG_INFO(DPDK, "found %d cores, master cores: %d, %d",
+             nb_lcores, rte_get_master_lcore(), rte_lcore_id());
 
 
     /* initialize all ports */
@@ -1035,8 +1041,11 @@ initDpdkModule() {
         }
 
         rte_eth_macaddr_get(portid, &sk.port_info[portid]->eth_addr);
-        ether_format_addr(sk.port_info[portid]->eth_addr_s, ETHER_ADDR_FMT_SIZE, &sk.port_info[portid]->eth_addr);
-        LOG_INFO(DPDK, "port %d mac address: %s.", portid, sk.port_info[portid]->eth_addr_s);
+        ether_format_addr(sk.port_info[portid]->eth_addr_s,
+                          ETHER_ADDR_FMT_SIZE,
+                          &sk.port_info[portid]->eth_addr);
+        LOG_INFO(DPDK, "port %d mac address: %s.", portid,
+                 sk.port_info[portid]->eth_addr_s);
 
         /* init memory */
         unsigned nb_mbuf = RTE_MAX(
@@ -1169,7 +1178,7 @@ void
 init_kni_module(void) {
     unsigned socket_id = sk.master_numa_id;
     struct rte_mempool *mbuf_pool = pktmbuf_pool[socket_id];
-    sk_init_kni_module(socket_id, mbuf_pool);
+    sk_init_kni_module(mbuf_pool);
 }
 
 /*

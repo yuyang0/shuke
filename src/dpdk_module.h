@@ -135,6 +135,7 @@ typedef struct lcore_conf {
     uint16_t queue_id_list[RTE_MAX_ETHPORTS];
 
     struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
+    struct mbuf_table kni_tx_mbufs[RTE_MAX_ETHPORTS];
 
     struct numaNode_s *node;
     uint16_t ipv4_packet_id;
@@ -182,14 +183,15 @@ uint64_t rte_tsc_time();
 /*----------------------------------------------
  *     kni
  *---------------------------------------------*/
-void sk_init_kni_module(unsigned socket_id, struct rte_mempool *mbuf_pool);
+void sk_init_kni_module(struct rte_mempool *mbuf_pool);
 void init_kni_module(void);
 int cleanup_kni_module();
 int kni_ifconfig_all();
 
-void sk_kni_process(uint8_t port_id, uint16_t queue_id,
-                    struct rte_mbuf **pkts_burst, unsigned count);
-int sk_kni_enqueue(uint8_t portid, struct rte_mbuf *pkt);
+int kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port);
+
+void
+sk_kni_process(lcore_conf_t *qconf, uint8_t port_id, uint16_t queue_id, struct rte_mbuf **pkts_burst, unsigned count);
 
 #ifdef SK_TEST
 void initTestDpdkEal();
