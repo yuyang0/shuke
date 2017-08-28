@@ -4,6 +4,7 @@
 
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -38,38 +39,47 @@ static int kni_change_mtu(uint8_t port_id, unsigned new_mtu);
 static int kni_config_network_interface(uint8_t port_id, uint8_t if_up);
 
 static int
-kni_ifconfig(char *ifname, char *ipaddr) {
-
+kni_ifconfig(int portid, char *ipaddr) {
+    sk_kni_conf_t *kconf = kni_conf_list[portid];
+    port_info_t *pinfo = sk.port_info[portid];
+    char *ifname = kconf->veth_name;
     struct ifreq ifr;
     struct sockaddr_in* addr = (struct sockaddr_in*)&ifr.ifr_addr;
     int sockfd;                     /* socket fd we use to manipulate stuff with */
-    // int selector;
 
     int ret;
 
     /* Create a channel to the NET kernel. */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    /* get interface name */
+    /* set interface name */
     strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
 
-    addr->sin_family = AF_INET;
-    inet_pton(AF_INET, ipaddr, &addr->sin_addr);
-
-    ret = ioctl(sockfd, SIOCSIFADDR, &ifr);
+    /* configure mac address */
+    memcpy(ifr.ifr_hwaddr.sa_data, pinfo->eth_addr.addr_bytes, ETHER_ADDR_LEN);
+    ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
+    ret = ioctl(sockfd, SIOCSIFHWADDR, &ifr);
     if (ret < 0) {
-        LOG_ERROR(KNI, "set address error %s\n", strerror(errno));
+        LOG_ERROR(KNI, "set mac address error %s\n", strerror(errno));
         exit(-1);
     }
+    /* config ipv4 address */
+    addr->sin_family = AF_INET;
+    inet_pton(AF_INET, ipaddr, &addr->sin_addr);
+    ret = ioctl(sockfd, SIOCSIFADDR, &ifr);
+    if (ret < 0) {
+        LOG_ERROR(KNI, "set ipv4 address error %s\n", strerror(errno));
+        exit(-1);
+    }
+    /* get flags */
     ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
-
     if (ret < 0) {
         LOG_ERROR(KNI, "get flags error %s\n", strerror(errno));
         exit(-1);
     }
     ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
-    // ifr.ifr_flags &= ~selector;  // unset something
 
+    /* set flags */
     ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
     if (ret < 0) {
         LOG_ERROR(KNI, "set flags error %s\n", strerror(errno));
@@ -83,8 +93,7 @@ int kni_ifconfig_all()
 {
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        sk_kni_conf_t *kconf = kni_conf_list[portid];
-        kni_ifconfig(kconf->veth_name, sk.bindaddr[i]);
+        kni_ifconfig(portid, sk.bindaddr[i]);
     }
     return OK_CODE;
 }
