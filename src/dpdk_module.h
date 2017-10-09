@@ -156,6 +156,12 @@ typedef struct lcore_conf {
     int64_t received_req;
 } __rte_cache_aligned lcore_conf_t;
 
+struct hw_features {
+    uint8_t rx_csum;
+    uint8_t tx_csum_ip;
+    uint8_t tx_csum_l4;
+};
+
 typedef struct port_info {
     // ethernet address for this port
     struct ether_addr eth_addr;
@@ -167,6 +173,7 @@ typedef struct port_info {
     int *lcore_list;
 
     uint32_t ipv4_addr;
+    struct hw_features hw_features;
 } __rte_cache_aligned port_info_t;
 
 extern struct rte_eth_conf default_port_conf;

@@ -9,75 +9,10 @@
 
 #define MAX_JUMBO_PKT_LEN  9600
 #define MEMPOOL_CACHE_SIZE 256
-/*
- * RX and TX Prefetch, Host, and Write-back threshold values should be
- * carefully set for optimal performance. Consult the network
-
- * controller's datasheet and supporting DPDK documentation for guidance
- * on how these parameters should be set.
- */
-#define RX_PTHRESH 			8 /**< Default values of RX prefetch threshold reg. */
-#define RX_HTHRESH 			8 /**< Default values of RX host threshold reg. */
-#define RX_WTHRESH 			4 /**< Default values of RX write-back threshold reg. */
-
-/*
- * These default values are optimized for use with the Intel(R) 82599 10 GbE
- * Controller and the DPDK ixgbe PMD. Consider using other values for other
- * network controllers and/or network drivers.
- */
-#define TX_PTHRESH 			36 /**< Default values of TX prefetch threshold reg. */
-#define TX_HTHRESH			0  /**< Default values of TX host threshold reg. */
-#define TX_WTHRESH			0  /**< Default values of TX write-back threshold reg. */
 
 /* Static global variables used within this file. */
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
-
-struct rte_eth_conf default_port_conf = {
-    .rxmode = {
-        .mq_mode = ETH_MQ_RX_RSS,
-        .max_rx_pkt_len = ETHER_MAX_LEN,
-        .split_hdr_size = 0,
-        .header_split   = 0, /**< Header Split disabled */
-        .hw_ip_checksum = 1, /**< IP checksum offload enabled */
-        .hw_vlan_filter = 0, /**< VLAN filtering disabled */
-        .jumbo_frame    = 0, /**< Jumbo Frame Support disabled */
-        .hw_strip_crc   = 1, /**< CRC stripped by hardware */
-    },
-    .rx_adv_conf = {
-        .rss_conf = {
-            .rss_key = NULL,
-            .rss_hf = ETH_RSS_TCP | ETH_RSS_UDP | ETH_RSS_IP | ETH_RSS_L2_PAYLOAD,
-        },
-    },
-    .txmode = {
-        .mq_mode = ETH_MQ_TX_NONE,
-    },
-};
-
-static const struct rte_eth_rxconf rx_conf = {
-    .rx_thresh = {
-        .pthresh = 		RX_PTHRESH, /* RX prefetch threshold reg */
-        .hthresh = 		RX_HTHRESH, /* RX host threshold reg */
-        .wthresh = 		RX_WTHRESH, /* RX write-back threshold reg */
-    },
-    .rx_free_thresh = 		32,
-};
-
-static const struct rte_eth_txconf tx_conf = {
-    .tx_thresh = {
-        .pthresh = 		TX_PTHRESH, /* TX prefetch threshold reg */
-        .hthresh = 		TX_HTHRESH, /* TX host threshold reg */
-        .wthresh = 		TX_WTHRESH, /* TX write-back threshold reg */
-    },
-    .tx_free_thresh = 		0, /* Use PMD default values */
-    .tx_rs_thresh = 		0, /* Use PMD default values */
-    /*
-     * As the example won't handle mult-segments and offload cases,
-     * set the flag by default.
-     */
-    .txq_flags = 			0x0,
-};
 
 static struct rte_mempool * pktmbuf_pool[NB_SOCKETS];
 
@@ -190,20 +125,6 @@ init_per_lcore() {
     qconf->tsc_hz = rte_get_tsc_hz();
     qconf->start_us = (uint64_t )ustime();
     qconf->start_tsc = rte_rdtsc();
-}
-
-static int check_cksum_offload(int portid) {
-    struct rte_eth_dev_info dev_info;
-    rte_eth_dev_info_get((uint8_t )portid, &dev_info);
-    if ((dev_info.tx_offload_capa & DEV_TX_OFFLOAD_IPV4_CKSUM) == 0) {
-        LOG_WARN(DPDK, "port %d doesn't support ipv4 cksum offload.");
-        return -1;
-    }
-    if ((dev_info.tx_offload_capa & DEV_TX_OFFLOAD_UDP_CKSUM) == 0) {
-        LOG_WARN(DPDK, "port %d doesn't support udp cksum offload.");
-        return -1;
-    }
-    return 0;
 }
 
 static int
@@ -416,6 +337,8 @@ verify_cksum(struct rte_mbuf *m) {
         /* checksum by sw. It has to take care to recalculate the cksum */
         /* if the packet is transmitted (either by sw or using tx offload) */
         break;
+    default:
+        break;
     }
     // check l4 cksum
     switch (m->ol_flags & PKT_RX_L4_CKSUM_MASK) {
@@ -425,6 +348,8 @@ verify_cksum(struct rte_mbuf *m) {
         // should verify the l4 cksum by software
         break;
     case PKT_RX_L4_CKSUM_NONE:
+        break;
+    default:
         break;
     }
     return ok;
@@ -644,7 +569,8 @@ static inline __attribute__((always_inline)) void
 __handle_packet(struct rte_mbuf *m, uint8_t portid,
                  lcore_conf_t *qconf)
 {
-    if (!verify_cksum(m)) {
+    port_info_t *pinfo = sk.port_info[portid];
+    if (pinfo->hw_features.rx_csum && !verify_cksum(m)) {
         LOG_DEBUG(DPDK, "invalid cksum");
         goto invalid;
     }
@@ -688,6 +614,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         case ETHER_TYPE_IPv4:
             is_ipv4 = true;
             ipv4_h = (struct ipv4_hdr *)l3_h;
+            if (! pinfo->hw_features.rx_csum) {
+                // using software to verify cksum
+                if (rte_ipv4_cksum(ipv4_h) != 0xFFFF) {
+                    LOG_DEBUG(DPDK, "wrong ipv4 checksum, drop it.");
+                    goto invalid;
+                }
+            }
             m->l3_len = (ipv4_h->version_ihl & IPV4_HDR_IHL_MASK) * IPV4_IHL_MULTIPLIER;
 #ifdef IP_FRAG
             m = ipv4_reassemble(qconf, m, &eth_h, &ipv4_h);
@@ -716,6 +649,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     switch (ipproto) {
         case IPPROTO_UDP:
             udp_h = (struct udp_hdr *) (l3_h + m->l3_len);
+            if (! pinfo->hw_features.rx_csum) {
+                // using software to verify cksum
+                if (get_udptcp_checksum(l3_h, udp_h, is_ipv4) != 0xFFFF) {
+                    LOG_DEBUG(DPDK, "wrong udp checksum, drop it.");
+                    goto invalid;
+                }
+            }
             // check the udp port
             if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
                 LOG_DEBUG(DPDK, "invalid udp port");
@@ -726,6 +666,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             if(sk.only_udp) goto invalid;
 
             tcp_h = (struct tcp_hdr *) (l3_h + m->l3_len);
+            if (! pinfo->hw_features.rx_csum) {
+                // using software to verify cksum
+                if (get_udptcp_checksum(l3_h, tcp_h, is_ipv4) != 0xFFFF) {
+                    LOG_DEBUG(DPDK, "wrong udp checksum, drop it.");
+                    goto invalid;
+                }
+            }
             // check the tcp port
             if (rte_be_to_cpu_16(tcp_h->dst_port) != sk.port) {
                 LOG_DEBUG(DPDK, "invalid tcp port");
@@ -968,9 +915,13 @@ initDpdkEal() {
     config_log();
 }
 
-int
-initDpdkModule() {
+void prepare_eth_port_conf(struct rte_eth_conf *port_conf,
+                           struct rte_eth_dev_info *dev_info,
+                           port_info_t *pinfo) {
+    memset(port_conf, 0, sizeof(*port_conf));
 
+    port_conf->rxmode.mq_mode = ETH_MQ_RX_RSS;
+    port_conf->rx_adv_conf.rss_conf.rss_hf = ETH_RSS_PROTO_MASK;
     /* setting the rss key */
     // static const uint8_t key[] = {
     //     0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, /* 10 */
@@ -981,31 +932,82 @@ initDpdkModule() {
     //     0x05, 0x05  /* 60 - 8 */
     // };
     //
-    // default_port_conf.rx_adv_conf.rss_conf.rss_key = (uint8_t *)&key;
-    // default_port_conf.rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
+    // port_conf->rx_adv_conf.rss_conf.rss_key = (uint8_t *)&key;
+    // port_conf->rx_adv_conf.rss_conf.rss_key_len = sizeof(key);
 
+    if (sk.jumbo_on) {
+        port_conf->rxmode.jumbo_frame = 1;
+        port_conf->rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
+    }
+
+    /* Set Rx VLAN stripping */
+    if (dev_info->rx_offload_capa & DEV_RX_OFFLOAD_VLAN_STRIP) {
+        port_conf->rxmode.hw_vlan_strip = 1;
+    }
+
+    port_conf->rxmode.hw_strip_crc = 1;
+    /* Set Rx checksum checking */
+    if ((dev_info->rx_offload_capa & DEV_RX_OFFLOAD_IPV4_CKSUM) &&
+        (dev_info->rx_offload_capa & DEV_RX_OFFLOAD_UDP_CKSUM) &&
+        (dev_info->rx_offload_capa & DEV_RX_OFFLOAD_TCP_CKSUM)) {
+        LOG_INFO(DPDK, "PORT %d RX checksum offload supported", pinfo->port_id);
+        port_conf->rxmode.hw_ip_checksum = 1;
+        pinfo->hw_features.rx_csum = 1;
+    }
+
+    if ((dev_info->tx_offload_capa & DEV_TX_OFFLOAD_IPV4_CKSUM)) {
+        LOG_INFO(DPDK, "PORT %d TX ip checksum offload supported", pinfo->port_id);
+        pinfo->hw_features.tx_csum_ip = 1;
+    }
+
+    if ((dev_info->tx_offload_capa & DEV_TX_OFFLOAD_UDP_CKSUM) &&
+        (dev_info->tx_offload_capa & DEV_TX_OFFLOAD_TCP_CKSUM)) {
+        LOG_INFO(DPDK, "PORT %d TX TCP&UDP checksum offload supported", pinfo->port_id);
+        pinfo->hw_features.tx_csum_l4 = 1;
+    }
+}
+
+void prepare_eth_rx_tx_conf(struct rte_eth_dev_info *dev_info) {
+    dev_info->default_txconf.txq_flags = ETH_TXQ_FLAGS_NOMULTMEMP |
+                                        ETH_TXQ_FLAGS_NOREFCOUNT;
+
+    /* Disable features that are not supported by port's HW */
+    if (!(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_UDP_CKSUM)) {
+        dev_info->default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOXSUMUDP;
+    }
+
+    if (!(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_TCP_CKSUM)) {
+        dev_info->default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOXSUMTCP;
+    }
+
+    if (!(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_VLAN_INSERT)) {
+        dev_info->default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOVLANOFFL;
+    }
+
+    if (!(dev_info->tx_offload_capa & DEV_TX_OFFLOAD_VLAN_INSERT)) {
+        dev_info->default_txconf.txq_flags |= ETH_TXQ_FLAGS_NOVLANOFFL;
+    }
+}
+
+int
+initDpdkModule() {
     lcore_conf_t *qconf;
     struct rte_eth_dev_info dev_info;
-    struct rte_eth_txconf *txconf;
+    struct rte_eth_conf port_conf;
     int ret;
-    unsigned nb_ports;
+    unsigned nb_dev_ports;
     uint16_t queueid;
     unsigned lcore_id;
     uint32_t nb_tx_queue, nb_lcores;
     uint8_t portid, nb_rx_queue, socketid;
 
-    /* parse application arguments (after the EAL ones) */
     if (sk.jumbo_on) {
-        default_port_conf.rxmode.jumbo_frame = 1;
         if ((sk.max_pkt_len < 64) ||
             (sk.max_pkt_len > MAX_JUMBO_PKT_LEN)) {
-            LOG_ERR(DPDK, "Invalid packet length\n");
-            return -1;
+            rte_exit(EXIT_FAILURE, "Invalid packet length\n");
         }
-        default_port_conf.rxmode.max_rx_pkt_len = (uint32_t)sk.max_pkt_len;
     }
-
-    nb_ports = rte_eth_dev_count();
+    nb_dev_ports = rte_eth_dev_count();
 
     nb_lcores = rte_lcore_count();
     LOG_INFO(DPDK, "found %d cores, master cores: %d, %d",
@@ -1015,30 +1017,45 @@ initDpdkModule() {
     /* initialize all ports */
     for (int i = 0; i < sk.nr_ports; i++) {
         portid = (uint8_t )sk.port_ids[i];
+        if (portid >= nb_dev_ports) {
+            rte_exit(EXIT_FAILURE,
+                     "this machine doesn't have port %d\n",
+                     portid);
+        }
         port_info_t *pinfo = sk.port_info[portid];
         /* init port */
         LOG_INFO(DPDK, "Initializing port %d ... ", portid );
-        fflush(stdout);
 
-        nb_rx_queue = (uint8_t )pinfo->nr_lcore;
+        rte_eth_dev_info_get(portid, &dev_info);
+
         /*
-         * every core should has a tx queue except master core
+         * every core should has a rx/tx queue except master core
          */
+        nb_rx_queue = (uint8_t )pinfo->nr_lcore;
         nb_tx_queue = (uint32_t )(pinfo->nr_lcore);
-        if (nb_tx_queue > MAX_TX_QUEUE_PER_PORT)
-            nb_tx_queue = MAX_TX_QUEUE_PER_PORT;
+
+        if (nb_rx_queue > dev_info.max_rx_queues) {
+            rte_exit(EXIT_FAILURE,
+                     "number of rx queue(%d) is bigger than dev's max_rx_queue(%d)\n",
+                     nb_rx_queue,
+                     dev_info.max_rx_queues);
+        }
+        if (nb_tx_queue > dev_info.max_tx_queues) {
+            rte_exit(EXIT_FAILURE,
+                     "number of tx queue(%d) is bigger than dev's max_tx_queue(%d)\n",
+                     nb_tx_queue, dev_info.max_tx_queues);
+        }
+
+        prepare_eth_port_conf(&port_conf, &dev_info, pinfo);
+        prepare_eth_rx_tx_conf(&dev_info);
         LOG_INFO(DPDK, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
                  portid, nb_rx_queue, (unsigned)nb_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
-                                    (uint16_t)nb_tx_queue, &default_port_conf);
+                                    (uint16_t)nb_tx_queue, &port_conf);
         if (ret < 0)
             rte_exit(EXIT_FAILURE,
                      "Cannot configure device: err=%d, port=%d\n",
                      ret, portid);
-
-        if (check_cksum_offload(portid) < 0) {
-            rte_exit(EXIT_FAILURE, "port %d doesn't support cksum offload\n", portid);
-        }
 
         rte_eth_macaddr_get(portid, &sk.port_info[portid]->eth_addr);
         ether_format_addr(sk.port_info[portid]->eth_addr_s,
@@ -1049,12 +1066,12 @@ initDpdkModule() {
 
         /* init memory */
         unsigned nb_mbuf = RTE_MAX(
-            (nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +
-             nb_ports*nb_lcores*MAX_PKT_BURST +
-             nb_ports*nb_tx_queue*RTE_TEST_TX_DESC_DEFAULT +
+            (nb_dev_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +
+             nb_dev_ports*nb_lcores*MAX_PKT_BURST +
+             nb_dev_ports*nb_tx_queue*RTE_TEST_TX_DESC_DEFAULT +
              nb_lcores*MEMPOOL_CACHE_SIZE  +
-             nb_ports*KNI_MBUF_MAX     +
-             nb_ports*KNI_QUEUE_SIZE),
+             nb_dev_ports*KNI_MBUF_MAX     +
+             nb_dev_ports*KNI_QUEUE_SIZE),
             (unsigned)8192);
         ret = init_mem(nb_mbuf);
 
@@ -1078,12 +1095,10 @@ initDpdkModule() {
             LOG_INFO(DPDK, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>",
                      lcore_id, portid, queueid, socketid);
 
-            rte_eth_dev_info_get(portid, &dev_info);
-            txconf = &dev_info.default_txconf;
-            if (default_port_conf.rxmode.jumbo_frame)
-                txconf->txq_flags = 0;
+            // if (default_port_conf.rxmode.jumbo_frame)
+            //     txconf->txq_flags = 0;
             ret = rte_eth_tx_queue_setup(portid, queueid, nb_txd,
-                                         socketid, txconf);
+                                         socketid, &dev_info.default_txconf);
             if (ret < 0)
                 rte_exit(EXIT_FAILURE,
                          "rte_eth_tx_queue_setup: err=%d, "
@@ -1093,7 +1108,7 @@ initDpdkModule() {
                      lcore_id, portid, queueid, socketid);
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
                                          socketid,
-                                         &rx_conf,
+                                         &dev_info.default_rxconf,
                                          pktmbuf_pool[socketid]);
             if (ret < 0)
                 rte_exit(EXIT_FAILURE,
@@ -1108,7 +1123,7 @@ initDpdkModule() {
 #endif
 
     /* start ports */
-    for (portid = 0; portid < nb_ports; portid++) {
+    for (portid = 0; portid < nb_dev_ports; portid++) {
         if ((sk.portmask & (1 << portid)) == 0) {
             continue;
         }
@@ -1129,7 +1144,7 @@ initDpdkModule() {
             rte_eth_promiscuous_enable(portid);
     }
 
-    check_all_ports_link_status((uint8_t)nb_ports, (uint32_t )sk.portmask);
+    check_all_ports_link_status((uint8_t)nb_dev_ports, (uint32_t )sk.portmask);
 
     rte_timer_subsystem_init();
     sk.hz = rte_get_timer_hz();
