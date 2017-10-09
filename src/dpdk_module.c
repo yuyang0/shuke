@@ -461,9 +461,10 @@ ipv6_reassemble(lcore_conf_t *qconf, struct rte_mbuf *m,
  * when you call this function, you must be sure that the packet size is bigger than MTU
  */
 void
-ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port, bool is_ipv4) {
+ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m,
+                 port_info_t *pinfo, bool is_ipv4) {
     struct ether_hdr * origin_eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
-
+    uint8_t port = (uint8_t)pinfo->port_id;
     struct rte_mbuf *new_m;
     uint16_t len;
     int len2;
@@ -507,18 +508,17 @@ ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port, bool is_
         rte_memcpy(eth_hdr, origin_eth_h, sizeof(struct ether_hdr));
         new_m->l2_len = sizeof(struct ether_hdr);
 
-#ifdef SOFT_CKSUM
-        struct ipv4_hdr *ipv4_h = (struct ipv4_hdr*)(eth_hdr+1);
         if (is_ipv4) {
-            new_m->ol_flags &= (~(PKT_TX_IPV4 | PKT_TX_IP_CKSUM));
-            ipv4_h->hdr_checksum = 0;
-            ipv4_h->hdr_checksum = rte_ipv4_cksum(ipv4_h);
+            if (pinfo->hw_features.tx_csum_ip) {
+                new_m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
+            } else {
+                struct ipv4_hdr *ipv4_h = (struct ipv4_hdr*)(eth_hdr+1);
+                new_m->ol_flags &= (~(PKT_TX_IPV4 | PKT_TX_IP_CKSUM));
+                ipv4_h->hdr_checksum = 0;
+                ipv4_h->hdr_checksum = rte_ipv4_cksum(ipv4_h);
+            }
         }
-#else
-        if (is_ipv4) {
-            new_m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
-        }
-#endif
+
         log_packet(new_m);
     }
     len += len2;
@@ -722,11 +722,12 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         ipv4_h->dst_addr = ipv4_addr;
         ipv4_h->total_length = rte_cpu_to_be_16(m->l3_len+m->l4_len+n);
         ipv4_h->hdr_checksum = 0;
-#ifdef SOFT_CKSUM
-        ipv4_h->hdr_checksum = rte_ipv4_cksum(ipv4_h);
-#else
-        m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
-#endif
+
+        if (pinfo->hw_features.tx_csum_ip) {
+            m->ol_flags |= (PKT_TX_IPV4 | PKT_TX_IP_CKSUM);
+        } else {
+            ipv4_h->hdr_checksum = rte_ipv4_cksum(ipv4_h);
+        }
     } else {
         ipv6_h->hop_limits = 64;
         rte_memcpy(ipv6_addr, ipv6_h->dst_addr, 16);
@@ -741,14 +742,15 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     udp_h->dgram_len = rte_cpu_to_be_16(m->l4_len + n);
     /* set checksum parameters for HW offload */
     udp_h->dgram_cksum = 0;
-#ifdef SOFT_CKSUM
-    udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
-    LOG_DEBUG(DPDK, "udp checksum: 0x%x.", udp_h->dgram_cksum);
-#else
-    m->ol_flags |= PKT_TX_UDP_CKSUM;
-    udp_h->dgram_cksum = get_psd_sum(l3_h, is_ipv4, m->ol_flags);
-    LOG_DEBUG(DPDK, "udp psd checksum: 0x%x.", udp_h->dgram_cksum);
-#endif
+
+    if (pinfo->hw_features.tx_csum_l4) {
+        m->ol_flags |= PKT_TX_UDP_CKSUM;
+        udp_h->dgram_cksum = get_psd_sum(l3_h, is_ipv4, m->ol_flags);
+        LOG_DEBUG(DPDK, "udp psd checksum: 0x%x.", udp_h->dgram_cksum);
+    } else {
+        udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
+        LOG_DEBUG(DPDK, "udp checksum: 0x%x.", udp_h->dgram_cksum);
+    }
 
 #ifdef IP_FRAG
     if (likely(mtu + sizeof(struct ether_hdr) >= m->pkt_len)) {
@@ -757,7 +759,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         // we must calculate the udp cksum when ip fragmentation is needed.
         udp_h->dgram_cksum = 0;
         udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
-        ip_fragmentation(qconf, m, portid, is_ipv4);
+        ip_fragmentation(qconf, m, pinfo, is_ipv4);
     }
 #else
     send_single_packet(qconf, m, portid);
