@@ -123,7 +123,7 @@ $(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c .make-prerequisites
 	$(SHUKE_CC) -c $< -o $@
 
 clean:
-	-rm -f $(SHUKE_BUILD_DIR)/shuke-server $(SHUKE_BUILD_DIR)/*.o dnsbench
+	-rm -f $(SHUKE_BUILD_DIR)/shuke-server $(SHUKE_BUILD_DIR)/*.o
 
 .PHONY:clean
 
@@ -156,10 +156,6 @@ $(URCU_STATIC_LIBS): 3rd/liburcu/Makefile
 
 3rd/liburcu/bootstrap:
 	git submodule update --init
-
-
-dnsbench: src/bench.c src/ae.c
-	$(SHUKE_CC) -o $@ $^ $(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(SHUKE_CFLAGS) -DUSE_MALLOC
 
 
 #Libraries of dpdk
