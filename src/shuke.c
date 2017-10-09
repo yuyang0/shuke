@@ -1498,8 +1498,24 @@ int initOtherConfig() {
     /*
      * if master_lcore_id is not set, then use the last lcore id in coremask
      */
-    if (sk.master_lcore_id < 0)
+    if (sk.master_lcore_id < 0) {
         sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
+    } else {
+        /*
+         * make sure master lcore id stay in lcore list
+         */
+        int found = 0;
+        for (int i = 0; i < sk.nr_lcore_ids; ++i) {
+            if (sk.lcore_ids[i] == sk.master_lcore_id) {
+                found = 1;
+                break;
+            }
+        }
+        if (! found) {
+            fprintf(stderr, "error: master lcore id(%d) is not enabled in coremask.\n", sk.master_lcore_id);
+            exit(-1);
+        }
+    }
 
     // parse all port id
     nr_id = 1024;
