@@ -423,9 +423,9 @@ static void daemonize(void) {
 }
 
 static void usage() {
-    printf("-c /path/to/cdns.conf    configure file.\n"
-           "-h                       print this help and exit. \n"
-           "-v                       print version. \n");
+    printf("-c /path/to/shuke.conf    configure file.\n"
+           "-h                        print this help and exit. \n"
+           "-v                        print version. \n");
 }
 
 static void version() {
@@ -492,7 +492,7 @@ static int _getAllZoneFromFile(bool is_first) {
     while((de = dictNext(it)) != NULL) {
         char *dotOrigin = dictGetKey(de);
         char *fname = dictGetVal(de);
-        if (loadZoneFromFile(sk.master_numa_id, fname, &z) == DS_ERR) {
+        if (loadZoneFromFile(sk.master_numa_id, fname, &z) == ERR_CODE) {
             return ERR_CODE;
         } else {
             if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
@@ -525,7 +525,7 @@ int reloadZoneFromFile(zoneReloadContext *t) {
         dot2lenlabel(t->dotOrigin, origin);
         deleteZoneAllNumaNodes(origin);
     } else {
-        if (loadZoneFromFile(sk.master_numa_id, fname, &z) == DS_ERR) {
+        if (loadZoneFromFile(sk.master_numa_id, fname, &z) == ERR_CODE) {
             return ERR_CODE;
         } else {
             if (strcasecmp(z->dotOrigin, t->dotOrigin) != 0) {
@@ -571,15 +571,11 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     // current start position in response buffer.
     int errcode;
     numaNode_t *node = ctx->node;
-    const int AR_INFO_SIZE = 64;
-    const int CPS_INFO_SIZE = 64;
-    arInfo ari[AR_INFO_SIZE];
-    size_t ar_sz = 0;
 
-    compressInfo cps[CPS_INFO_SIZE];
     compressInfo temp = {ctx->name, DNS_HDR_SIZE, ctx->nameLen+1};
-    cps[0] = temp;
-    size_t cps_sz = 1;
+    ctx->cps[0] = temp;
+    ctx->cps_sz = 1;
+    ctx->ari_sz = 0;
 
     RRSet *cname;
     dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, 0};
@@ -591,22 +587,22 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     cname = dnsDictValueGet(dv, DNS_TYPE_CNAME);
     if (cname) {
         hdr.nAnRR = 1;
-        errcode = RRSetCompressPack(ctx, cname, DNS_HDR_SIZE, cps, &cps_sz, CPS_INFO_SIZE, ari, &ar_sz, AR_INFO_SIZE);
-        if (errcode == DS_ERR) {
+        errcode = RRSetCompressPack(ctx, cname, DNS_HDR_SIZE);
+        if (errcode == ERR_CODE) {
             return ERR_CODE;
         }
         // dump NS records of the zone this CNAME record's value belongs to to authority section
         if (!sk.minimize_resp) {
-            char *name = ari[0].name;
-            size_t offset = ari[0].offset;
+            char *name = ctx->ari[0].name;
+            size_t offset = ctx->ari[0].offset;
             LOG_DEBUG(USER1, "name: %s, offset: %d", name, offset);
             zone *ns_z = zoneDictGetZone(node->zd, name);
             if (ns_z) {
                 if (ns_z->ns) {
                     hdr.nNsRR += ns_z->ns->num;
                     size_t nameOffset = offset + strlen(name) - strlen(ns_z->origin);
-                    errcode = RRSetCompressPack(ctx, ns_z->ns, nameOffset, cps, &cps_sz, CPS_INFO_SIZE, ari, &ar_sz, AR_INFO_SIZE);
-                    if (errcode == DS_ERR) {
+                    errcode = RRSetCompressPack(ctx, ns_z->ns, nameOffset);
+                    if (errcode == ERR_CODE) {
                         return ERR_CODE;
                     }
                 }
@@ -617,8 +613,8 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         RRSet *rs = dnsDictValueGet(dv, ctx->qType);
         if (rs) {
             hdr.nAnRR = rs->num;
-            errcode = RRSetCompressPack(ctx, rs, DNS_HDR_SIZE, cps, &cps_sz, CPS_INFO_SIZE, ari, &ar_sz, AR_INFO_SIZE);
-            if (errcode == DS_ERR) {
+            errcode = RRSetCompressPack(ctx, rs, DNS_HDR_SIZE);
+            if (errcode == ERR_CODE) {
                 return ERR_CODE;
             }
         }
@@ -627,8 +623,8 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             if (z->ns && (ctx->qType != DNS_TYPE_NS || strcasecmp(z->origin, ctx->name) != 0)) {
                 hdr.nNsRR += z->ns->num;
                 size_t nameOffset = DNS_HDR_SIZE + ctx->nameLen - strlen(z->origin);
-                errcode = RRSetCompressPack(ctx, z->ns, nameOffset, cps, &cps_sz, CPS_INFO_SIZE, ari, &ar_sz, AR_INFO_SIZE);
-                if (errcode == DS_ERR) {
+                errcode = RRSetCompressPack(ctx, z->ns, nameOffset);
+                if (errcode == ERR_CODE) {
                     return ERR_CODE;
                 }
             }
@@ -636,10 +632,10 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     }
     // MX, NS, SRV records cause additional section processing.
     //TODO avoid duplication
-    for (size_t i = 0; i < ar_sz; i++) {
+    for (size_t i = 0; i < ctx->ari_sz; i++) {
         zone *ar_z;
-        char *name = ari[i].name;
-        size_t offset = ari[i].offset;
+        char *name = ctx->ari[i].name;
+        size_t offset = ctx->ari[i].offset;
 
         // TODO avoid fetch when the name belongs to z
         ar_z = zoneDictGetZone(node->zd, name);
@@ -647,16 +643,16 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         RRSet *ar_a = zoneFetchTypeVal(ar_z, name, DNS_TYPE_A);
         if (ar_a) {
             hdr.nArRR += ar_a->num;
-            errcode = RRSetCompressPack(ctx, ar_a, offset, NULL, NULL, 0, NULL, NULL, 0);
-            if (errcode == DS_ERR) {
+            errcode = RRSetCompressPack(ctx, ar_a, offset);
+            if (errcode == ERR_CODE) {
                 return ERR_CODE;
             }
         }
         RRSet *ar_aaaa = zoneFetchTypeVal(ar_z, name, DNS_TYPE_AAAA);
         if (ar_aaaa) {
             hdr.nArRR += ar_aaaa->num;
-            errcode = RRSetCompressPack(ctx, ar_aaaa, offset, NULL, NULL, 0, NULL, NULL, 0);
-            if (errcode == DS_ERR) {
+            errcode = RRSetCompressPack(ctx, ar_aaaa, offset);
+            if (errcode == ERR_CODE) {
                 return ERR_CODE;
             }
         }
@@ -704,9 +700,8 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     char *name;
     int ret;
 
-
     if (sz < 12) {
-        LOG_WARN(USER1, "receive bad dns query message with only %d bytes, drop it", sz);
+        LOG_DEBUG(USER1, "receive bad dns query message with only %d bytes, drop it", sz);
         // just ignore this packet(don't send response)
         return ERR_CODE;
     }
@@ -773,7 +768,9 @@ end:
     return ctx->cur;
 }
 
-int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *src_addr, uint16_t src_port, bool is_ipv4,
+// TODO: handle the situation when one mbuf is not enough
+int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
+                       char *src_addr, uint16_t src_port, bool is_ipv4,
                        numaNode_t *node, int lcore_id)
 {
     struct context ctx;
@@ -793,8 +790,6 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen, char *s
         cport = ntohs(src_port);
         logQuery(&ctx, cip, cport, false);
     }
-    // resetDname(&(ctx.dname));
-
     return status;
 }
 
@@ -820,7 +815,6 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     snpack(ctx.resp, DNS_HDR_SIZE, respLen, "m>hh", ctx.name, ctx.nameLen+1, ctx.qType, ctx.qClass);
     tcpConnAppendDnsResponse(conn, ctx.resp, ctx.cur);
 
-    // resetDname(&(ctx.dname));
     return status;
 }
 
@@ -858,7 +852,6 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         // run tcp dns server cron
         tcpServerCron(el, id, (void *)sk.tcp_srv);
     }
-
     return TIME_INTERVAL;
 }
 

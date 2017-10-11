@@ -139,7 +139,7 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
             ttl = (uint32_t)bson_extract_int32(b, "ttl");
             type = bson_extract_string(b, "type");
             rdata = bson_extract_string(b, "rdata");
-            if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, ctx->new_zn) == DS_ERR) {
+            if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, ctx->new_zn) == ERR_CODE) {
                 LOG_ERR(MONGO, "parse rdata error %d.", ctx->psr->errstr);
                 goto error;
             }
@@ -332,7 +332,7 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
             type = bson_extract_string(b, "type");
             rdata = bson_extract_string(b, "rdata");
             LOG_DEBUG(MONGO, "RR%d: %s, %d, %s, %s", j, name, ttl, type, rdata);
-            if (RRParserFeedRdata(psr, rdata, name, ttl, type, z) == DS_ERR) {
+            if (RRParserFeedRdata(psr, rdata, name, ttl, type, z) == ERR_CODE) {
                 goto error;
             }
         }

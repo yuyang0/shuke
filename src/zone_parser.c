@@ -69,9 +69,9 @@ void RRParserReset(RRParser *psr) {
 }
 
 int RRParserSetDotOrigin(RRParser *psr, char *dotOrigin) {
-    if (!isAbsDotDomain(dotOrigin)) return DS_ERR;
+    if (!isAbsDotDomain(dotOrigin)) return ERR_CODE;
     strncpy(psr->dotOrigin, dotOrigin, MAX_DOMAIN_LEN);
-    return DS_OK;
+    return OK_CODE;
 }
 
 static int RRParserTokenize(RRParser *psr, char *s) {
@@ -92,7 +92,7 @@ static int RRParserTokenize(RRParser *psr, char *s) {
 }
 
 int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
-    int err = DS_OK;
+    int err = OK_CODE;
     uint16_t type = psr->type;
     char *tok;
 
@@ -141,7 +141,7 @@ int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
             goto error;
         }
         dot2lenlabel(tok, NULL);
-        if (checkLenLabel(tok, 0) == DS_ERR) {
+        if (checkLenLabel(tok, 0) == ERR_CODE) {
             snprintf(psr->errstr, ERR_STR_LEN, "%s is an invalid domain name", tok);
             goto error;
         }
@@ -168,7 +168,7 @@ int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
             goto error;
         }
         dot2lenlabel(tok, NULL);
-        if (checkLenLabel(tok, 0) == DS_ERR) {
+        if (checkLenLabel(tok, 0) == ERR_CODE) {
             snprintf(psr->errstr, ERR_STR_LEN, "%s is an invalid domain name.", tok);
             goto error;
         }
@@ -203,7 +203,7 @@ int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
     case DNS_TYPE_SOA:
         if (remain != 7) {
             snprintf(psr->errstr, ERR_STR_LEN, "SOA record needs 7 tokens, but gives %d field", remain);
-            return DS_ERR;
+            return ERR_CODE;
         }
         tok = RRParserNextToken(psr);
         dot2lenlabel(tok, NULL);
@@ -297,7 +297,7 @@ int RRParserParseTextRdata(RRParser *psr, RRSet **rs, zone *z) {
 
     goto ok;
 error:
-    err = DS_ERR;
+    err = ERR_CODE;
     psr->err = PARSER_ERR;
 ok:
     return err;
@@ -305,7 +305,7 @@ ok:
 
 int RRParserDoParse(RRParser *psr, zone *z, bool check_top_soa) {
     RRSet *rs = NULL;
-    int err = DS_OK;
+    int err = OK_CODE;
     uint16_t type = psr->type;
     char *domain = psr->name;
     if (type == DNS_TYPE_SOA) {
@@ -334,7 +334,7 @@ int RRParserDoParse(RRParser *psr, zone *z, bool check_top_soa) {
         rs->ttl = psr->ttl;
     }
     // read rdata
-    if (RRParserParseTextRdata(psr, &rs, z) == DS_ERR) {
+    if (RRParserParseTextRdata(psr, &rs, z) == ERR_CODE) {
         goto error;
     }
 
@@ -348,7 +348,7 @@ int RRParserDoParse(RRParser *psr, zone *z, bool check_top_soa) {
     goto ok;
 
 error:
-    err = DS_ERR;
+    err = ERR_CODE;
     psr->err = PARSER_ERR;
     RRSetDestroy(rs);
 ok:
@@ -366,13 +366,13 @@ ok:
  *              2. name is not NULL, then ss should ignore owner name and only contain ttl, class(optional), type and rdata.
  *                 this situation is mainly for RR stored in databases(redis, mongodb, etc).
  * @param z : the zone object this RR belongs to.
- * @return DS_OK if everything is ok otherwise return DS_ERR.
+ * @return OK_CODE if everything is ok otherwise return ERR_CODE.
  */
 int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z) {
     bool no_type = true;
     bool check_soa_top = true;
     char *tok;
-    int err = DS_OK;
+    int err = OK_CODE;
     RRParserReset(psr);
     if (RRParserTokenize(psr, ss) < 0) {
         goto error;
@@ -380,14 +380,14 @@ int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z) {
     if (name != NULL) {
         check_soa_top = false;
         strncpy(psr->name, name, MAX_DOMAIN_LEN);
-        if (abs2lenRelative(psr->name, psr->dotOrigin) == DS_ERR) {
+        if (abs2lenRelative(psr->name, psr->dotOrigin) == ERR_CODE) {
             snprintf(psr->errstr, ERR_STR_LEN, "syntax error: invalid domain name(%s), dotOrigin(%s)", name, psr->dotOrigin);
             goto error;
         }
     } else {
         if (*ss != ' ') {
             strncpy(psr->name, psr->tokens[0], MAX_DOMAIN_LEN);
-            if (abs2lenRelative(psr->name, psr->dotOrigin) == DS_ERR) {
+            if (abs2lenRelative(psr->name, psr->dotOrigin) == ERR_CODE) {
                 // LOG_DEBUG("%s %s", psr->tokens[0], psr->dotOrigin);
                 snprintf(psr->errstr, ERR_STR_LEN, "%s is not a valid domain name.", psr->tokens[0]);
                 goto error;
@@ -408,7 +408,7 @@ int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z) {
             continue;
         } else {    // a type?
             int ret = strToDNSType(tok);
-            if (ret == DS_ERR) {
+            if (ret == ERR_CODE) {
                 snprintf(psr->errstr, ERR_STR_LEN, "%s is not a ttl, class or type", tok);
                 goto error;
             }
@@ -421,40 +421,40 @@ int RRParserFeed(RRParser *psr, char *ss, char *name, zone *z) {
         snprintf(psr->errstr, ERR_STR_LEN, "no type field");
         goto error;
     }
-    if (RRParserDoParse(psr, z, check_soa_top) == DS_ERR) goto error;
+    if (RRParserDoParse(psr, z, check_soa_top) == ERR_CODE) goto error;
     goto ok;
 error:
     psr->err = PARSER_ERR;
-    err = DS_ERR;
+    err = ERR_CODE;
 ok:
     return err;
 }
 
 int RRParserFeedRdata(RRParser *psr, char *rdata, char *name, uint32_t ttl, char *type, zone *z) {
     bool check_soa_top = false;
-    int err = DS_OK;
+    int err = OK_CODE;
     RRParserReset(psr);
     if (RRParserTokenize(psr, rdata) < 0) {
         goto error;
     }
     strncpy(psr->name, name, MAX_DOMAIN_LEN);
-    if (abs2lenRelative(psr->name, psr->dotOrigin) == DS_ERR) {
+    if (abs2lenRelative(psr->name, psr->dotOrigin) == ERR_CODE) {
         snprintf(psr->errstr, ERR_STR_LEN, "syntax error: invalid domain name(%s), dotOrigin(%s)", name, psr->dotOrigin);
         goto error;
     }
     psr->ttl = ttl;
     int ret = strToDNSType(type);
-    if (ret == DS_ERR) {
+    if (ret == ERR_CODE) {
         snprintf(psr->errstr, ERR_STR_LEN, "%s is not a type", type);
         goto error;
     }
     psr->type = (uint16_t)ret;
 
-    if (RRParserDoParse(psr, z, check_soa_top) == DS_ERR) goto error;
+    if (RRParserDoParse(psr, z, check_soa_top) == ERR_CODE) goto error;
     goto ok;
 error:
     psr->err = PARSER_ERR;
-    err = DS_ERR;
+    err = ERR_CODE;
 ok:
     return err;
 }
@@ -541,7 +541,7 @@ static long parsetime(char *ss) {
         case 'S':
             break;
         default:
-            return DS_ERR;
+            return ERR_CODE;
         }
         ret += part;
         start = end + 1;
@@ -607,7 +607,7 @@ static char *findLineEnd(char *start) {
 static int readFullRecord(char *errstr, char **ssp, char *buf, size_t sz, int *line_idx) {
     while(1) {
         if (sgets(buf, (int)sz, ssp) == NULL) {
-            return DS_EOF;
+            return EOF_CODE;
         }
         if (needSkip(buf)) {
             (*line_idx)++;
@@ -632,11 +632,11 @@ static int readFullRecord(char *errstr, char **ssp, char *buf, size_t sz, int *l
                     remain = sz - (ptr - buf);
                     if (remain <= 0) {
                         snprintf(errstr, ERR_STR_LEN, "Syntax error(line %d): the record is too long(more than %d)", *line_idx, RECORD_SIZE);
-                        return DS_ERR;
+                        return ERR_CODE;
                     }
                     if (sgets(ptr, remain, ssp) == NULL) {
                         snprintf(errstr, ERR_STR_LEN, "syntax error(line: %d): no close parenthesis.", *line_idx);
-                        return DS_ERR;
+                        return ERR_CODE;
                     }
                     (*line_idx)++;
                     if (needSkip(ptr)) continue;
@@ -655,17 +655,17 @@ static int readFullRecord(char *errstr, char **ssp, char *buf, size_t sz, int *l
     // replace all invisible character to space.
     replaceInvisibleChar(buf);
     // LOG_DEBUG("read full record: %s", buf);
-    return DS_OK;
+    return OK_CODE;
 }
 
 // convert absolute domain name(<label dot> format) to relative domain name
 // the relative domain will be in <len label> format
 int abs2lenRelative(char domain[], char *dotOrigin) {
-    if (strcmp(domain, "@") == 0) return DS_OK;
+    if (strcmp(domain, "@") == 0) return OK_CODE;
 
     if (isAbsDotDomain(domain) == true) {
         if (endscasewith(domain, dotOrigin) == false) {
-            return DS_ERR;
+            return ERR_CODE;
         }
         size_t remain = strlen(domain) - strlen(dotOrigin);
         domain[remain] = 0;
@@ -673,19 +673,19 @@ int abs2lenRelative(char domain[], char *dotOrigin) {
             strcpy(domain, "@");
         } else {
             dot2lenlabel(domain, NULL);
-            if (checkLenLabel(domain, 0) == DS_ERR) {
-                return DS_ERR;
+            if (checkLenLabel(domain, 0) == ERR_CODE) {
+                return ERR_CODE;
             }
         }
     } else {
         // label should endswith dot
         strncat(domain, ".", 2);
         dot2lenlabel(domain, NULL);
-        if (checkLenLabel(domain, 0) == DS_ERR) {
-            return DS_ERR;
+        if (checkLenLabel(domain, 0) == ERR_CODE) {
+            return ERR_CODE;
         }
     }
-    return DS_OK;
+    return OK_CODE;
 }
 
 // parse the directives(starts with $) at the top of zone files.
@@ -696,35 +696,35 @@ static int readDirectives(char *errstr, char **ssp, char *origin, uint32_t *ttl,
     int prev_idx = *line_idx;
     char *ss = *ssp;
     int err;
-    for (; ((err= readFullRecord(NULL, ssp, rbuf, RECORD_SIZE, line_idx)) == DS_OK); ss = *ssp, prev_idx=*line_idx) {
+    for (; ((err= readFullRecord(NULL, ssp, rbuf, RECORD_SIZE, line_idx)) == OK_CODE); ss = *ssp, prev_idx=*line_idx) {
         // unget this line
         if (rbuf[0] != '$') {
             *ssp = ss;
             *line_idx = prev_idx;
-            return DS_OK;
+            return OK_CODE;
         }
         tokenize(rbuf, tokens, &ntokens, " \t");
 
         if (strcasecmp(tokens[0], "$ORIGIN") == 0) {
             if (ntokens < 2) {
                 snprintf(errstr, ERR_STR_LEN, "Syntax error(line %d): no argument for $ORIGIN", *line_idx);
-                return DS_ERR;
+                return ERR_CODE;
             }
             strncpy(origin, tokens[1], 255);
             continue;
         } else if (strcasecmp(tokens[0], "$TTL") == 0) {
             if (ntokens < 2) {
                 snprintf(errstr, ERR_STR_LEN, "Syntax error(line %d): no argument for $TTL", *line_idx);
-                return DS_ERR;
+                return ERR_CODE;
             }
             *ttl = (uint32_t) parsetime(tokens[1]);
             continue;
         } else {
             snprintf(errstr, ERR_STR_LEN, "Syntax error(line %d): invalid or unsupported directive %s.", *line_idx, tokens[0]);
-            return DS_ERR;
+            return ERR_CODE;
         }
     }
-    if (err != DS_EOF) err = DS_OK;
+    if (err != EOF_CODE) err = OK_CODE;
     return err;
 }
 
@@ -738,7 +738,7 @@ int loadZoneFromStr(char *errstr, int socket_id, char *zbuf, zone **zpp) {
     RRParser *psr = NULL;
     char *ss = zbuf;
 
-    if(readDirectives(errstr, &ss, dotOrigin, &default_ttl, &line_idx) == DS_ERR) {
+    if(readDirectives(errstr, &ss, dotOrigin, &default_ttl, &line_idx) == ERR_CODE) {
         goto error;
     }
     LOG_DEBUG(USER1, "origin: %s, default ttl: %d", dotOrigin, default_ttl);
@@ -750,20 +750,20 @@ int loadZoneFromStr(char *errstr, int socket_id, char *zbuf, zone **zpp) {
     z = zoneCreate(dotOrigin, socket_id);
     z->default_ttl = default_ttl;
 
-    while ((err= readFullRecord(errstr, &ss, rbuf, RECORD_SIZE, &line_idx)) == DS_OK) {
+    while ((err= readFullRecord(errstr, &ss, rbuf, RECORD_SIZE, &line_idx)) == OK_CODE) {
         LOG_DEBUG(USER1, "line: %s", rbuf);
-        if (RRParserFeed(psr, rbuf, NULL, z) == DS_ERR) {
+        if (RRParserFeed(psr, rbuf, NULL, z) == ERR_CODE) {
             snprintf(errstr, ERR_STR_LEN, "Line %d %s", line_idx, psr->errstr);
             goto error;
         }
     }
-    if (err != DS_EOF) goto error;
+    if (err != EOF_CODE) goto error;
 
     *zpp = z;
     goto ok;
 
 error:
-    err = DS_ERR;
+    err = ERR_CODE;
     zoneDestroy(z);
 ok:
     RRParserDestroy(psr);
@@ -778,7 +778,7 @@ int loadZoneFromFile(int socket_id, const char *fname, zone **zpp) {
     zbuf = zreadFile(fname);
     if (zbuf == NULL) {
         LOG_ERROR(USER1, "Can't read zone file %s.", fname);
-        return DS_ERR;
+        return ERR_CODE;
     }
     err = loadZoneFromStr(errstr, socket_id, zbuf, zpp);
     zfree(zbuf);
@@ -820,7 +820,7 @@ int zoneParserTest(int argc, char *argv[]) {
     int err;
     char errstr[ERR_STR_LEN];
     fprintf(stderr, "\n");
-    while ((err=readFullRecord(errstr, &ss, buf, 1000, &idx)) == DS_OK) {
+    while ((err=readFullRecord(errstr, &ss, buf, 1000, &idx)) == OK_CODE) {
         fprintf(stderr, "l%d:%s \n", idx, buf);
     }
     fprintf(stderr, "\n");

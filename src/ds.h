@@ -21,16 +21,30 @@
 #include "str.h"
 #include "protocol.h"
 
-#define DS_OK     0
-#define DS_ERR   -1
-#define DS_EOF    1
-
 #define PARSER_OK    0
 #define PARSER_ERR  -1
 
 #define IP_STR_LEN  INET6_ADDRSTRLEN
 
+
+#define AR_INFO_SIZE   64
+#define CPS_INFO_SIZE  64
+
 struct numaNode_s;
+
+// this struct is used to track the compress information in the response.
+typedef struct {
+    char *name;
+    int offset;
+    int uncompress_len;
+} compressInfo;
+
+// used to do additional section processing.
+typedef struct {
+    char *name;
+    // offset of the name in the buffer, used to compress the name.
+    int offset;
+} arInfo;
 
 struct context {
     struct  numaNode_s *node;
@@ -42,8 +56,6 @@ struct context {
     // name just points to the recv buffer, so never free this pointer
     char *name;
     size_t nameLen;
-    // when finished use dname, you need call resetDname to free the memory.
-    // dname_t dname;
 
     uint16_t qType;
     uint16_t qClass;
@@ -51,6 +63,11 @@ struct context {
     char *resp;
     size_t totallen;
     int cur;
+
+    size_t ari_sz;
+    size_t cps_sz;
+    arInfo ari[AR_INFO_SIZE];
+    compressInfo cps[CPS_INFO_SIZE];
 };
 
 typedef struct {
@@ -70,20 +87,6 @@ typedef struct {
     // the dot origin this RR belongs to.
     char dotOrigin[MAX_DOMAIN_LEN+2];
 } RRParser;
-
-// this struct is used to track the compress information in the response.
-typedef struct {
-    char *name;
-    int offset;
-    int uncompress_len;
-} compressInfo;
-
-// used to do additional section processing.
-typedef struct {
-    char *name;
-    // offset of the name in the buffer, used to compress the name.
-    int offset;
-} arInfo;
 
 /*
   a collection of RR whose name and type are same.
@@ -204,9 +207,7 @@ void RRSetUpdateOffsets(RRSet *rs);
 RRSet* RRSetCat(RRSet *rs, char *buf, size_t len);
 RRSet *RRSetRemoveFreeSpace(RRSet *rs);
 
-int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
-                      compressInfo *cps, size_t *cps_sz, size_t cps_sz_max,
-                      arInfo *ari, size_t *ar_sz, size_t ar_sz_max);
+int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset);
 sds RRSetToStr(RRSet *rs);
 
 void RRSetDestroy(RRSet *rs);

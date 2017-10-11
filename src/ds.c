@@ -176,7 +176,8 @@ RRSet *RRSetCat(RRSet *rs, char *buf, size_t len) {
     return new;
 }
 
-static int getCommonSuffixOffset(compressInfo *cps, char *name2, size_t *offset1, size_t *offset2) {
+static int
+getCommonSuffixOffset(compressInfo *cps, char *name2, size_t *offset1, size_t *offset2) {
     char *name1 = cps->name;
     size_t uncompress_len = cps->uncompress_len;
     char *ptr;
@@ -190,7 +191,7 @@ static int getCommonSuffixOffset(compressInfo *cps, char *name2, size_t *offset1
             break;
         }
     }
-    if (*end2 == 0) return DS_ERR;
+    if (*end2 == 0) return ERR_CODE;
     // make end1, end2 point to the start position of a label.
     ptr = name2;
     for(; ; ) {
@@ -205,24 +206,25 @@ static int getCommonSuffixOffset(compressInfo *cps, char *name2, size_t *offset1
         int len = *ptr;
         ptr += (len+1);
     }
-    if (*end2 == 0) return DS_ERR;
+    if (*end2 == 0) return ERR_CODE;
 
     *offset1 = end1 - name1;
     *offset2 = end2 - name2;
     if (*offset1 > uncompress_len) {
-        return DS_ERR;
+        return ERR_CODE;
     }
-    return DS_OK;
+    return OK_CODE;
 }
 
-int dumpCompressedName(struct context *ctx, char *name, compressInfo *cps, size_t *cps_sz, size_t cps_sz_max) {
+static int
+dumpCompressedName(struct context *ctx, char *name) {
     int cur = ctx->cur;
     size_t offset1=0, offset2=0;
     size_t best_offset1 = 256;
     size_t best_offset2 = 256;
     int best_idx = -1;
-    for (size_t i = 0; i < *cps_sz; ++i) {
-        if (getCommonSuffixOffset(cps+i, name, &offset1, &offset2) != DS_OK) continue;
+    for (size_t i = 0; i < ctx->cps_sz; ++i) {
+        if (getCommonSuffixOffset(ctx->cps+i, name, &offset1, &offset2) != OK_CODE) continue;
         if (offset2 < best_offset2) {
             best_offset1 = offset1;
             best_offset2 = offset2;
@@ -230,22 +232,22 @@ int dumpCompressedName(struct context *ctx, char *name, compressInfo *cps, size_
         }
     }
     // add an entry to compress info array.
-    if (best_offset2 > 0 && (*cps_sz < cps_sz_max)) {
+    if (best_offset2 > 0 && (ctx->cps_sz < CPS_INFO_SIZE)) {
         compressInfo temp = {name, cur, best_offset2};
-        cps[*cps_sz] = temp;
-        (*cps_sz)++;
+        ctx->cps[ctx->cps_sz] = temp;
+        (ctx->cps_sz)++;
     }
 
     if (best_offset2 < 256) {
 
-        size_t nameOffset = cps[best_idx].offset + best_offset1;
+        size_t nameOffset = ctx->cps[best_idx].offset + best_offset1;
         nameOffset |= 0xC000;
 
         cur = snpack(ctx->resp, cur, ctx->totallen, "m>h", name, best_offset2, (uint16_t)nameOffset);
     } else {
         cur = snpack(ctx->resp, cur, ctx->totallen, "m", name, strlen(name)+1);
     }
-    if (cur == ERR_CODE) return DS_ERR;
+    if (cur == ERR_CODE) return ERR_CODE;
     ctx->cur = cur;
     return cur;
 }
@@ -270,15 +272,9 @@ static inline int dumpCompressedRRHeader(char *buf, int offset, size_t size, uin
  * @param ctx:  context object, used to store the dumped bytes
  * @param rs:  the RRSet object needs to be dumped
  * @param nameOffset: the offset of the name in sds, used to compress the name
- * @param cps: the compress information of s
- * @param cps_sz: the current size of compress info array
- * @param ari: this array store the information needs to do additional section process
- * @param ar_sz: the size of `ari`.
- * @return the new sds bytes.
+ * @return OK_CODE if everything is OK, otherwise return ERR_CODE.
  */
-int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
-                      compressInfo *cps, size_t *cps_sz, size_t cps_sz_max,
-                      arInfo *ari, size_t *ar_sz, size_t ar_sz_max)
+int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
 {
     char *resp = ctx->resp;
     size_t totallen = ctx->totallen;
@@ -307,7 +303,7 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
         uint16_t rdlength = load16be(rdata);
 
         cur = dumpCompressedRRHeader(resp, cur, totallen, dnsNameOffset, rs->type, DNS_CLASS_IN, rs->ttl);
-        if (cur == ERR_CODE) return DS_ERR;
+        if (cur == ERR_CODE) return ERR_CODE;
 
         // compress the domain name in NS and MX record.
         switch (rs->type) {
@@ -316,57 +312,54 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset,
                 name = rdata + 2;
                 len_offset = cur;
                 cur = snpack(resp, cur, totallen, "m", rdata, 2);
-                if (cur == ERR_CODE) return DS_ERR;
+                if (cur == ERR_CODE) return ERR_CODE;
                 ctx->cur = cur;
 
-                cur = dumpCompressedName(ctx, name, cps, cps_sz, cps_sz_max);
-                if (cur == DS_ERR) return DS_ERR;
+                cur = dumpCompressedName(ctx, name);
+                if (cur == ERR_CODE) return ERR_CODE;
 
                 dump16be((uint16_t)(cur-len_offset-2), resp+len_offset);
-                if (ari && (*ar_sz < ar_sz_max)) {
+                if (ctx->ari_sz < AR_INFO_SIZE) {
                     arInfo ai_temp = {name, len_offset+2};
-                    ari[*ar_sz] = ai_temp;
-                    (*ar_sz)++;
+                    ctx->ari[ctx->ari_sz++] = ai_temp;
                 }
                 break;
             case DNS_TYPE_MX:
                 name = rdata + 4;
                 len_offset = cur;
                 cur = snpack(resp, cur, totallen, "m", rdata, 4);
-                if (cur == ERR_CODE) return DS_ERR;
+                if (cur == ERR_CODE) return ERR_CODE;
                 ctx->cur = cur;
 
-                cur = dumpCompressedName(ctx, name, cps, cps_sz, cps_sz_max);
-                if (cur == DS_ERR) return DS_ERR;
+                cur = dumpCompressedName(ctx, name);
+                if (cur == ERR_CODE) return ERR_CODE;
 
                 dump16be((uint16_t)(cur-len_offset-2), resp+len_offset);
-                if (ari && (*ar_sz < ar_sz_max)) {
+                if (ctx->ari_sz < AR_INFO_SIZE) {
                     arInfo ai_temp = {name, len_offset+4};
-                    ari[*ar_sz] = ai_temp;
-                    (*ar_sz)++;
+                    ctx->ari[ctx->ari_sz++] = ai_temp;
                 }
                 break;
             case DNS_TYPE_SRV:
                 // don't compress the target field, but need add compress info for the remain records.
                 name = rdata + 8;
                 len_offset = cur;
-                if (*cps_sz < cps_sz_max) {
+                if (ctx->cps_sz < CPS_INFO_SIZE) {
                     compressInfo temp = {name, cur+8, rdlength-6};
-                    cps[*cps_sz] = temp;
-                    (*cps_sz)++;
+                    ctx->cps[ctx->cps_sz] = temp;
+                    ctx->cps_sz++;
                 }
 
                 cur = snpack(resp, cur, totallen, "m", rdata, rdlength+2);
-                if (cur == ERR_CODE) return DS_ERR;
+                if (cur == ERR_CODE) return ERR_CODE;
 
-                if (ari && (*ar_sz < ar_sz_max)) {
+                if (ctx->ari_sz < AR_INFO_SIZE) {
                     arInfo ai_temp = {name, len_offset+8};
-                    ari[*ar_sz] = ai_temp;
-                    (*ar_sz)++;
+                    ctx->ari[ctx->ari_sz++] = ai_temp;
                 }
                 break;
             default:
-                if (unlikely((int)(totallen-cur) < rdlength+2)) return DS_ERR;
+                if (unlikely((int)(totallen-cur) < rdlength+2)) return ERR_CODE;
                 rte_memcpy(resp+cur, rdata, rdlength+2);
                 cur += (rdlength+2);
         }
@@ -872,7 +865,7 @@ int zoneDictEmpty(zoneDict *zd) {
         }
     }
     zoneDictWUnlock(zd);
-    return DS_OK;
+    return OK_CODE;
 }
 
 int zoneDictExistZone(zoneDict *zd, char *origin) {
