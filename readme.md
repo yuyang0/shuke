@@ -1,4 +1,6 @@
 # SHUKE
+[![Build Status](https://travis-ci.org/yuyang0/shuke.svg?branch=master)](https://travis-ci.org/yuyang0/shuke)
+
 An authority-only dns server implemented with DPDK
 
 ## Features

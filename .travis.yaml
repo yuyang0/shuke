@@ -1,0 +1,14 @@
+language: c
+cache:
+  directories:
+    3rd
+
+compiler:
+  - gcc
+
+install:
+  - sudo apt-get install -y coreutils build-essential git
+  - sudo apt-get install -y linux-headers-`uname -r`
+
+script:
+  - sh bootstrap.sh V=1
