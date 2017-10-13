@@ -1,10 +1,10 @@
 # SHUKE
 [![Build Status](https://travis-ci.org/yuyang0/shuke.svg?branch=master)](https://travis-ci.org/yuyang0/shuke)
 
-An authority-only dns server implemented with DPDK
+An high performance authority-only dns server implemented with DPDK
 
 ## Features
-1. support storing RR in mongodb
+1. support storing zone data in mongodb
 2. high performance
 
 ## performance
@@ -33,7 +33,8 @@ An authority-only dns server implemented with DPDK
 ### buid
 
 1. build dpdk, shuke is only tested on dpdk-17.05.1. if you use linux x86-64,
-   you can run `bash DPDK_ROOT/usertools/dpdk-setup.sh`, then perform the following
+   you can run `bash 3rd/dpdk-stable-<version>/usertools/dpdk-setup.sh`,
+   then perform the following
    instructions.
     + press `[12]` to compile dpdk for linux x86-64 target.
     + press `[15]` to insert UIO
@@ -44,8 +45,7 @@ An authority-only dns server implemented with DPDK
     + press `[32]` to quit
 
 2. install autoconf and libtool
-3. make sure `RTE_SDK` and `RTE_TARGET` are set properly,
-   run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
+3. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
 
 ### tips
 1. if you want to build shuke in DEBUG mode, just run `make DEBUG=1`
@@ -77,7 +77,8 @@ the collection should contain the following fields
 the meaning of fields is clear. just like the zone file.
 
 ## Admin Commands
-SHUKE has admin tcp server used to execute admin operations
+SHUKE has a tcp server used to execute admin operations,
+`tools/admin.py` is the client. it supports several commands:
 
 1. `zone`: this command used to manipulate the zone data in memory, it has many subcommands.
     1. `get`: get a zone
