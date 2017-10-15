@@ -7,8 +7,24 @@
 #include "shuke.h"
 #include "utils.h"
 
+#define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
+
+#define NB_SOCKETS        8
+
 #define MAX_JUMBO_PKT_LEN  9600
 #define MEMPOOL_CACHE_SIZE 256
+
+/* Configure how many packets ahead to prefetch, when reading packets */
+#define PREFETCH_OFFSET	  3
+
+#define KNI_MBUF_MAX 2048
+#define KNI_QUEUE_SIZE 2048
+
+/*
+ * Configurable number of RX/TX ring descriptors
+ */
+#define RTE_TEST_RX_DESC_DEFAULT 128
+#define RTE_TEST_TX_DESC_DEFAULT 512
 
 /* Static global variables used within this file. */
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
@@ -17,6 +33,14 @@ static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 static struct rte_mempool * pktmbuf_pool[NB_SOCKETS];
 
 #ifdef IP_FRAG
+#define	DEFAULT_FLOW_TTL	MS_PER_S
+#define	DEFAULT_FLOW_NUM	0x1000
+
+#define	MAX_PACKET_FRAG RTE_LIBRTE_IP_FRAG_MAX_FRAG
+#define MBUF_TABLE_SIZE  (2 * RTE_MAX(MAX_PKT_BURST, MAX_PACKET_FRAG))
+
+/* Should be power of two. */
+#define	IP_FRAG_TBL_BUCKET_ENTRIES	16
 
 #define IP_FRAG_NB_MBUF 8192
 /*
@@ -879,7 +903,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 }
 
 void
-initDpdkEal() {
+init_dpdk_eal() {
     int ret;
     char master_lcore_cmd[128];
     char log_cmd[128];
@@ -992,7 +1016,7 @@ void prepare_eth_rx_tx_conf(struct rte_eth_dev_info *dev_info) {
 }
 
 int
-initDpdkModule() {
+init_dpdk_module() {
     lcore_conf_t *qconf;
     struct rte_eth_dev_info dev_info;
     struct rte_eth_conf port_conf;
@@ -1156,7 +1180,7 @@ initDpdkModule() {
     return 0;
 }
 
-int startDpdkThreads(void) {
+int start_dpdk_threads(void) {
     int ret = 0;
     for (int i = 0; i < sk.nr_lcore_ids; i++) {
         unsigned lcore_id = (unsigned )sk.lcore_ids[i];
@@ -1171,7 +1195,7 @@ int startDpdkThreads(void) {
     return 0;
 }
 
-int cleanupDpdkModule(void) {
+int cleanup_dpdk_module(void) {
     unsigned nb_ports;
     uint8_t portid;
 

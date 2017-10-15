@@ -1544,7 +1544,7 @@ int initOtherConfig() {
      * because all function provided by dpdk should be called after EAL has been initialized
      * and when init numa config, we need call rte_lcore_to_socket_id. so we init EAL here,
      */
-    initDpdkEal();
+    init_dpdk_eal();
 
     initNumaConfig();
 
@@ -1595,7 +1595,7 @@ int main(int argc, char *argv[]) {
     setupSignalHandlers();
 
     sk.force_quit = false;
-    initDpdkModule();
+    init_dpdk_module();
 
     if (!sk.only_udp) init_kni_module();
 
@@ -1603,7 +1603,7 @@ int main(int argc, char *argv[]) {
 
     initShuke();
 
-    startDpdkThreads();
+    start_dpdk_threads();
 
     if (! sk.only_udp) {
         kni_ifconfig_all();
@@ -1617,7 +1617,7 @@ int main(int argc, char *argv[]) {
 
     if (! sk.only_udp) cleanup_kni_module();
 
-    cleanupDpdkModule();
+    cleanup_dpdk_module();
 
     rcu_unregister_thread();
 }

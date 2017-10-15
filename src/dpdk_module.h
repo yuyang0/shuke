@@ -79,42 +79,9 @@
 #include <rte_ip_frag.h>
 #endif
 
-/*
- * Configurable number of RX/TX ring descriptors
- */
-#define RTE_TEST_RX_DESC_DEFAULT 128
-#define RTE_TEST_TX_DESC_DEFAULT 512
-
-#define MAX_TX_QUEUE_PER_PORT RTE_MAX_ETHPORTS
-#define MAX_RX_QUEUE_PER_PORT 128
-
-#define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
-
 #define MAX_PKT_BURST     32
 #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
 
-#define MAX_RX_QUEUE_PER_LCORE 16
-
-#define NB_SOCKETS        8
-
-/* Configure how many packets ahead to prefetch, when reading packets */
-#define PREFETCH_OFFSET	  3
-
-#define KNI_MBUF_MAX 2048
-#define KNI_QUEUE_SIZE 2048
-
-#ifdef IP_FRAG
-#define	DEFAULT_FLOW_TTL	MS_PER_S
-#define	DEFAULT_FLOW_NUM	0x1000
-
-#define SK_MAX(x1, x2) (x1) > (x2)? (x1): (x2)
-
-#define	MAX_PACKET_FRAG RTE_LIBRTE_IP_FRAG_MAX_FRAG
-#define MBUF_TABLE_SIZE  (2 * SK_MAX(MAX_PKT_BURST, MAX_PACKET_FRAG))
-
-/* Should be power of two. */
-#define	IP_FRAG_TBL_BUCKET_ENTRIES	16
-#endif
 
 struct mbuf_table {
     uint16_t len;
@@ -176,12 +143,10 @@ typedef struct port_info {
     struct hw_features hw_features;
 } __rte_cache_aligned port_info_t;
 
-extern struct rte_eth_conf default_port_conf;
-
-void initDpdkEal();
-int initDpdkModule(void);
-int startDpdkThreads(void);
-int cleanupDpdkModule(void);
+void init_dpdk_eal();
+int init_dpdk_module(void);
+int start_dpdk_threads(void);
+int cleanup_dpdk_module(void);
 
 uint64_t rte_tsc_ustime();
 uint64_t rte_tsc_mstime();
