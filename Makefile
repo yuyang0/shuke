@@ -80,7 +80,6 @@ endif
 
 all: $(SHUKE_BUILD_DIR) $(SHUKE_BUILD_DIR)/shuke-server
 
-include Makefile.dep
 
 Makefile.dep:
 	set -e; rm -f $@; \
@@ -89,16 +88,13 @@ Makefile.dep:
 	mv -f $@.$$$$ $@; \
 	rm -f $@.$$$$
 
-dep:
-	$(MAKE) Makefile.dep
-.PHONY: dep
+-include Makefile.dep
 
 -include .make-settings
 
-persist-settings: distclean
+persist-settings: clean
 	echo PREV_FINAL_CFLAGS=$(FINAL_CFLAGS) >> .make-settings
 	echo PREV_FINAL_LDFLAGS=$(FINAL_LDFLAGS) >> .make-settings
-	# -(cd ../deps && $(MAKE) $(DEPENDENCY_TARGETS))
 
 .PHONY: persist-settings
 
@@ -122,11 +118,13 @@ $(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c .make-prerequisites
 	$(SHUKE_CC) -c $< -o $@
 
 clean:
-	-rm -f $(SHUKE_BUILD_DIR)/shuke-server $(SHUKE_BUILD_DIR)/*.o
+	-rm -f $(SHUKE_BUILD_DIR)/shuke-server $(SHUKE_BUILD_DIR)/*.o Makefile.dep
 
 .PHONY:clean
 
 distclean: clean
+	- (make -C 3rd/himongo clean)
+	- (make -C 3rd/liburcu clean)
 	- (rm -f .make-*)
 
 .PHONY: distclean

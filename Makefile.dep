@@ -168,6 +168,7 @@ build/mongo.o: src/mongo.c src/shuke.h src/defines.h src/version.h src/ae.h \
 build/protocol.o: src/protocol.c src/fmacros.h src/endianconv.h src/zmalloc.h \
  src/protocol.h
 build/rbtree.o: src/rbtree.c src/rbtree.h src/defines.h
+build/rculfhash-mm-socket.o: src/rculfhash-mm-socket.c src/zmalloc.h
 build/sds.o: src/sds.c src/sds.h src/zmalloc.h
 build/shuke.o: src/shuke.c src/dpdk_module.h src/conf.h src/utils.h \
  src/version.h src/ds.h src/sds.h src/dict.h src/rbtree.h src/defines.h \
