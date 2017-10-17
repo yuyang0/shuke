@@ -10,6 +10,7 @@ import random
 import argparse
 from urllib import request
 from pymongo import MongoClient
+from pymongo.errors import BulkWriteError
 
 
 CUR_DIR = path.dirname(path.realpath(__file__))
@@ -120,11 +121,17 @@ def gen_zone_data(parsed):
     print(len(total_zone_list), len(total_subdomain_list), len(zone_list))
     # print(zone_list)
     zm.del_db()
-    for zname in zone_list:
+    for idx, zname in enumerate(zone_list):
         subdomains = random.sample(total_subdomain_list, num_domains)
         dot_origin, rr_list = gen_a_zone(zname, subdomains)
-        zm.write_to_mongo(dot_origin, rr_list)
-        print("add zone: ", zname)
+        try:
+            zm.write_to_mongo(dot_origin, rr_list)
+        except BulkWriteError as bwe:
+            print(bwe.details)
+            print(dot_origin, rr_list)
+            raise
+
+        print("add zone: ", idx, zname)
 
 
 if __name__ == '__main__':

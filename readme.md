@@ -1,7 +1,7 @@
 # SHUKE
 [![Build Status](https://travis-ci.org/yuyang0/shuke.svg?branch=master)](https://travis-ci.org/yuyang0/shuke)
 
-An high performance authority-only dns server implemented with DPDK
+A high performance authority-only dns server implemented with DPDK
 
 ## Features
 1. support storing zone data in mongodb
@@ -97,3 +97,8 @@ SHUKE has a tcp server used to execute admin operations,
     3. `memory`: return memory usage information
     4. `cpu`: return cpu usage information
     5. `stats`: statistics information
+
+## Limitations
+1. currently only support A,AAAA,NS,CNAME,SOA,SRV,TXT,MX. 
+   support for EDNS, DNSSEC and PTR is in the plan.
+2. only support mongodb, we plan to support mysql.
