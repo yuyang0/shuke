@@ -30,6 +30,18 @@ A high performance authority-only dns server implemented with DPDK
     ![benchmark(2 10G port)](doc/static/benchmark_2_port.png)
 
 ## Quick start
+### vagrant
+if you use vagrant, it is very simple to try shuke
+1. install virtualbox and vagrant
+2. run `cd vagrant && vagrant up`
+3. ssh to the guest machine, then run the following command:
+
+       cd /shuke
+       sudo build/shuke-server -c vagrant/test.conf
+
+4. in the host machine, run `dig www1.example.com. @172.28.128.10 -p 19899 -t A`
+
+tips: `vagrant/seetup.sh` is a good place to figure out how to build this project.
 ### buid
 
 1. build dpdk, shuke is only tested on dpdk-17.05.1. if you use linux x86-64,
@@ -99,6 +111,6 @@ SHUKE has a tcp server used to execute admin operations,
     5. `stats`: statistics information
 
 ## Limitations
-1. currently only support A,AAAA,NS,CNAME,SOA,SRV,TXT,MX. 
+1. currently only support A,AAAA,NS,CNAME,SOA,SRV,TXT,MX.
    support for EDNS, DNSSEC and PTR is in the plan.
 2. only support mongodb, we plan to support mysql.

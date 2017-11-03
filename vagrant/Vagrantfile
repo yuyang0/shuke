@@ -1,0 +1,57 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/xenial64"
+  config.vm.box_check_update = false
+
+  config.vm.provision :shell, :path => "setup.sh", :args => "/shuke"
+
+  # Copy in the .gitconfig if it exists
+  if File.file?(File.expand_path("~/.gitconfig"))
+    config.vm.provision  "file", source: "~/.gitconfig", destination: ".gitconfig"
+  end
+  config.vm.network "forwarded_port", guest: 14141, host: 14141
+  config.vm.network "forwarded_port", guest: 19899, host: 19899
+
+  # vagrant-cachier caches apt/yum etc to speed subsequent
+  # vagrant up
+  # to enable, run
+  # vagrant plugin install vagrant-cachier
+  #
+  if Vagrant.has_plugin?("vagrant-cachier")
+    config.cache.scope = :box
+  end
+  # Define some physical ports for your VMs to be used by DPDK
+  nics = (ENV['VPP_VAGRANT_NICS'] || "2").to_i(10)
+  for i in 1..nics
+    config.vm.network "private_network", type: "dhcp"
+  end
+
+  # use http proxy if avaiable
+  if ENV['http_proxy'] && Vagrant.has_plugin?("vagrant-proxyconf")
+    config.proxy.http     = ENV['http_proxy']
+    config.proxy.https    = ENV['https_proxy']
+    config.proxy.no_proxy = "localhost,127.0.0.1"
+  end
+
+  vmcpu=(ENV['VPP_VAGRANT_VMCPU'] || 2)
+  vmram=(ENV['VPP_VAGRANT_VMRAM'] || 4096)
+
+  config.ssh.forward_agent = true
+  config.ssh.forward_x11 = true
+
+  config.vm.provider "virtualbox" do |vb|
+      vb.name = "ubuntu-16.04-x86-shuke"
+      vb.customize ["modifyvm", :id, "--ioapic", "on"]
+      vb.memory = "#{vmram}"
+      vb.cpus = "#{vmcpu}"
+
+      # rsync the vpp directory if provision hasn't happened yet
+      config.vm.synced_folder "../", "/shuke", type: "rsync",
+       # rsync__auto: false,
+       rsync__exclude: [
+         "build/*"]
+
+      #support for the SSE4.x instruction is required in some versions of VB.
+      vb.customize ["setextradata", :id, "VBoxInternal/CPUM/SSE4.1", "1"]
+      vb.customize ["setextradata", :id, "VBoxInternal/CPUM/SSE4.2", "1"]
+  end
+end

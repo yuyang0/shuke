@@ -15,7 +15,7 @@ shuke-server
 dnsbench
 callgrind*
 .cache
-build
+/build
 /GPATH
 /GRTAGS
 /GSYMS
@@ -23,3 +23,4 @@ build
 /.clang_complete
 /cscope*
 x86_64-native-linuxapp-gcc
+.vagrant
