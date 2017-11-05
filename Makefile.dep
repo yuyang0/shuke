@@ -32,7 +32,6 @@ build/admin.o: src/admin.c src/shuke.h src/defines.h src/version.h src/ae.h \
  3rd/himongo/libbson/src/bson/bcon.h src/utils.h
 build/ae.o: src/ae.c src/ae.h src/zmalloc.h src/ae_epoll.c
 build/anet.o: src/anet.c src/fmacros.h src/anet.h
-build/conf.o: src/conf.c src/fmacros.h src/defines.h src/str.h src/conf.h
 build/dict.o: src/dict.c src/fmacros.h src/dict.h src/zmalloc.h
 build/dpdk_module.o: src/dpdk_module.c src/dpdk_module.h src/shuke.h \
  src/defines.h src/version.h src/ae.h src/anet.h src/zmalloc.h \
@@ -170,12 +169,12 @@ build/protocol.o: src/protocol.c src/fmacros.h src/endianconv.h src/zmalloc.h \
 build/rbtree.o: src/rbtree.c src/rbtree.h src/defines.h
 build/rculfhash-mm-socket.o: src/rculfhash-mm-socket.c src/zmalloc.h
 build/sds.o: src/sds.c src/sds.h src/zmalloc.h
-build/shuke.o: src/shuke.c src/dpdk_module.h src/conf.h src/utils.h \
- src/version.h src/ds.h src/sds.h src/dict.h src/rbtree.h src/defines.h \
- src/str.h src/protocol.h src/zmalloc.h src/shuke.h src/ae.h src/anet.h \
- src/endianconv.h src/list.h src/log.h 3rd/himongo/async.h \
- 3rd/himongo/himongo.h 3rd/himongo/read.h 3rd/himongo/sds.h \
- 3rd/himongo/proto.h 3rd/himongo/libbson/src/bson/bson.h \
+build/shuke.o: src/shuke.c src/dpdk_module.h src/utils.h src/version.h src/ds.h \
+ src/sds.h src/dict.h src/rbtree.h src/defines.h src/str.h src/protocol.h \
+ src/zmalloc.h src/shuke.h src/ae.h src/anet.h src/endianconv.h \
+ src/list.h src/log.h 3rd/himongo/async.h 3rd/himongo/himongo.h \
+ 3rd/himongo/read.h 3rd/himongo/sds.h 3rd/himongo/proto.h \
+ 3rd/himongo/libbson/src/bson/bson.h \
  3rd/himongo/libbson/src/bson/bson-compat.h \
  3rd/himongo/libbson/src/bson/bson-config.h \
  3rd/himongo/libbson/src/bson/bson-macros.h \

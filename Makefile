@@ -28,6 +28,7 @@ OPTIMIZATION ?=-O3
 # PROJECT_ROOT:=$(abspath .)
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
 URCU_STATIC_LIBS:=3rd/liburcu/src/.libs/liburcu-cds.a 3rd/liburcu/src/.libs/liburcu.a
+YAML_STATICLIB:=3rd/libyaml/src/.libs/libyaml.a
 
 SHUKE_SRC_DIR:=src
 # Default settings
@@ -41,7 +42,8 @@ LIB_DIR_LIST=/usr/local/lib \
 INC_DIR_LIST=$(SHUKE_SRC_DIR) \
 				     3rd     \
 						 3rd/liburcu/include \
-						 3rd/liburcu/src
+						 3rd/liburcu/src   \
+             3rd/libyaml/include
 				     # $(RTE_SDK)/$(RTE_TARGET)/include
 SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c \
 						ds.c debug.c mongo.c protocol.c rbtree.c rculfhash-mm-socket.c \
@@ -52,7 +54,7 @@ SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
 FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(CFLAGS) $(SHUKE_CFLAGS) $(MACROS)
 FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG_FLAGS)
-FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) -pthread -lrt
+FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) $(YAML_STATICLIB) -pthread -lrt
 
 # FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
 FINAL_CFLAGS += $(addprefix -I,$(INC_DIR_LIST))
@@ -134,7 +136,7 @@ $(SHUKE_BUILD_DIR):
 
 @PHONY: $(SHUKE_BUILD_DIR)
 
-3rd: $(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS)
+3rd: $(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) $(YAML_STATICLIB)
 
 update3rd:
 	rm -rf 3rd/himongo 3rd/liburcu && git submodule update --init
@@ -154,6 +156,14 @@ $(URCU_STATIC_LIBS): 3rd/liburcu/Makefile
 3rd/liburcu/bootstrap:
 	git submodule update --init
 
+$(YAML_STATICLIB): 3rd/libyaml/Makefile
+	cd 3rd/libyaml && make
+
+3rd/libyaml/Makefile: | 3rd/libyaml/bootstrap
+	cd 3rd/libyaml && ./bootstrap && ./configure
+
+3rd/libyaml/bootstrap:
+	git submodule update --init
 
 #Libraries of dpdk
 DPDKLIBS = -Wl,-lrte_pipeline -Wl,-lrte_table -Wl,-lrte_port -Wl,-lrte_pdump -Wl,-lrte_distributor -Wl,-lrte_ip_frag -Wl,-lrte_meter -Wl,-lrte_sched -Wl,-lrte_lpm -Wl,--whole-archive -Wl,-lrte_acl -Wl,--no-whole-archive -Wl,-lrte_jobstats -Wl,-lrte_metrics -Wl,-lrte_bitratestats -Wl,-lrte_latencystats -Wl,-lrte_power -Wl,-lrte_timer -Wl,-lrte_efd -Wl,-lrte_cfgfile -Wl,--whole-archive -Wl,-lrte_hash -Wl,-lrte_vhost -Wl,-lrte_kvargs -Wl,-lrte_mbuf -Wl,-lrte_net -Wl,-lrte_ethdev -Wl,-lrte_cryptodev -Wl,-lrte_eventdev -Wl,-lrte_mempool -Wl,-lrte_mempool_ring -Wl,-lrte_ring -Wl,-lrte_eal -Wl,-lrte_cmdline -Wl,-lrte_reorder -Wl,-lrte_kni -Wl,-lrte_mempool_stack -Wl,-lrte_pmd_af_packet -Wl,-lrte_pmd_ark -Wl,-lrte_pmd_avp -Wl,-lrte_pmd_bnxt -Wl,-lrte_pmd_bond -Wl,-lrte_pmd_cxgbe -Wl,-lrte_pmd_e1000 -Wl,-lrte_pmd_ena -Wl,-lrte_pmd_enic -Wl,-lrte_pmd_fm10k -Wl,-lrte_pmd_i40e -Wl,-lrte_pmd_ixgbe -Wl,-lrte_pmd_kni -Wl,-lrte_pmd_lio -Wl,-lrte_pmd_nfp -Wl,-lrte_pmd_null -Wl,-lrte_pmd_qede -Wl,-lrte_pmd_ring -Wl,-lrte_pmd_sfc_efx -Wl,-lrte_pmd_tap -Wl,-lrte_pmd_thunderx_nicvf -Wl,-lrte_pmd_virtio -Wl,-lrte_pmd_vhost -Wl,-lrte_pmd_vmxnet3_uio -Wl,-lrte_pmd_null_crypto -Wl,-lrte_pmd_crypto_scheduler -Wl,-lrte_pmd_skeleton_event -Wl,-lrte_pmd_sw_event -Wl,-lrte_pmd_octeontx_ssovf -Wl,--no-whole-archive -Wl,-lrt -Wl,-lm -Wl,-ldl -Wl,-export-dynamic -Wl,-export-dynamic

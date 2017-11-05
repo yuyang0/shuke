@@ -714,6 +714,9 @@ static void configCommand(int argc, char *argv[], adminConn *c) {
     }
     if (strcasecmp(argv[1], "GET") == 0) {
         ;
+    } else if (strcasecmp(argv[1], "GETALL") == 0) {
+        s = configToStr();
+        goto end;
     } else if (strcasecmp(argv[1], "SET") == 0) {
         ;
     } else if (strcasecmp(argv[1], "ZONEFILE") == 0) {

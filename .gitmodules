@@ -4,3 +4,6 @@
 [submodule "3rd/liburcu"]
 	path = 3rd/liburcu
 	url = https://github.com/yuyang0/userspace-rcu.git
+[submodule "3rd/libyaml"]
+	path = 3rd/libyaml
+	url = https://github.com/yaml/libyaml.git

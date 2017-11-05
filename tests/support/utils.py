@@ -9,7 +9,9 @@ import os
 import pytest
 import socket
 
-from . import server
+import vagrant
+
+from . import server, settings
 
 
 @pytest.fixture(scope="module")
@@ -30,6 +32,14 @@ def dns_srv(request):
     print(srv.get_stderr())
     if valgrind:
         assert check_valgrind_error(srv.get_stderr())
+
+
+@pytest.fixture(scope="session", autouse=True)
+def start_vagrant(request):
+    vgt = vagrant.Vagrant(root=os.path.join(settings.REPO_ROOT, "vagrant"))
+    vgt.up(provision=True)
+    # prepare something ahead of all tests
+    # request.addfinalizer(finalizer_function)
 
 
 def find_available_port():

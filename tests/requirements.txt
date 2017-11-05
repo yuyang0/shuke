@@ -1,3 +1,6 @@
 pymongo
 pytest
 dnspython
+python-vagrant
+fabric
+pyyaml

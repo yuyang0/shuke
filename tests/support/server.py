@@ -6,7 +6,6 @@
 """
 from __future__ import print_function, division, absolute_import
 import os
-import signal
 import socket
 import struct
 import subprocess
@@ -15,53 +14,39 @@ import time
 import copy
 import tempfile
 
+import yaml
+
 import dns.message
 import dns.query
-import pymongo
+import vagrant
+from fabric.api import env, execute, task, sudo
+from fabric.operations import put
+from fabric.contrib import files
 
-from . import settings, zone2mongo, utils
-from .config import default_cfg
+from . import settings
 from .zone2mongo import ZoneMongo
 
 
-def start_srv(cmd, stdin=None, stdout=None, stderr=None, timeout=10):
-    print("start", cmd)
-    args = cmd if isinstance(cmd, (tuple, list,)) else shlex.split(cmd)
-    p = subprocess.Popen(args, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True)
-    time.sleep(timeout)
-    print("poll : %s\n" % p.poll())
-    if p.poll() is not None:
-        raise Exception("cannot start %s" % (cmd))
-    return p
+DNS_BIN = '/shuke/build/shuke-server'
 
 
-def stop_srv(popen):
-    if popen.poll() is not None:
-        return
-    popen.terminate()
-    popen.wait()
+@task
+def start_shuke(cmd, pidfile="/var/run/shuke_53.pid"):
+    sudo('%s' % cmd, sudo=True)
 
 
-def to_conf(d):
-    def list_to_conf(l):
-        return ' [\n' + ' '.join(l) + '\n]'
+@task
+def stop_shuke(pidfile):
+    if files.is_exist(pidfile, sudo=True):
+        sudo("kill -9 `cat %s`" % pidfile)
 
-    def dict_to_conf(d):
-        l = [" %s %s \n" % (k, v) for k, v in d.items()]
-        return ' {\n' + ''.join(l) + '}'
 
-    ret_list = []
-    for k, v in d.items():
-        if isinstance(v, list):
-            v_ss = list_to_conf(v)
-        elif isinstance(v, dict):
-            v_ss = dict_to_conf(v)
-        elif isinstance(v, bool):
-            v_ss = "yes" if v else "no"
-        else:
-            v_ss = str(v)
-        ret_list.append("%s %s" % (k, v_ss))
-    return '\n'.join(ret_list)
+@task
+def shuke_is_running(pidfile):
+    if files.is_exist(pidfile, sudo=True):
+        res = sudo("kill -0 `cat %s`" % pidfile)
+        return res.return_code == 0
+    return False
 
 
 def recvall(sock, n):
@@ -106,8 +91,8 @@ class AdminClient(object):
 class DNSServer(object):
     def __init__(self, overrides=None, valgrind=False):
         self.pid = None
-        self.popen = None
-        self.cf = copy.deepcopy(default_cfg)
+        with open(os.path.join(settings.REPO_ROOT, "vagrant", "test.yaml")) as fp:
+            self.cf = yaml.load(fp)
         if overrides:
             self.cf.update(overrides)
         # override mongo host and mongo port
@@ -116,73 +101,52 @@ class DNSServer(object):
                 self.cf["mongo_host"] = settings.MONGO_HOST
             if "mongo_port" not in self.cf:
                 self.cf["mongo_port"] = settings.MONGO_PORT
-            self.zm = ZoneMongo(settings.MONGO_HOST, settings.MONGO_PORT, self.cf["mongo_dbname"])
+            self.zm = ZoneMongo(settings.MONGO_HOST,
+                                settings.MONGO_PORT,
+                                self.cf["mongo_dbname"])
         self.valgrind = valgrind
         self.stderr = tempfile.TemporaryFile(mode="w+", encoding="utf8")
 
-        self.cf_str = to_conf(self.cf)
+        self.cf_str = yaml.dump(self.cf)
         self.fp = tempfile.NamedTemporaryFile()
         self.fp.write(self.cf_str.encode("utf8"))
         self.fp.flush()
         fname = self.fp.name
 
+        put(fname, fname)
+
         if self.valgrind:
             # TODO find the bug of possible lost and still reachable memory
-            # self.cmd = "valgrind --leak-check=full --show-leak-kinds=all %s -c %s" % (settings.DNS_BIN, fname)
-            self.cmd = "valgrind --leak-check=full --show-reachable=no --show-possibly-lost=no %s -c %s" % (settings.DNS_BIN, fname)
+            self.cmd = "valgrind --leak-check=full --show-reachable=no --show-possibly-lost=no %s -c %s" % (DNS_BIN, fname)
         else:
-            self.cmd = "%s -c %s" % (settings.DNS_BIN, fname)
+            self.cmd = "%s -c %s" % (DNS_BIN, fname)
+        self.vagrant = vagrant.Vagrant(root=os.path.join(settings.REPO_ROOT, "vagrant"))
+
+    def _execute(self, fn, *args, **kwargs):
+        v = self.vagrant
+        env.hosts = [v.user_hostname_port()]
+        env.key_filename = v.keyfile()
+        env.disable_known_hosts = True  # useful for when the vagrant box ip changes.
+        execute(fn, *args, **kwargs)  # run a fabric task on the vagrant host.
 
     def start(self):
-        assert self.popen is None
         try:
-            self.popen = self._start_srv(self.cmd, stderr=self.stderr)
+            self._start_srv(self.cmd, stderr=self.stderr)
         except Exception as e:
             raise Exception("%s, stderr: %s" % (str(e), self.get_stderr()))
-        self.admin_cli = AdminClient(self.cf["admin_host"], self.cf["admin_port"])
+        self.admin_cli = AdminClient(self.cf["admin_host"],
+                                     self.cf["admin_port"])
 
-    def _start_srv(self, cmd, stdin=None, stdout=None, stderr=None, timeout=10):
-        print("start", cmd)
-        args = cmd if isinstance(cmd, (tuple, list,)) else shlex.split(cmd)
-        p = subprocess.Popen(args, stdin=stdin, stdout=stdout,
-                             stderr=stderr, close_fds=True)
-        time.sleep(timeout)
-        # when run daemon mode, p.pid doesn't return the right pid
-        if self.cf['daemonize'].lower() in ("no", "off", "false"):
-            if p.poll() is not None:
-                raise Exception("cannot start %s" % (cmd))
-        else:
-            # when run daemon mode, p.pid doesn't return the right pid
-            # so we need get pid from pidfile
-            pidfile = self.cf["pidfile"]
-            if not os.path.isfile(pidfile):
-                raise Exception("cannot start %s" % (cmd))
-            with open(pidfile, "r") as fp:
-                self.pid = int(fp.read())
-            if not utils.check_pid(self.pid):
-                raise Exception("cannot start %s" % (cmd))
-        print("poll : %s, pid1: %s, pid2: %s\n" % (p.poll(), p.pid, self.pid))
-        return p
+    def _start_srv(self, cmd, stdout=None, stderr=None, timeout=10):
+        self._execute(start_shuke)
 
     def _stop_srv(self):
-        if self.cf['daemonize'].lower() in ("no", "off", "false"):
-            if self.popen.poll() is not None:
-                return
-            self.popen.terminate()
-            self.popen.wait()
-        else:
-            os.kill(self.pid, signal.SIGTERM)
-            # wait util process exit
-            while True:
-                if utils.check_pid(self.pid) is False:
-                    break
+        self._execute(stop_shuke, self.cf["pidfile"])
 
     def stop(self):
         self.admin_cli.close()
         self.fp.close()
-        if self.popen:
-            self._stop_srv()
-            self.popen = None
+        self._stop_srv()
 
     def get_stderr(self):
         self.stderr.seek(0)
@@ -211,7 +175,7 @@ class DNSServer(object):
             return dns.query.udp(q, dns_host, port=dns_port)
 
     def isalive(self):
-        return self.popen.poll() is not None
+        self._execute(shuke_is_running)
 
     def mongo_clear(self):
         self.zm.del_all_zones()

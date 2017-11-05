@@ -167,6 +167,8 @@ struct shuke {
     int tcp_idle_timeout;
     int max_tcp_connections;
 
+    char *data_store;
+
     char *zone_files_root;
     dict *zone_files_dict;
 
@@ -179,7 +181,6 @@ struct shuke {
     char *admin_host;
     int admin_port;
 
-    char *data_store;
     int all_reload_interval;
     bool minimize_resp;
     // end config
@@ -338,5 +339,11 @@ void collectStats();
 void sigsegvHandler(int sig, siginfo_t *info, void *secret);
 void _shukeAssert(char *estr, char *file, int line);
 void _shukePanic(char *msg, char *file, int line);
+
+/*----------------------------------------------
+ *     config
+ *---------------------------------------------*/
+sds configToStr();
+void initConfigFromYamlFile(char *conffile);
 
 #endif /* _SHUKE_H_ */

@@ -7,7 +7,6 @@
 
 #include "dpdk_module.h"
 
-#include "conf.h"
 #include "utils.h"
 #include "version.h"
 #include "ds.h"
@@ -15,6 +14,7 @@
 
 #include "shuke.h"
 #include "asciilogo.h"
+
 
 struct shuke sk;
 
@@ -913,39 +913,9 @@ dictType commandTableDictType = {
         NULL,                         /* val destructor */
 };
 
-static int addZoneFileToConf(char *errstr, int argc, char **argv, void *privdata) {
-    int err = CONF_OK;
-    dict *d = privdata;
-    char *k = NULL, *v = NULL;
-    if (argc != 2) goto error;
-    k = strip(argv[0], "\"");
-    v = strip(argv[1], "\"");
-    if (isAbsDotDomain(k) == false) {
-        snprintf(errstr, ERR_STR_LEN, "%s is not absolute domain name.", k);
-        goto error;
-    }
-    v = toAbsPath(v, sk.zone_files_root);
-    if (access(v, F_OK) == -1) {
-        snprintf(errstr, ERR_STR_LEN, "%s doesn't exist.", v);
-        goto error;
-    }
-    if (dictAdd(d, k, v) != DICT_OK) {
-        snprintf(errstr, ERR_STR_LEN, "duplicate zone file %s", k);
-        goto error;
-    }
-    goto ok;
-error:
-    err = CONF_ERR;
-ok:
-    // don't use zfree.
-    free(v);
-    return err;
-}
-
-static char *getConfigBuf(int argc, char **argv) {
+static char *getConfigFname(int argc, char **argv) {
     int c;
     char *conffile = NULL;
-    char *cbuf;
     char cwd[MAXLINE];
     if (getcwd(cwd, MAXLINE) == NULL) {
         fprintf(stderr, "getcwd: %s.\n", strerror(errno));
@@ -971,149 +941,8 @@ static char *getConfigBuf(int argc, char **argv) {
         fprintf(stderr, "you must specify config file\n");
         exit(1);
     }
-    cbuf = readFile(conffile);
-    if (cbuf == NULL) {
-        fprintf(stderr, "Can't open configure file(%s)\n", conffile);
-        exit(1);
-    }
     sk.configfile = toAbsPath(conffile, cwd);
-    return cbuf;
-}
-
-static void initConfigFromFile(int argc, char **argv) {
-    int conf_err;
-    char cwd[MAXLINE];
-
-    char *cbuf = getConfigBuf(argc, argv);
-    if (getcwd(cwd, MAXLINE) == NULL) {
-        fprintf(stderr, "getcwd: %s.\n", strerror(errno));
-        exit(1);
-    }
-
-    // set default values
-    sk.master_lcore_id = -1;
-    sk.promiscuous_on = false;
-    sk.numa_on = false;
-
-    sk.only_udp = false;
-    sk.port = 53;
-    sk.daemonize = false;
-    sk.logVerbose = false;
-
-    sk.tcp_backlog = 511;
-    sk.tcp_keepalive = 300;
-    sk.tcp_idle_timeout = 120;
-    sk.max_tcp_connections = 1024;
-
-    sk.retry_interval = 120;
-    sk.mongo_port = 27017;
-
-    sk.admin_port = 14141;
-    sk.all_reload_interval = 36000;
-    sk.minimize_resp = true;
-
-
-    sk.coremask = getStrVal(cbuf, "coremask", NULL);
-    CHECK_CONFIG("coremask", sk.coremask != NULL,
-                 "Config Error: coremask can't be empty");
-    conf_err = getIntVal(sk.errstr, cbuf, "master_lcore_id", &sk.master_lcore_id);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    sk.mem_channels = getStrVal(cbuf, "mem_channels", NULL);
-    CHECK_CONFIG("mem_channels", sk.mem_channels != NULL,
-                 "Config Error: mem_channels can't be empty");
-    conf_err = getBoolVal(sk.errstr, cbuf, "promiscuous_on", &sk.promiscuous_on);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "portmask", &sk.portmask);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "numa_on", &sk.numa_on);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "jumbo_on", &sk.jumbo_on);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "max_pkt_len", &sk.max_pkt_len);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    sk.queue_config = getStrVal(cbuf, "queue_config", NULL);
-    CHECK_CONFIG("queue_config", sk.queue_config != NULL,
-                 "Config Error: queue_config can't be empty");
-
-    /* printf("cmsk: %s, pmsk: %d" */
-    /*        " config: %s, promiscuous: %d" */
-    /*        " enable_jumbo: %d\n", */
-    /*        sk.coremask, sk.portmask, */
-    /*        sk.rx_queue_config, sk.promiscuous_on, */
-    /*        sk.jumbo_on); */
-
-    sk.bindaddr_count = CONFIG_BINDADDR_MAX;
-    if (getStrArrayVal(sk.errstr, cbuf, "bind", sk.bindaddr, &(sk.bindaddr_count)) < 0) {
-        fprintf(stderr, "Config Error: %s\n", sk.errstr);
-        exit(1);
-    }
-
-    conf_err = getIntVal(sk.errstr, cbuf, "port", &sk.port);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    conf_err = getBoolVal(sk.errstr, cbuf, "only_udp", &sk.only_udp);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    sk.data_store = getStrVal(cbuf, "data_store", NULL);
-    CHECK_CONFIG("data_store", sk.data_store != NULL,
-                 "Config Error: data_store can't be empty");
-
-    conf_err = getIntVal(sk.errstr, cbuf, "tcp_backlog", &sk.tcp_backlog);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "tcp_keepalive", &sk.tcp_keepalive);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "tcp_idle_timeout", &sk.tcp_idle_timeout);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getIntVal(sk.errstr, cbuf, "max_tcp_connections", &sk.max_tcp_connections);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    sk.pidfile = getStrVal(cbuf, "pidfile", "/var/run/cdns.pid");
-    sk.query_log_file = getStrVal(cbuf, "query_log_file", NULL);
-    sk.logfile = getStrVal(cbuf, "logfile", NULL);
-
-    conf_err = getBoolVal(sk.errstr, cbuf, "log_verbose", &sk.logVerbose);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "daemonize", &sk.daemonize);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    sk.logLevelStr = getStrVal(cbuf, "loglevel", "info");
-
-    sk.admin_host = getStrVal(cbuf, "admin_host", NULL);
-    conf_err = getIntVal(sk.errstr, cbuf, "admin_port", &sk.admin_port);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    conf_err = getIntVal(sk.errstr, cbuf, "all_reload_interval", &sk.all_reload_interval);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-    conf_err = getBoolVal(sk.errstr, cbuf, "minimize_resp", &sk.minimize_resp);
-    CHECK_CONF_ERR(conf_err, sk.errstr);
-
-    if (strcasecmp(sk.data_store, "file") == 0) {
-        sk.zone_files_root = getStrVal(cbuf, "zone_files_root", cwd);
-        if (*(sk.zone_files_root) != '/') {
-            fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
-            exit(1);
-        }
-        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_HEAP);
-        if (getBlockVal(sk.errstr, cbuf, "zone_files", &addZoneFileToConf, sk.zone_files_dict) != CONF_OK) {
-            fprintf(stderr, "Config Error: %s.\n", sk.errstr);
-            exit(1);
-        }
-    } else if (strcasecmp(sk.data_store, "mongo") == 0) {
-        sk.mongo_host = getStrVal(cbuf, "mongo_host", NULL);
-        sk.mongo_dbname = getStrVal(cbuf, "mongo_dbname", NULL);
-        conf_err = getIntVal(sk.errstr, cbuf, "mongo_port", &sk.mongo_port);
-        CHECK_CONF_ERR(conf_err, sk.errstr);
-        conf_err = getLongVal(sk.errstr, cbuf, "retry_interval", &sk.retry_interval);
-        CHECK_CONF_ERR(conf_err, sk.errstr);
-
-        CHECK_CONFIG("mongo_host", sk.mongo_host != NULL, NULL);
-        CHECK_CONFIG("mongo_dbname", sk.mongo_dbname != NULL, NULL);
-    } else {
-        fprintf(stderr, "invalid data_store config.\n");
-        exit(1);
-    }
-    free(cbuf);
+    return sk.configfile;
 }
 
 static void initShuke() {
@@ -1582,7 +1411,8 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    initConfigFromFile(argc, argv);
+    getConfigFname(argc, argv);
+    initConfigFromYamlFile(sk.configfile);
     if (sk.daemonize) daemonize();
     if (sk.daemonize) createPidFile();
     // configure log as early as possible

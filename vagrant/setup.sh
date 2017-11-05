@@ -20,14 +20,14 @@ export RTE_TARGET="x86_64-native-linuxapp-gcc"
 export RTE_SDK=`ls -d $SHUKE_DIR/3rd/dpdk-*`
 HUGEPGSZ=`cat /proc/meminfo  | grep Hugepagesize | cut -d : -f 2 | tr -d ' '`
 
-echo "------------------------------------------------------------------------------"
+echo "--------------------------------------------------------------"
 echo "0:$0"
 echo "1:$1"
 echo "SHUKE_DIR:  $SHUKE_DIR"
 echo "RTE_SDK:    $RTE_SDK"
 echo "RTE_TARGET: $RTE_TARGET"
 echo "HUGEPGSZ:   $HUGEPGSZ"
-echo "------------------------------------------------------------------------------"
+echo "--------------------------------------------------------------"
 
 build_dpdk() {
     if [ ! -d "$RTE_SDK/$RTE_TARGET" ]; then
@@ -218,20 +218,46 @@ build_dpdk
 # Install kernel modules
 load_igb_uio_module
 load_kni_module
-set_non_numa_pages 1024
+set_non_numa_pages 512
 
 # Bind secondary network adapter
 # I need to set a second adapter in Vagrantfile
 # Note that this NIC setup does not persist across reboots
-for NET_IF_NAME in enp0s8 enp0s9
-do
-    sudo ifconfig ${NET_IF_NAME} down
-    sudo ${RTE_SDK}/usertools/dpdk-devbind.py --bind=igb_uio ${NET_IF_NAME}
-done
+nr_uio_if=`python $RTE_SDK/usertools/dpdk-devbind.py -s | grep "drv=igb_uio"|wc -l`
+if [ $nr_uio_if -eq 0 ];
+then
+    for NET_IF_NAME in enp0s8 enp0s9
+    do
+        echo "bind $NET_IF_NAME to uio."
+        sudo ifconfig ${NET_IF_NAME} down
+        sudo ${RTE_SDK}/usertools/dpdk-devbind.py --bind=igb_uio ${NET_IF_NAME}
+    done
+else
+    echo "devices have already been binded to uio, skip it."
+fi
+
 # Add env variables setting to .profile file so that they are set at each login
-echo "export RTE_SDK=${RTE_SDK}" >> ${HOME}/.profile
-echo "export RTE_TARGET=${RTE_TARGET}" >> ${HOME}/.profile
+# echo "export RTE_SDK=${RTE_SDK}" >> ${HOME}/.profile
+# echo "export RTE_TARGET=${RTE_TARGET}" >> ${HOME}/.profile
 
 sudo apt-get install -y autoconf libtool
 # build shuke
 make -C ${SHUKE_DIR}
+
+install_mongo()
+{
+    sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 0C49F3730359A14518585931BC711F9BA15703C6
+    echo "deb [ arch=amd64,arm64 ] http://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.4 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.4.list
+    sudo apt-get update
+    sudo apt-get install -y mongodb-org
+}
+
+if ! which mongod >/dev/null
+then
+    echo "install mongodb."
+    install_mongo
+else
+    echo "mongodb is already installed, skip it."
+fi
+
+sudo systemctl start mongod

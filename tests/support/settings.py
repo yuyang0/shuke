@@ -10,7 +10,6 @@ from os.path import dirname, abspath
 
 
 REPO_ROOT = dirname(dirname(dirname(abspath(__file__))))
-DNS_BIN = os.path.join(REPO_ROOT, "build/shuke-server")
 
 ASSETS_DIR = os.path.join(REPO_ROOT, "tests/assets")
 EXAMPLE_ZONE_FILE = os.path.join(ASSETS_DIR, "example.z")
