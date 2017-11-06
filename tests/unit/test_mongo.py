@@ -12,12 +12,10 @@ import time
 import pytest
 
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
-from support import dns_srv, settings, utils
+from support import settings
 
 overrides = {
     "data_store": "mongo",
-    # "admin_port": utils.find_available_port(),
-    # "port": utils.find_available_port(),
 }
 valgrind = False
 

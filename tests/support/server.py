@@ -27,6 +27,27 @@ from .zone2mongo import ZoneMongo
 DNS_BIN = '/shuke/build/shuke-server'
 
 
+def check_valgrind_error(ss):
+    success = [
+        "definitely lost: 0 bytes",
+        "no leaks are possible",
+    ]
+    for succ in success:
+        if ss.find(succ) != -1:
+            return True
+    return False
+
+
+def check_pid(pid):
+    """ Check For the existence of a unix pid. """
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    else:
+        return True
+
+
 @task
 def start_shuke(cmd, pidfile, config):
     put(config, config)
@@ -184,3 +205,13 @@ class DNSServer(object):
 
     def mongo_delete_zone(self, dot_origin):
         self.zm.del_zone(dot_origin)
+
+
+if __name__ == "__main__":
+    srv = DNSServer(overrides={"valgrind": False})
+    print(srv.cf_str)
+
+    srv.start()
+    # print(srv.info())
+    time.sleep(10)
+    srv.stop()

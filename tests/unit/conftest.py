@@ -5,13 +5,17 @@
 
 """
 from __future__ import print_function, division, absolute_import
+
+import sys
 import os
-import pytest
+from os.path import dirname, abspath
 import socket
 
-import vagrant
+sys.path.insert(0, dirname(dirname(abspath(__file__))))
+from support import settings, server
 
-from . import server, settings
+import pytest
+import vagrant
 
 
 @pytest.fixture(scope="module")
@@ -29,16 +33,27 @@ def dns_srv(request):
 
     yield srv
     srv.stop()
-    if valgrind:
-        assert check_valgrind_error(srv.get_stderr())
 
 
 @pytest.fixture(scope="session", autouse=True)
 def start_vagrant(request):
-    vgt = vagrant.Vagrant(root=os.path.join(settings.REPO_ROOT, "vagrant"))
-    vgt.up(provision=True)
+    print("starting vagrant...")
+    vagrant_root = os.path.join(settings.REPO_ROOT, "vagrant")
+    vgt = vagrant.Vagrant(root=vagrant_root)
+    statuses = vgt.status()
+    if len(statuses) >= 1 and statuses[0].state == "running":
+        print("vm is in running state, skip `vagrant up`")
+    else:
+        res = vgt.up(provision=True, stream_output=True)
+        if res is not None:
+            for output in res:
+                print(res)
+    print("vagrant is started...")
+
     # prepare something ahead of all tests
-    # request.addfinalizer(finalizer_function)
+    def finalizer_func():
+        pass
+    request.addfinalizer(finalizer_func)
 
 
 def find_available_port():
@@ -50,24 +65,3 @@ def find_available_port():
     port = sock.getsockname()[1]
     sock.close()
     return port
-
-
-def check_valgrind_error(ss):
-    success = [
-        "definitely lost: 0 bytes",
-        "no leaks are possible",
-    ]
-    for succ in success:
-        if ss.find(succ) != -1:
-            return True
-    return False
-
-
-def check_pid(pid):
-    """ Check For the existence of a unix pid. """
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    else:
-        return True
