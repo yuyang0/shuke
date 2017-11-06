@@ -2,5 +2,5 @@ pymongo
 pytest
 dnspython
 python-vagrant
-fabric
+fabric3
 pyyaml

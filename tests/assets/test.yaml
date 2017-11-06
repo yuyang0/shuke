@@ -1,0 +1,105 @@
+###############################################
+#  DPDK related config
+###############################################
+coremask:  "0x3"
+master_lcore_id:  0
+
+mem_channels:  4
+portmask:  0x3
+promiscuous_on: no
+numa_on: yes
+jumbo_on: no
+max_pkt_len: 2048
+# queue configuration
+#
+# pls note: shuke uses run-to-completion model
+#   so every core should has a rx queue and a tx queue and
+#   rx queue id is equal to tx queue id.
+#
+# EBNF grammar:
+#
+#    config   ::= <part> {";" <part>}
+#    part     ::= <cores>"."<ports>
+#    cores    ::= <num_exp>
+#    ports    ::= <num_exp>
+#    num_exp  ::= <num> | "[" <num_list> {"," <num_list>} "]"
+#    num_list ::= <num> | <range>
+#    range    ::= <num>"-"<num>
+#    num      ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+#
+# examples
+#    [1-3, 4, 7].[1-3]   using cores 1,2,3,4,7 to handle port 1,2,3
+#    [1-3, 4, 7].[1,2,3]   using cores 1,2,3,4,7 to handle port 1,2,3
+#    [1-5].0; [2-6].1    cores 1-5 handle port 0, cores 2-6 handle port 1
+queue_config: "[1].[0-1]"
+
+
+# the addresses bind to kni virtual interfaces
+# the number of address should equal to the number of enabled port, only ipv4 addresses are allowed
+bind:
+  - 172.28.128.10
+  - 172.28.128.20
+
+# in production environment, use 53
+port: 19899
+
+# if set true, shuke will disable tcp server
+only_udp:  false
+
+tcp_backlog:      511
+tcp_keepalive:    300
+
+# timeout used to close idle tcp connection.
+tcp_idle_timeout: 120
+max_tcp_connections: 1024
+
+daemonize: yes
+
+pidfile: /var/run/shuke_53.pid
+
+# please note: query log hurts performance.
+# just comment out below line to disable query log
+query_log_file:  "/tmp/shuke_query.log"
+
+loglevel:  info
+logfile:   "/tmp/shuke.log"
+
+# logging the file and line information.
+log_verbose: yes
+
+# interval between the connect retry to mongodb
+# used to avoid reconnecting too often when mongodb fails.
+retry_interval: 5
+
+# currently shuke only support to fetch zone data from file or mongodb
+# so the valid values of `data_store` are "mongo", "file"
+#
+# if data_store is set to `file`, then zone_files_root and zone_files should be set correctly
+# if data_store is set to `mongo`, then mongo_host, mongo_port and mongo_dbname should be set correctly
+data_store:  file
+
+# only valid when data_store is file
+zone_files_root: /shuke
+
+# every line contains a zone file, the format is:
+# zone_name    relative_file_path
+zone_files:
+   example.com.:  "tests/assets/example.z"
+
+
+# only valid when data_store's value is mongo
+mongo_host: 127.0.0.1
+mongo_port: 27017
+mongo_dbname: zone
+
+# address for tcp server runs in main thread,
+# this server mainly used to debug or perform admin operation.
+
+# admin_host: 127.0.0.1
+admin_port: 14141
+
+all_reload_interval: 36000  # 10 hours
+
+# if minimize_resp is enabled, then dns server won't return some optional records(such as NS records) in response.
+# so it can decrease the response size
+minimize_resp: yes

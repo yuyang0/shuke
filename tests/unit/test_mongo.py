@@ -16,8 +16,8 @@ from support import dns_srv, settings, utils
 
 overrides = {
     "data_store": "mongo",
-    "admin_port": utils.find_available_port(),
-    "port": utils.find_available_port(),
+    # "admin_port": utils.find_available_port(),
+    # "port": utils.find_available_port(),
 }
 valgrind = False
 

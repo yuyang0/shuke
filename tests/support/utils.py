@@ -29,7 +29,6 @@ def dns_srv(request):
 
     yield srv
     srv.stop()
-    print(srv.get_stderr())
     if valgrind:
         assert check_valgrind_error(srv.get_stderr())
 

@@ -8,10 +8,7 @@ from __future__ import print_function, division, absolute_import
 import os
 import socket
 import struct
-import subprocess
-import shlex
 import time
-import copy
 import tempfile
 
 import yaml
@@ -31,19 +28,31 @@ DNS_BIN = '/shuke/build/shuke-server'
 
 
 @task
-def start_shuke(cmd, pidfile="/var/run/shuke_53.pid"):
-    sudo('%s' % cmd, sudo=True)
+def start_shuke(cmd, pidfile, config):
+    put(config, config)
+    sudo('%s' % cmd)
+    for i in range(5):
+        if not files.exists(pidfile, use_sudo=True):
+            time.sleep(2)
+        else:
+            time.sleep(5)
+            break
 
 
 @task
 def stop_shuke(pidfile):
-    if files.is_exist(pidfile, sudo=True):
-        sudo("kill -9 `cat %s`" % pidfile)
+    if files.exists(pidfile, use_sudo=True):
+        sudo("kill -15 `cat %s`" % pidfile)
+        for i in range(5):
+            if files.exists(pidfile, use_sudo=True):
+                time.sleep(2)
+            else:
+                break
 
 
 @task
 def shuke_is_running(pidfile):
-    if files.is_exist(pidfile, sudo=True):
+    if files.exists(pidfile, use_sudo=True):
         res = sudo("kill -0 `cat %s`" % pidfile)
         return res.return_code == 0
     return False
@@ -62,10 +71,10 @@ def recvall(sock, n):
 
 class AdminClient(object):
     def __init__(self, host, port):
-        self.host = host
+        self.host = host if host else "127.0.0.1"
         self.port = port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((host, int(port)))
+        self.sock.connect((self.host, int(self.port)))
 
     def send(self, msg):
         b_msg = msg.encode("utf8")
@@ -91,29 +100,23 @@ class AdminClient(object):
 class DNSServer(object):
     def __init__(self, overrides=None, valgrind=False):
         self.pid = None
-        with open(os.path.join(settings.REPO_ROOT, "vagrant", "test.yaml")) as fp:
+        with open(os.path.join(settings.ASSETS_DIR, "test.yaml")) as fp:
             self.cf = yaml.load(fp)
         if overrides:
             self.cf.update(overrides)
+        self.cf.pop("admin_host", None)
         # override mongo host and mongo port
         if self.cf["data_store"].lower() == "mongo":
-            if "mongo_host" not in self.cf:
-                self.cf["mongo_host"] = settings.MONGO_HOST
-            if "mongo_port" not in self.cf:
-                self.cf["mongo_port"] = settings.MONGO_PORT
             self.zm = ZoneMongo(settings.MONGO_HOST,
                                 settings.MONGO_PORT,
                                 self.cf["mongo_dbname"])
         self.valgrind = valgrind
-        self.stderr = tempfile.TemporaryFile(mode="w+", encoding="utf8")
 
         self.cf_str = yaml.dump(self.cf)
         self.fp = tempfile.NamedTemporaryFile()
         self.fp.write(self.cf_str.encode("utf8"))
         self.fp.flush()
         fname = self.fp.name
-
-        put(fname, fname)
 
         if self.valgrind:
             # TODO find the bug of possible lost and still reachable memory
@@ -131,26 +134,25 @@ class DNSServer(object):
 
     def start(self):
         try:
-            self._start_srv(self.cmd, stderr=self.stderr)
+            self._start_srv()
         except Exception as e:
-            raise Exception("%s, stderr: %s" % (str(e), self.get_stderr()))
-        self.admin_cli = AdminClient(self.cf["admin_host"],
+            raise Exception("%s" % (str(e),))
+        self.admin_cli = AdminClient(self.cf.get("admin_host", None),
                                      self.cf["admin_port"])
 
-    def _start_srv(self, cmd, stdout=None, stderr=None, timeout=10):
-        self._execute(start_shuke)
+    def _start_srv(self, timeout=10):
+        self._execute(start_shuke, self.cmd, self.cf["pidfile"], self.fp.name)
 
     def _stop_srv(self):
         self._execute(stop_shuke, self.cf["pidfile"])
+
+    def isalive(self):
+        self._execute(shuke_is_running, self.cf["pidfile"])
 
     def stop(self):
         self.admin_cli.close()
         self.fp.close()
         self._stop_srv()
-
-    def get_stderr(self):
-        self.stderr.seek(0)
-        return self.stderr.read()
 
     def set_zone(self, ss):
         return self.admin_cmd("zone set \"%s\"" % ss)
@@ -173,9 +175,6 @@ class DNSServer(object):
             return dns.query.tcp(q, dns_host, port=dns_port)
         else:
             return dns.query.udp(q, dns_host, port=dns_port)
-
-    def isalive(self):
-        self._execute(shuke_is_running)
 
     def mongo_clear(self):
         self.zm.del_all_zones()

@@ -54,7 +54,7 @@ Vagrant.configure("2") do |config|
       config.vm.synced_folder "../", "/shuke", type: "rsync",
        # rsync__auto: false,
        rsync__exclude: [
-         "build/*",
+         "build",
          "*/x86_64-native-linuxapp-gcc",
          "3rd/himongo",
          "3rd/liburcu",

@@ -237,8 +237,13 @@ else
 fi
 
 # Add env variables setting to .profile file so that they are set at each login
-# echo "export RTE_SDK=${RTE_SDK}" >> ${HOME}/.profile
-# echo "export RTE_TARGET=${RTE_TARGET}" >> ${HOME}/.profile
+if grep -q "RTE_SDK" ${HOME}/.profile
+then
+    echo "RTE_SDK already in profile."
+else
+    echo "export RTE_SDK=${RTE_SDK}" >> ${HOME}/.profile
+    echo "export RTE_TARGET=${RTE_TARGET}" >> ${HOME}/.profile
+fi
 
 sudo apt-get install -y autoconf libtool
 # build shuke
@@ -249,7 +254,8 @@ install_mongo()
     sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 0C49F3730359A14518585931BC711F9BA15703C6
     echo "deb [ arch=amd64,arm64 ] http://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.4 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-3.4.list
     sudo apt-get update
-    sudo apt-get install -y mongodb-org
+    sudo apt-get install -y mongodb-org --allow-unauthenticated
+    sed -i 's/bindIp: /# bindIp: /g' /etc/mongod.conf
 }
 
 if ! which mongod >/dev/null

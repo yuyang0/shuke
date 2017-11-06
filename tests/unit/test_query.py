@@ -14,9 +14,9 @@ from support import dns_srv, settings, utils
 
 overrides = {
     "data_store": "file",
-    "zone_files": {"example.com.": settings.EXAMPLE_ZONE_FILE},
-    "admin_port": utils.find_available_port(),
-    "port": utils.find_available_port(),
+    # "zone_files": {"example.com.": settings.EXAMPLE_ZONE_FILE},
+    # "admin_port": utils.find_available_port(),
+    # "port": utils.find_available_port(),
     "minimize_resp": False,
 }
 valgrind = False
