@@ -47,7 +47,7 @@ def start_vagrant(request):
         res = vgt.up(provision=True, stream_output=True)
         if res is not None:
             for output in res:
-                print(res)
+                print(output, end='')
     print("vagrant is started...")
 
     # prepare something ahead of all tests

@@ -52,23 +52,26 @@ def check_pid(pid):
 def start_shuke(cmd, pidfile, config):
     put(config, config)
     sudo('%s' % cmd)
-    for i in range(5):
-        if not files.exists(pidfile, use_sudo=True):
-            time.sleep(2)
-        else:
-            time.sleep(5)
+    for i in range(10):
+        if files.exists(pidfile, use_sudo=True):
             break
+        time.sleep(2)
+    else:
+        raise Exception("shuke doesn't start correctly.")
+    time.sleep(5)
 
 
 @task
 def stop_shuke(pidfile):
     if files.exists(pidfile, use_sudo=True):
         sudo("kill -15 `cat %s`" % pidfile)
-        for i in range(5):
-            if files.exists(pidfile, use_sudo=True):
-                time.sleep(2)
-            else:
+        for i in range(10):
+            if not files.exists(pidfile, use_sudo=True):
                 break
+            time.sleep(2)
+        else:
+            raise Exception("shuke doesn't stop correctly.")
+        time.sleep(5)
 
 
 @task
