@@ -82,10 +82,15 @@ int initAdminServer(void) {
     }
     INIT_LIST_HEAD(&(sk.head));
 
-    if (strchr(host, ':') == NULL) {
-        sk.fd = anetTcpServer(sk.errstr, port, host, sk.tcp_backlog, 0);
+    if (host == NULL) {
+        // bind all addresses
+        sk.fd = anetTcpServer(sk.errstr, port, NULL, sk.tcp_backlog, 0);
     } else {
-        sk.fd = anetTcp6Server(sk.errstr, port, host, sk.tcp_backlog, 0);
+        if (strchr(host, ':') == NULL) {
+            sk.fd = anetTcpServer(sk.errstr, port, host, sk.tcp_backlog, 0);
+        } else {
+            sk.fd = anetTcp6Server(sk.errstr, port, host, sk.tcp_backlog, 0);
+        }
     }
     if (sk.fd == ANET_ERR) {
         return ERR_CODE;
