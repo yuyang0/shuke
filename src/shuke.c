@@ -1414,7 +1414,6 @@ int main(int argc, char *argv[]) {
     getConfigFname(argc, argv);
     initConfigFromYamlFile(sk.configfile);
     if (sk.daemonize) daemonize();
-    if (sk.daemonize) createPidFile();
     // configure log as early as possible
     config_log();
 
@@ -1443,6 +1442,9 @@ int main(int argc, char *argv[]) {
         sk.tcp_srv = tcpServerCreate();
         assert(sk.tcp_srv);
     }
+    // create pidfile before enter the loop
+    if (sk.daemonize) createPidFile();
+
     aeMain(sk.el);
 
     if (! sk.only_udp) cleanup_kni_module();
