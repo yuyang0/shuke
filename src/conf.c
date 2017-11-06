@@ -55,23 +55,24 @@
 
 #define GET_STR_CONFIG(name, v, t)                                  \
     do{                                                             \
-        CHECK_CONFIG(name, t.type == YAML_SCALAR_EVENT,             \
+        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,             \
                      "Config Error: " name "should be a string");   \
-        v = strdup((char*)t.data.scalar.value);                            \
+        if((v) != NULL) free(v); \
+        (v) = strdup((char*)(t).data.scalar.value);                            \
     } while(0)
 
 #define GET_INT_CONFIG(name, v, t)                                      \
     do{                                                                 \
-        CHECK_CONFIG(name, t.type == YAML_SCALAR_EVENT,                 \
+        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,                 \
                      "Config Error: " name "should be a string");       \
         char *end = NULL;                                               \
         long lval;                                                      \
         int base = 10;                                                  \
-        char *str_val = (char*)t.data.scalar.value;                            \
+        char *str_val = (char*)(t).data.scalar.value;                            \
         if (str_val[0] == '0') base = 16;                               \
         lval = strtol(str_val, &end, base);                             \
         if (*end == '\0') {                                             \
-            v = lval;                                                   \
+            (v) = lval;                                                   \
         } else {                                                        \
             fprintf(stderr, "invalid character for config %s", name);  \
             exit(-1);                                                   \
@@ -80,49 +81,49 @@
 
 #define GET_BOOL_CONFIG(name, v, t)                                     \
     do{                                                                 \
-        CHECK_CONFIG(name, t.type == YAML_SCALAR_EVENT,                 \
+        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,                 \
                      "Config Error: " name "should be a string");       \
-        char *str_val = (char*)t.data.scalar.value;                        \
+        char *str_val = (char*)(t).data.scalar.value;                        \
         if (!strcasecmp(str_val, "on") ||                               \
             !strcasecmp(str_val, "yes") ||                              \
             !strcasecmp(str_val, "true")) {                             \
-            v = true;                                                   \
+            (v) = true;                                                   \
         } else if (!strcasecmp(str_val, "off") ||                       \
                    !strcasecmp(str_val, "no") ||                        \
                    !strcasecmp(str_val, "false")) {                     \
-            v = false;                                                  \
+            (v) = false;                                                  \
         } else {                                                        \
             fprintf(stderr, "only on/true/yes and off/false/no is valid for the key %s.", name); \
             exit(-1);                                                   \
         }                                                               \
     } while(0)
 
-
-static int addZoneFileToConf(char *k, char *v) {
-    int err = OK_CODE;
-    dict *d = sk.zone_files_dict;
-    k = strip(k, "\"");
-    v = strip(v, "\"");
-    if (isAbsDotDomain(k) == false) {
-        snprintf(sk.errstr, ERR_STR_LEN, "%s is not absolute domain name.", k);
-        goto error;
+/*!
+ * convert all the zone file name to absolute path
+ * @return
+ */
+static int refineZoneFileConfig() {
+    dictIterator *it = dictGetIterator(sk.zone_files_dict);
+    dictEntry *de;
+    char *dotOrigin, *fname;
+    while((de = dictNext(it)) != NULL) {
+        dotOrigin = dictGetKey(de);
+        fname = dictGetVal(de);
+        if (isAbsDotDomain(dotOrigin) == false) {
+            snprintf(sk.errstr, ERR_STR_LEN, "%s is not absolute domain name.", dotOrigin);
+            return ERR_CODE;
+        }
+        fname = toAbsPath(fname, sk.zone_files_root);
+        if (access(fname, F_OK) == -1) {
+            snprintf(sk.errstr, ERR_STR_LEN, "%s doesn't exist.", fname);
+            free(fname);
+            return ERR_CODE;
+        }
+        dictReplace(sk.zone_files_dict, dotOrigin, fname);
+        free(fname);
     }
-    v = toAbsPath(v, sk.zone_files_root);
-    if (access(v, F_OK) == -1) {
-        snprintf(sk.errstr, ERR_STR_LEN, "%s doesn't exist.", v);
-        goto error;
-    }
-    if (dictAdd(d, k, v) != DICT_OK) {
-        snprintf(sk.errstr, ERR_STR_LEN, "duplicate zone file %s", k);
-        goto error;
-    }
-    goto ok;
-error:
-    err = ERR_CODE;
-ok:
-    // don't use zfree.
-    free(v);
-    return err;
+    dictReleaseIterator(it);
+    return OK_CODE;
 }
 
 static int _parse_yaml_config(FILE *fh) {
@@ -290,8 +291,9 @@ static int _parse_yaml_config(FILE *fh) {
                             fprintf(stderr, "config value of zone_files must be a map of <zname, fname>\n");
                             exit(-1);
                         }
-                        if(addZoneFileToConf((char*)k.data.scalar.value, (char*)v.data.scalar.value) != OK_CODE) {
-                            fprintf(stderr, "zone_file error: %s\n", sk.errstr);
+
+                        if (dictAdd(sk.zone_files_dict, (char*)k.data.scalar.value, (char*)v.data.scalar.value) != DICT_OK) {
+                            fprintf(stderr, "duplicate zone file %s", (char*)k.data.scalar.value);
                             exit(EXIT_FAILURE);
                         }
                         yaml_event_delete(&k);
@@ -357,9 +359,8 @@ void initConfigFromYamlFile(char *conffile) {
     sk.admin_port = 14141;
     sk.all_reload_interval = 36000;
     sk.minimize_resp = true;
-    sk.pidfile = "/var/run/shuke.pid";
-    sk.logLevelStr = "info";
-    sk.zone_files_root = strdup(cwd);
+    sk.pidfile = strdup("/var/run/shuke.pid");
+    sk.logLevelStr = strdup("info");
 
     _parse_yaml_config(fp);
 
@@ -371,9 +372,15 @@ void initConfigFromYamlFile(char *conffile) {
     CHECK_CONFIG("data_store", sk.data_store != NULL,
                  "Config Error: data_store can't be empty");
     if (strcasecmp(sk.data_store, "file") == 0) {
-        assert(sk.zone_files_root != NULL);
+        if (sk.zone_files_root == NULL) {
+            sk.zone_files_root = strdup(cwd);
+        }
         if (*(sk.zone_files_root) != '/') {
             fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
+            exit(1);
+        }
+        if (refineZoneFileConfig() != OK_CODE) {
+            fprintf(stderr, "Config Error: %s.\n", sk.errstr);
             exit(1);
         }
     } else if (strcasecmp(sk.data_store, "mongo") == 0) {
