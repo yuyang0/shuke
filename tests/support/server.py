@@ -10,17 +10,18 @@ import socket
 import struct
 import time
 import tempfile
+import io
 
 import yaml
 
 import dns.message
 import dns.query
 import vagrant
-from fabric.api import env, execute, task, sudo
+from fabric.api import env, execute, task, sudo, get, settings
 from fabric.operations import put
 from fabric.contrib import files
 
-from . import settings
+from . import constants
 from .zone2mongo import ZoneMongo
 
 
@@ -64,14 +65,21 @@ def start_shuke(cmd, pidfile, config):
 @task
 def stop_shuke(pidfile):
     if files.exists(pidfile, use_sudo=True):
-        sudo("kill -15 `cat %s`" % pidfile)
+        fd = io.BytesIO()
+        get(pidfile, fd, use_sudo=True)
+        pid = int(fd.getvalue())
+        print("pid is ", pid)
+
+        sudo("kill -15 %s" % pid)
         for i in range(10):
-            if not files.exists(pidfile, use_sudo=True):
-                break
+            with settings(warn_only=True):
+                res = sudo("kill -0 %s" % pid)
+                # wait until the process exit.
+                if res.failed:
+                    break
             time.sleep(2)
         else:
             raise Exception("shuke doesn't stop correctly.")
-        time.sleep(5)
 
 
 @task
@@ -124,15 +132,15 @@ class AdminClient(object):
 class DNSServer(object):
     def __init__(self, overrides=None, valgrind=False):
         self.pid = None
-        with open(os.path.join(settings.ASSETS_DIR, "test.yaml")) as fp:
+        with open(os.path.join(constants.ASSETS_DIR, "test.yaml")) as fp:
             self.cf = yaml.load(fp)
         if overrides:
             self.cf.update(overrides)
         self.cf.pop("admin_host", None)
         # override mongo host and mongo port
         if self.cf["data_store"].lower() == "mongo":
-            self.zm = ZoneMongo(settings.MONGO_HOST,
-                                settings.MONGO_PORT,
+            self.zm = ZoneMongo(constants.MONGO_HOST,
+                                constants.MONGO_PORT,
                                 self.cf["mongo_dbname"])
         self.valgrind = valgrind
 
@@ -147,7 +155,7 @@ class DNSServer(object):
             self.cmd = "valgrind --leak-check=full --show-reachable=no --show-possibly-lost=no %s -c %s" % (DNS_BIN, fname)
         else:
             self.cmd = "%s -c %s" % (DNS_BIN, fname)
-        self.vagrant = vagrant.Vagrant(root=os.path.join(settings.REPO_ROOT, "vagrant"))
+        self.vagrant = vagrant.Vagrant(root=os.path.join(constants.REPO_ROOT, "vagrant"))
 
     def _execute(self, fn, *args, **kwargs):
         v = self.vagrant

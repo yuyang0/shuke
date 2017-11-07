@@ -12,7 +12,7 @@ from os.path import dirname, abspath
 import socket
 
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
-from support import settings, server
+from support import constants, server
 
 import pytest
 import vagrant
@@ -38,7 +38,7 @@ def dns_srv(request):
 @pytest.fixture(scope="session", autouse=True)
 def start_vagrant(request):
     print("starting vagrant...")
-    vagrant_root = os.path.join(settings.REPO_ROOT, "vagrant")
+    vagrant_root = os.path.join(constants.REPO_ROOT, "vagrant")
     vgt = vagrant.Vagrant(root=vagrant_root)
     statuses = vgt.status()
     if len(statuses) >= 1 and statuses[0].state == "running":

@@ -12,7 +12,7 @@ import time
 import pytest
 
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
-from support import settings
+from support import constants
 
 overrides = {
     "data_store": "mongo",

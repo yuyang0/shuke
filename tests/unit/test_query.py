@@ -10,11 +10,11 @@ from os.path import dirname, abspath
 import pytest
 
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
-from support import settings
+from support import constants
 
 overrides = {
     "data_store": "file",
-    # "zone_files": {"example.com.": settings.EXAMPLE_ZONE_FILE},
+    # "zone_files": {"example.com.": constants.EXAMPLE_ZONE_FILE},
     "minimize_resp": False,
 }
 valgrind = False
