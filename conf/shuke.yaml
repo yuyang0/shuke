@@ -94,7 +94,8 @@ mongo_dbname: zone
 
 # address for tcp server runs in main thread,
 # this server mainly used to debug or perform admin operation.
-admin_host: 127.0.0.1
+
+# admin_host: 127.0.0.1
 admin_port: 14141
 
 all_reload_interval: 36000  # 10 hours

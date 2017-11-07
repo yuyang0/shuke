@@ -460,6 +460,10 @@ sds configToStr() {
             sk.all_reload_interval,
             sk.minimize_resp
     );
+    s = sdscat(s, "bind: \n");
+    for (int i = 0; i < sk.bindaddr_count; ++i) {
+        s = sdscatfmt(s, "  - %s\n", sk.bindaddr[i]);
+    }
     return s;
 }
 #if defined(SK_TEST)
@@ -471,37 +475,16 @@ sds configToStr() {
 #define UNUSED(x) (void)(x)
 
 int confTest(int argc, char *argv[]) {
-    char errstr[ERR_STR_LEN];
-    int err;
-    int iv;
-    bool bv;
-
     if (argc < 4) {
         fprintf(stderr, "need conf file");
         exit(1);
     }
-    char *fp = readFile(argv[3]);
-    test_cond("loglevel: ", strcmp(getStrVal(fp, "loglevel", ""), "info") == 0);
-    test_cond("logfile: ", strcmp(getStrVal(fp, "logfile", ""), "") == 0);
-    test_cond("pidfile: ", strcmp(getStrVal(fp, "pidfile", ""), "/var/run/cdns_53.pid") == 0);
+    initConfigFromYamlFile(argv[3]);
+    test_cond("loglevel: ", strcmp(sk.logLevelStr, "info") == 0);
+    test_cond("logfile: ", strcmp(sk.logfile, "") == 0);
+    test_cond("pidfile: ", strcmp(sk.pidfile, "/var/run/shuke.pid") == 0);
+    test_cond("port: ", sk.port == 53);
 
-    iv = 0;
-    getIntVal(errstr, fp, "port", &iv);
-    test_cond("port: ", iv == 53);
-
-    bv = true;
-    getBoolVal(errstr, fp, "daemonize", &bv);
-    test_cond("daemonize: ", bv == false);
-    {
-        char *results[512];
-        int n = 512;
-        err = getStrArrayVal(errstr, fp, "bind", results, &n);
-        fprintf(stderr, "getStrArrayVal: %d\n", err);
-        test_cond("bind count: ", n == 3);
-        test_cond("bind content(1): ", strcmp(results[0], "127.0.0.1") == 0);
-        test_cond("bind content(2): ", strcmp(results[1], "::1") == 0);
-        test_cond("bind content(3): ", strcmp(results[2], "::126") == 0);
-    }
     test_report();
     return 0;
 }
