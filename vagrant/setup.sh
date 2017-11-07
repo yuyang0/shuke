@@ -214,28 +214,48 @@ set_numa_pages()
 sudo apt-get -qq update
 sudo apt-get -y -qq install git clang doxygen hugepages build-essential libnuma-dev libpcap-dev inux-headers-`uname -r`
 
+echo "===> build dpdk"
 build_dpdk
 # Install kernel modules
+echo "===> insert UIO module"
 load_igb_uio_module
+
+echo "===> insert KNI module"
 load_kni_module
+
+echo "===> create huge pages"
 set_non_numa_pages 512
 
 # Bind secondary network adapter
 # I need to set a second adapter in Vagrantfile
 # Note that this NIC setup does not persist across reboots
+pci_list=($(sudo lshw -class network | grep pci@ | awk  'BEGIN{FS="@"} {print $2}'))
+if_list=($(ifconfig | grep HWaddr | awk '{print $1}'))
+# skip first interface and pci device
+pci_list=(${pci_list[@]:1})
+if_list=(${if_list[@]:1})
+
 nr_uio_if=`python $RTE_SDK/usertools/dpdk-devbind.py -s | grep "drv=igb_uio"|wc -l`
+
+echo "===> bind devics"
 if [ $nr_uio_if -eq 0 ];
 then
-    for NET_IF_NAME in enp0s8 enp0s9
+    for NET_IF_NAME in "${if_list[@]}"
     do
-        echo "bind $NET_IF_NAME to uio."
+        echo "ifdown $NET_IF_NAME"
         sudo ifconfig ${NET_IF_NAME} down
-        sudo ${RTE_SDK}/usertools/dpdk-devbind.py --bind=igb_uio ${NET_IF_NAME}
+    done
+
+    for PCI_ADDR in "${pci_list[@]}"
+    do
+        echo "bind $PCI_ADDR to uio."
+        sudo ${RTE_SDK}/usertools/dpdk-devbind.py --bind=igb_uio ${PCI_ADDR}
     done
 else
     echo "devices have already been binded to uio, skip it."
 fi
 
+echo "===> add environment variables"
 # Add env variables setting to .profile file so that they are set at each login
 if grep -q "RTE_SDK" ${HOME}/.profile
 then
@@ -245,10 +265,12 @@ else
     echo "export RTE_TARGET=${RTE_TARGET}" >> ${HOME}/.profile
 fi
 
+echo "===> build shuke"
 sudo apt-get install -y autoconf libtool
 # build shuke
 make -C ${SHUKE_DIR}
 
+echo "===> install mongodb"
 install_mongo()
 {
     sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 0C49F3730359A14518585931BC711F9BA15703C6
