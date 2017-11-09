@@ -25,6 +25,10 @@ endif
 SHUKE_BUILD_DIR ?= build
 OPTIMIZATION ?=-O3
 
+PREFIX?=/usr/local
+INSTALL_BIN=$(PREFIX)/bin
+INSTALL=install
+
 # PROJECT_ROOT:=$(abspath .)
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
 URCU_STATIC_LIBS:=3rd/liburcu/src/.libs/liburcu-cds.a 3rd/liburcu/src/.libs/liburcu.a
@@ -92,42 +96,43 @@ Makefile.dep:
 
 -include Makefile.dep
 
--include .make-settings
+-include $(SHUKE_BUILD_DIR)/.make-settings
 
 persist-settings: clean
-	echo PREV_FINAL_CFLAGS=$(FINAL_CFLAGS) >> .make-settings
-	echo PREV_FINAL_LDFLAGS=$(FINAL_LDFLAGS) >> .make-settings
+	echo PREV_FINAL_CFLAGS=$(FINAL_CFLAGS) >> $(SHUKE_BUILD_DIR)/.make-settings
+	echo PREV_FINAL_LDFLAGS=$(FINAL_LDFLAGS) >> $(SHUKE_BUILD_DIR)/.make-settings
 
 .PHONY: persist-settings
 
 # Prerequisites target
-.make-prerequisites:
+$(SHUKE_BUILD_DIR)/.make-prerequisites:
 	@touch $@
 
 # Clean everything, persist settings and build dependencies if anything changed
 ifneq ($(strip $(PREV_FINAL_CFLAGS)), $(strip $(FINAL_CFLAGS)))
-.make-prerequisites: persist-settings
+$(SHUKE_BUILD_DIR)/.make-prerequisites: persist-settings
 endif
 
 ifneq ($(strip $(PREV_FINAL_LDFLAGS)), $(strip $(FINAL_LDFLAGS)))
-.make-prerequisites: persist-settings
+$(SHUKE_BUILD_DIR)/.make-prerequisites: persist-settings
 endif
 
 $(SHUKE_BUILD_DIR)/shuke-server: 3rd $(SHUKE_OBJ)
 	$(SHUKE_LD) -o $@ $(SHUKE_OBJ) $(DPDKLIBS) $(FINAL_LIBS)
 
-$(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c .make-prerequisites
+$(SHUKE_BUILD_DIR)/%.o: $(SHUKE_SRC_DIR)/%.c $(SHUKE_BUILD_DIR)/.make-prerequisites
 	$(SHUKE_CC) -c $< -o $@
 
 clean:
 	-rm -f $(SHUKE_BUILD_DIR)/shuke-server $(SHUKE_BUILD_DIR)/*.o Makefile.dep
+	-(rm -f $(SHUKE_BUILD_DIR)/.make-*)
 
 .PHONY:clean
 
 distclean: clean
-	- (make -C 3rd/himongo clean)
-	- (make -C 3rd/liburcu clean)
-	- (rm -f .make-*)
+	-(make -C 3rd/himongo clean)
+	-(make -C 3rd/liburcu clean)
+	-(make -C 3rd/libyaml clean)
 
 .PHONY: distclean
 
@@ -164,6 +169,10 @@ $(YAML_STATICLIB): 3rd/libyaml/Makefile
 
 3rd/libyaml/bootstrap:
 	git submodule update --init
+
+install: all
+	@mkdir -p $(INSTALL_BIN)
+	$(SHUKE_INSTALL) build/shuke-server $(INSTALL_BIN)
 
 #Libraries of dpdk
 DPDKLIBS = -Wl,-lrte_pipeline -Wl,-lrte_table -Wl,-lrte_port -Wl,-lrte_pdump -Wl,-lrte_distributor -Wl,-lrte_ip_frag -Wl,-lrte_meter -Wl,-lrte_sched -Wl,-lrte_lpm -Wl,--whole-archive -Wl,-lrte_acl -Wl,--no-whole-archive -Wl,-lrte_jobstats -Wl,-lrte_metrics -Wl,-lrte_bitratestats -Wl,-lrte_latencystats -Wl,-lrte_power -Wl,-lrte_timer -Wl,-lrte_efd -Wl,-lrte_cfgfile -Wl,--whole-archive -Wl,-lrte_hash -Wl,-lrte_vhost -Wl,-lrte_kvargs -Wl,-lrte_mbuf -Wl,-lrte_net -Wl,-lrte_ethdev -Wl,-lrte_cryptodev -Wl,-lrte_eventdev -Wl,-lrte_mempool -Wl,-lrte_mempool_ring -Wl,-lrte_ring -Wl,-lrte_eal -Wl,-lrte_cmdline -Wl,-lrte_reorder -Wl,-lrte_kni -Wl,-lrte_mempool_stack -Wl,-lrte_pmd_af_packet -Wl,-lrte_pmd_ark -Wl,-lrte_pmd_avp -Wl,-lrte_pmd_bnxt -Wl,-lrte_pmd_bond -Wl,-lrte_pmd_cxgbe -Wl,-lrte_pmd_e1000 -Wl,-lrte_pmd_ena -Wl,-lrte_pmd_enic -Wl,-lrte_pmd_fm10k -Wl,-lrte_pmd_i40e -Wl,-lrte_pmd_ixgbe -Wl,-lrte_pmd_kni -Wl,-lrte_pmd_lio -Wl,-lrte_pmd_nfp -Wl,-lrte_pmd_null -Wl,-lrte_pmd_qede -Wl,-lrte_pmd_ring -Wl,-lrte_pmd_sfc_efx -Wl,-lrte_pmd_tap -Wl,-lrte_pmd_thunderx_nicvf -Wl,-lrte_pmd_virtio -Wl,-lrte_pmd_vhost -Wl,-lrte_pmd_vmxnet3_uio -Wl,-lrte_pmd_null_crypto -Wl,-lrte_pmd_crypto_scheduler -Wl,-lrte_pmd_skeleton_event -Wl,-lrte_pmd_sw_event -Wl,-lrte_pmd_octeontx_ssovf -Wl,--no-whole-archive -Wl,-lrt -Wl,-lm -Wl,-ldl -Wl,-export-dynamic -Wl,-export-dynamic

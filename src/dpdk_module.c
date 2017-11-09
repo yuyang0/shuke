@@ -682,7 +682,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             }
             // check the udp port
             if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
-                LOG_DEBUG(DPDK, "invalid udp port");
+                LOG_DEBUG(DPDK, "invalid udp port %d", rte_be_to_cpu_16(udp_h->dst_port));
                 goto invalid;
             }
             break;
@@ -699,7 +699,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             }
             // check the tcp port
             if (rte_be_to_cpu_16(tcp_h->dst_port) != sk.port) {
-                LOG_DEBUG(DPDK, "invalid tcp port");
+                LOG_DEBUG(DPDK, "invalid tcp port %d", rte_be_to_cpu_16(tcp_h->dst_port));
                 goto invalid;
             }
             LOG_DEBUG(DPDK, "port %d got a tcp packet.", portid);

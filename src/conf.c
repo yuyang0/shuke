@@ -1,14 +1,4 @@
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
-/*
- * =======================================================================
- *       Filename:  conf.c
- *        Created:  2016-03-17 Thu 10:20
- *       Compiler:  gcc
- *
- *         Author:  Yu Yang
- *      	Email:  yyangplus@NOSPAM.gmail.com
- * =======================================================================
- */
 #include "fmacros.h"
 
 #include <stdio.h>
@@ -35,63 +25,45 @@
         }                                                               \
     }while(0)
 
-// used to check config which can be ignored
-#define CHECK_ERR_CODE(err, errstr)                         \
-    do {                                                    \
-        if ((err) == ERR_CODE) {                            \
-            fprintf(stderr, "Config Error: %s.\n", errstr); \
-            exit(1);                                        \
-        }                                                   \
-    } while(0)
-
-// used to check config which can't be ignored(don't allow default value)
-#define CHECK_CONF_NOT_OK(err, errstr)                      \
-    do {                                                    \
-        if ((err) != OK_CODE) {                             \
-            fprintf(stderr, "Config Error: %s.\n", errstr); \
-            exit(1);                                        \
-        }                                                   \
-    } while(0)
-
 #define GET_STR_CONFIG(name, v, t)                                  \
     do{                                                             \
-        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,             \
+        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,           \
                      "Config Error: " name "should be a string");   \
-        if((v) != NULL) free(v); \
-        (v) = strdup((char*)(t).data.scalar.value);                            \
+        if((v) != NULL) free(v);                                    \
+        (v) = strdup((char*)(t).data.scalar.value);                 \
     } while(0)
 
 #define GET_INT_CONFIG(name, v, t)                                      \
     do{                                                                 \
-        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,                 \
+        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,               \
                      "Config Error: " name "should be a string");       \
         char *end = NULL;                                               \
         long lval;                                                      \
         int base = 10;                                                  \
-        char *str_val = (char*)(t).data.scalar.value;                            \
+        char *str_val = (char*)(t).data.scalar.value;                   \
         if (str_val[0] == '0') base = 16;                               \
         lval = strtol(str_val, &end, base);                             \
         if (*end == '\0') {                                             \
-            (v) = lval;                                                   \
+            (v) = lval;                                                 \
         } else {                                                        \
-            fprintf(stderr, "invalid character for config %s", name);  \
+            fprintf(stderr, "invalid character for config %s", name);   \
             exit(-1);                                                   \
         }                                                               \
     } while(0)
 
 #define GET_BOOL_CONFIG(name, v, t)                                     \
     do{                                                                 \
-        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,                 \
+        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,               \
                      "Config Error: " name "should be a string");       \
-        char *str_val = (char*)(t).data.scalar.value;                        \
+        char *str_val = (char*)(t).data.scalar.value;                   \
         if (!strcasecmp(str_val, "on") ||                               \
             !strcasecmp(str_val, "yes") ||                              \
             !strcasecmp(str_val, "true")) {                             \
-            (v) = true;                                                   \
+            (v) = true;                                                 \
         } else if (!strcasecmp(str_val, "off") ||                       \
                    !strcasecmp(str_val, "no") ||                        \
                    !strcasecmp(str_val, "false")) {                     \
-            (v) = false;                                                  \
+            (v) = false;                                                \
         } else {                                                        \
             fprintf(stderr, "only on/true/yes and off/false/no is valid for the key %s.", name); \
             exit(-1);                                                   \
