@@ -97,6 +97,31 @@ int kni_ifconfig_all()
     return OK_CODE;
 }
 
+/*
+ * check if all kni virtual interfaces are up.
+ */
+bool is_all_veth_up() {
+    for (int i = 0; i < sk.nr_ports; ++i) {
+        int portid = sk.port_ids[i];
+        sk_kni_conf_t *kconf = kni_conf_list[portid];
+        char *ifname = kconf->veth_name;
+
+        struct ifreq ifr;
+        int sock = socket(PF_INET6, SOCK_DGRAM, IPPROTO_IP);
+        memset(&ifr, 0, sizeof(ifr));
+        strcpy(ifr.ifr_name, ifname);
+        if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+            LOG_WARN(KNI, "SIOCGIFFLAGS %s", strerror(errno));
+        }
+        close(sock);
+        if((ifr.ifr_flags & IFF_UP) == 0) {
+            LOG_DEBUG(KNI, "%s is not up.", ifname);
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Callback for request of changing MTU */
 static int
 kni_change_mtu(uint8_t port_id, unsigned new_mtu)

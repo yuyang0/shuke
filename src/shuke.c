@@ -1437,7 +1437,16 @@ int main(int argc, char *argv[]) {
     if (! sk.only_udp) {
         kni_ifconfig_all();
 
-        sleep(4);
+        // wait util all kni virtual interfaces are up
+        for (int i = 0; i < 20; i++) {
+            sleep(1);
+            if (is_all_veth_up()) break;
+            else {
+                if (i == 20) {
+                    LOG_FATAL(USER1, "can't bring all kni virtual interfaces up.");
+                }
+            }
+        }
         LOG_INFO(USER1, "starting dns tcp server.");
         sk.tcp_srv = tcpServerCreate();
         assert(sk.tcp_srv);

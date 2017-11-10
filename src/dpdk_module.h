@@ -126,7 +126,7 @@ void sk_init_kni_module(struct rte_mempool *mbuf_pool);
 void init_kni_module(void);
 int cleanup_kni_module();
 int kni_ifconfig_all();
-
+bool is_all_veth_up();
 int kni_send_single_packet(lcore_conf_t *qconf, struct rte_mbuf *m, uint8_t port);
 
 void
