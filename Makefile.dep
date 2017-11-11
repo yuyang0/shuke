@@ -99,7 +99,7 @@ build/dpdk_kni.o: src/dpdk_kni.c src/shuke.h src/defines.h src/version.h \
  3rd/himongo/libbson/src/bson/bcon.h
 build/ds.o: src/ds.c src/endianconv.h src/zmalloc.h src/sds.h src/str.h \
  src/dict.h src/protocol.h src/log.h src/utils.h src/ds.h src/rbtree.h \
- src/defines.h
+ src/defines.h src/dpdk_module.h
 build/debug.o: src/debug.c src/shuke.h src/defines.h src/version.h src/ae.h \
  src/anet.h src/zmalloc.h src/endianconv.h src/list.h src/log.h src/ds.h \
  src/sds.h src/dict.h src/rbtree.h src/str.h src/protocol.h \

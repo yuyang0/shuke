@@ -16,8 +16,48 @@
 #include "log.h"
 #include "utils.h"
 #include "ds.h"
+#include "dpdk_module.h"
 
 #define RRSET_MAX_PREALLOC (1024*1024)
+
+static int contextMakeRoomForResp(struct context *ctx, int addlen) {
+    int freelen = (int)(ctx->chunk_len - ctx->cur);
+    if (likely(freelen >= addlen)) return OK_CODE;
+    int newlen = (ctx->cur+addlen)*2;
+    char *new_buf;
+    struct rte_mbuf *new_m, *last_m, *head_m;
+    switch (ctx->resp_type) {
+        case RESP_STACK:
+            new_buf = zmalloc(newlen);
+            if (unlikely(new_buf == NULL)) return ERR_CODE;
+            rte_memcpy(new_buf, ctx->chunk, ctx->cur);
+            ctx->chunk = new_buf;
+            ctx->chunk_len = newlen;
+            ctx->resp_type = RESP_HEAP;
+            break;
+        case RESP_HEAP:
+            new_buf = zrealloc(ctx->chunk, newlen);
+            if (unlikely(new_buf == NULL)) return ERR_CODE;
+            ctx->chunk = new_buf;
+            ctx->chunk_len = newlen;
+            break;
+        case RESP_MBUF:
+            head_m = ctx->m;
+            new_m = get_mbuf();
+            last_m = rte_pktmbuf_lastseg(head_m);
+            last_m->data_len = (uint16_t )ctx->cur;
+            last_m->next = new_m;
+            head_m->pkt_len += ctx->cur;
+            head_m->nb_segs++;
+
+            ctx->chunk = rte_pktmbuf_mtod(new_m, void*);
+            ctx->cur = 0;
+            ctx->chunk_len = rte_pktmbuf_tailroom(new_m);
+            if (unlikely(ctx->chunk_len < addlen)) return ERR_CODE;
+            break;
+    }
+    return OK_CODE;
+}
 
 dnsDictValue *dnsDictValueCreate(int socket_id) {
     dnsDictValue *dv = socket_calloc(socket_id, 1, sizeof(*dv));
@@ -243,9 +283,9 @@ dumpCompressedName(struct context *ctx, char *name) {
         size_t nameOffset = ctx->cps[best_idx].offset + best_offset1;
         nameOffset |= 0xC000;
 
-        cur = snpack(ctx->resp, cur, ctx->totallen, "m>h", name, best_offset2, (uint16_t)nameOffset);
+        cur = snpack(ctx->chunk, cur, ctx->chunk_len, "m>h", name, best_offset2, (uint16_t)nameOffset);
     } else {
-        cur = snpack(ctx->resp, cur, ctx->totallen, "m", name, strlen(name)+1);
+        cur = snpack(ctx->chunk, cur, ctx->chunk_len, "m", name, strlen(name)+1);
     }
     if (cur == ERR_CODE) return ERR_CODE;
     ctx->cur = cur;
@@ -276,10 +316,6 @@ static inline int dumpCompressedRRHeader(char *buf, int offset, size_t size, uin
  */
 int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
 {
-    char *resp = ctx->resp;
-    size_t totallen = ctx->totallen;
-    int cur = ctx->cur;
-
     char *name;
     char *rdata;
     int32_t start_idx = 0;
@@ -302,23 +338,27 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
 
         uint16_t rdlength = load16be(rdata);
 
-        cur = dumpCompressedRRHeader(resp, cur, totallen, dnsNameOffset, rs->type, DNS_CLASS_IN, rs->ttl);
-        if (cur == ERR_CODE) return ERR_CODE;
+        /*
+         * expand response buffer if need.
+         * the following operation doesn't need to check if the response size is enough.
+         */
+        if (contextMakeRoomForResp(ctx, rdlength+12) == ERR_CODE) {
+            return ERR_CODE;
+        }
+        ctx->cur = dumpCompressedRRHeader(ctx->chunk, ctx->cur,
+                                          ctx->chunk_len, dnsNameOffset,
+                                          rs->type, DNS_CLASS_IN, rs->ttl);
 
         // compress the domain name in NS and MX record.
         switch (rs->type) {
             case DNS_TYPE_CNAME:
             case DNS_TYPE_NS:
                 name = rdata + 2;
-                len_offset = cur;
-                cur = snpack(resp, cur, totallen, "m", rdata, 2);
-                if (cur == ERR_CODE) return ERR_CODE;
-                ctx->cur = cur;
+                len_offset = ctx->cur;
+                ctx->cur = snpack(ctx->chunk, ctx->cur, ctx->chunk_len, "m", rdata, 2);
+                dumpCompressedName(ctx, name);
 
-                cur = dumpCompressedName(ctx, name);
-                if (cur == ERR_CODE) return ERR_CODE;
-
-                dump16be((uint16_t)(cur-len_offset-2), resp+len_offset);
+                dump16be((uint16_t)(ctx->cur-len_offset-2), ctx->chunk+len_offset);
                 if (ctx->ari_sz < AR_INFO_SIZE) {
                     arInfo ai_temp = {name, len_offset+2};
                     ctx->ari[ctx->ari_sz++] = ai_temp;
@@ -326,15 +366,14 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
                 break;
             case DNS_TYPE_MX:
                 name = rdata + 4;
-                len_offset = cur;
-                cur = snpack(resp, cur, totallen, "m", rdata, 4);
-                if (cur == ERR_CODE) return ERR_CODE;
-                ctx->cur = cur;
+                len_offset = ctx->cur;
+                // store preference
+                rte_memcpy(ctx->chunk+ctx->cur+2, rdata+2, 2);
+                ctx->cur+=4;
 
-                cur = dumpCompressedName(ctx, name);
-                if (cur == ERR_CODE) return ERR_CODE;
-
-                dump16be((uint16_t)(cur-len_offset-2), resp+len_offset);
+                dumpCompressedName(ctx, name);
+                // store rdlength
+                dump16be((uint16_t)(ctx->cur-len_offset-2), ctx->chunk+len_offset);
                 if (ctx->ari_sz < AR_INFO_SIZE) {
                     arInfo ai_temp = {name, len_offset+4};
                     ctx->ari[ctx->ari_sz++] = ai_temp;
@@ -343,15 +382,13 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
             case DNS_TYPE_SRV:
                 // don't compress the target field, but need add compress info for the remain records.
                 name = rdata + 8;
-                len_offset = cur;
+                len_offset = ctx->cur;
                 if (ctx->cps_sz < CPS_INFO_SIZE) {
-                    compressInfo temp = {name, cur+8, rdlength-6};
-                    ctx->cps[ctx->cps_sz] = temp;
-                    ctx->cps_sz++;
+                    compressInfo temp = {name, len_offset+8, rdlength-6};
+                    ctx->cps[ctx->cps_sz++] = temp;
                 }
-
-                cur = snpack(resp, cur, totallen, "m", rdata, rdlength+2);
-                if (cur == ERR_CODE) return ERR_CODE;
+                rte_memcpy(ctx->chunk+ctx->cur, rdata, rdlength+2);
+                ctx->cur += (rdlength+2);
 
                 if (ctx->ari_sz < AR_INFO_SIZE) {
                     arInfo ai_temp = {name, len_offset+8};
@@ -359,13 +396,11 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
                 }
                 break;
             default:
-                if (unlikely((int)(totallen-cur) < rdlength+2)) return ERR_CODE;
-                rte_memcpy(resp+cur, rdata, rdlength+2);
-                cur += (rdlength+2);
+                rte_memcpy(ctx->chunk+ctx->cur, rdata, rdlength+2);
+                ctx->cur += (rdlength+2);
         }
     }
-    ctx->cur = cur;
-    return cur;
+    return OK_CODE;
 }
 
 void RRSetDestroy(RRSet *rs) {

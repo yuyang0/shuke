@@ -658,7 +658,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         }
     }
     // update the header. don't update `cur` in ctx
-    dnsHeader_dump(&hdr, ctx->resp, DNS_HDR_SIZE);
+    dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
     return OK_CODE;
 }
 
@@ -671,7 +671,7 @@ int dumpDnsError(struct context *ctx, int err) {
     if (err == DNS_RCODE_NXDOMAIN) SET_AA(hdr.flag);
 
     // a little trick, overwrite the dns header, don't update `cur` in ctx
-    dnsHeader_dump(&hdr, ctx->resp, ctx->totallen);
+    dnsHeader_dump(&hdr, ctx->chunk, ctx->chunk_len);
     return OK_CODE;
 }
 
@@ -721,14 +721,16 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         LOG_DEBUG(USER1, "receive bad dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar: %d), drop it",
                   ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
         dumpDnsFormatErr(ctx);
-        return ctx->cur;
+        ret = OK_CODE;
+        goto end;
     }
 
     ctx->nameLen = lenlabellen(ctx->name);
 
     if (isSupportDnsType(ctx->qType) == false) {
         dumpDnsNotImplErr(ctx);
-        return ctx->cur;
+        ret = OK_CODE;
+        goto end;
     }
     if (ctx->hdr.nArRR == 1) {
         // TODO parse OPT message(EDNS)
@@ -751,34 +753,34 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         // zone is not managed by this server
         LOG_DEBUG(USER1, "zone is NULL, name: %s", ctx->name);
         dumpDnsRefusedErr(ctx);
-        //return ctx->cur;
-        goto end;
+        ret = OK_CODE;
+    } else {
+        dv = zoneFetchValueAbs(z, ctx->name, ctx->nameLen);
+        if (dv == NULL) {
+            dumpDnsNameErr(ctx);
+            ret = OK_CODE;
+        } else {
+            if (dumpDnsResp(ctx, dv, z) == ERR_CODE) {
+                ret = ERR_CODE;
+            }
+        }
     }
-
-    dv = zoneFetchValueAbs(z, ctx->name, ctx->nameLen);
-    if (dv == NULL) {
-        dumpDnsNameErr(ctx);
-        goto end;
-    }
-    if (dumpDnsResp(ctx, dv, z) == OK_CODE) {
-        goto end;
-    }
-end:
     zoneDictRUnlock(node->zd);
-    return ctx->cur;
+end:
+    return ret;
 }
 
-// TODO: handle the situation when one mbuf is not enough
-int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
-                       char *src_addr, uint16_t src_port, bool is_ipv4,
-                       numaNode_t *node, int lcore_id)
+int processUDPDnsQuery(struct rte_mbuf *m, char *buf, size_t sz, char *resp, size_t respLen, char *src_addr,
+                       uint16_t src_port, bool is_ipv4, numaNode_t *node, int lcore_id)
 {
     struct context ctx;
     ctx.node = node;
     ctx.lcore_id = lcore_id;
-    ctx.resp = resp;
-    ctx.totallen = respLen;
+    ctx.chunk = resp;
+    ctx.chunk_len = respLen;
     ctx.cur = 0;
+    ctx.resp_type = RESP_MBUF;
+    ctx.m = m;
     int status;
     status = _getDnsResponse(buf, sz, &ctx);
 
@@ -790,6 +792,10 @@ int processUDPDnsQuery(char *buf, size_t sz, char *resp, size_t respLen,
         cport = ntohs(src_port);
         logQuery(&ctx, cip, cport, false);
     }
+
+    struct rte_mbuf *last_m = rte_pktmbuf_lastseg(m);
+    last_m->data_len += (uint16_t )ctx.cur;
+    m->pkt_len += ctx.cur;
     return status;
 }
 
@@ -802,9 +808,10 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     struct context ctx;
     ctx.node = sk.nodes[sk.master_numa_id];
     ctx.lcore_id = sk.master_lcore_id;
-    ctx.resp = resp;
-    ctx.totallen = respLen;
+    ctx.chunk = resp;
+    ctx.chunk_len = respLen;
     ctx.cur = 0;
+    ctx.resp_type = RESP_STACK;
 
     status = _getDnsResponse(buf, sz, &ctx);
 
@@ -812,9 +819,9 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
         logQuery(&ctx, conn->cip, conn->cport, true);
     }
 
-    snpack(ctx.resp, DNS_HDR_SIZE, respLen, "m>hh", ctx.name, ctx.nameLen+1, ctx.qType, ctx.qClass);
-    tcpConnAppendDnsResponse(conn, ctx.resp, ctx.cur);
-
+    snpack(ctx.chunk, DNS_HDR_SIZE, respLen, "m>hh", ctx.name, ctx.nameLen+1, ctx.qType, ctx.qClass);
+    tcpConnAppendDnsResponse(conn, ctx.chunk, ctx.cur);
+    if(ctx.resp_type == RESP_HEAP) zfree(ctx.chunk);
     return status;
 }
 

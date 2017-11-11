@@ -619,6 +619,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     size_t udp_data_len;
     int n, total_h_len;
     void *src_addr = NULL;
+    int res;
 
     eth_h = rte_pktmbuf_mtod(m, struct ether_hdr *);
     ether_type = rte_be_to_cpu_16(eth_h->ether_type);
@@ -718,15 +719,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    n = processUDPDnsQuery(udp_data, udp_data_len, udp_data,
-                           rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
+    res = processUDPDnsQuery(m, udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
                            is_ipv4, qconf->node, qconf->lcore_id);
-    if(n == ERR_CODE) goto dropped;
+    if(res == ERR_CODE) goto dropped;
 
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
-    if (n + total_h_len < 60) n = 60 - total_h_len;
-    rte_pktmbuf_append(m, (uint16_t)n);
+    n = rte_pktmbuf_pkt_len(m) - total_h_len;
     LOG_DEBUG(DPDK, "pkt_len: %u, udp len: %zu, port: %d",
               rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
 
@@ -776,6 +775,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
         LOG_DEBUG(DPDK, "udp checksum: 0x%x.", udp_h->dgram_cksum);
     }
 
+    /*
+     * ethernet frame should at least contain 64 bytes(include CRC)
+     */
+    if (unlikely(n + total_h_len < 60)) {
+        int addlen = 60 - total_h_len - n;
+        rte_pktmbuf_append(m, (uint16_t)addlen);
+    }
 #ifdef IP_FRAG
     if (likely(mtu + sizeof(struct ether_hdr) >= m->pkt_len)) {
         send_single_packet(qconf, m, portid);
@@ -1239,6 +1245,12 @@ uint64_t rte_tsc_mstime() {
 
 uint64_t rte_tsc_time() {
     return rte_tsc_ustime()/US_PER_S;
+}
+
+struct rte_mbuf *get_mbuf() {
+    int lcore_id = rte_lcore_id();
+    unsigned socketid = rte_lcore_to_socket_id(lcore_id);
+    return rte_pktmbuf_alloc(pktmbuf_pool[socketid]);
 }
 
 #ifdef SK_TEST

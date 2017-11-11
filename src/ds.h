@@ -46,7 +46,29 @@ typedef struct {
     int offset;
 } arInfo;
 
+/*
+ * indicate the place where the memory of response stays
+ */
+enum ctxRespType {
+    RESP_STACK,
+    RESP_HEAP,
+    RESP_MBUF,
+};
+
 struct context {
+    // information relate to response
+    enum ctxRespType resp_type;
+    struct rte_mbuf *m;
+    /*
+     * current chuck of response.
+     * TCP response only has one chunk
+     * UDP response may contain multiple chunks, every segment of mbuf is a chunk
+     */
+    char *chunk;
+    int chunk_len;
+    // current write position of this chunk
+    int cur;
+
     struct  numaNode_s *node;
     int lcore_id;
     struct _zone *z;
@@ -59,10 +81,6 @@ struct context {
 
     uint16_t qType;
     uint16_t qClass;
-
-    char *resp;
-    size_t totallen;
-    int cur;
 
     size_t ari_sz;
     size_t cps_sz;

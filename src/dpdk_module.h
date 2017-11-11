@@ -119,6 +119,7 @@ uint64_t rte_tsc_ustime();
 uint64_t rte_tsc_mstime();
 uint64_t rte_tsc_time();
 
+struct rte_mbuf *get_mbuf();
 /*----------------------------------------------
  *     kni
  *---------------------------------------------*/
