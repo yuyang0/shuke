@@ -719,8 +719,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    res = processUDPDnsQuery(m, udp_data, udp_data_len, udp_data, rte_pktmbuf_tailroom(m), src_addr, udp_h->src_port,
-                           is_ipv4, qconf->node, qconf->lcore_id);
+    res = processUDPDnsQuery(m, udp_data, udp_data_len, src_addr, udp_h->src_port,
+                             is_ipv4, qconf->node, qconf->lcore_id);
     if(res == ERR_CODE) goto dropped;
 
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)

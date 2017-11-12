@@ -11,6 +11,7 @@
 #include "version.h"
 #include "ds.h"
 #include "zmalloc.h"
+#include "edns.h"
 
 #include "shuke.h"
 #include "asciilogo.h"
@@ -578,7 +579,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     ctx->ari_sz = 0;
 
     RRSet *cname;
-    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, 0};
+    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
 
     SET_QR_R(hdr.flag);
     SET_AA(hdr.flag);
@@ -657,21 +658,38 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             }
         }
     }
+    // dump edns
+    if (ctx->hdr.nArRR == 1) {
+        int edns_len = ctx->edns.rdlength + 11;
+        if (unlikely(contextMakeRoomForResp(ctx, edns_len) == ERR_CODE)) {
+            return ERR_CODE;
+        }
+        ednsDump(ctx->chunk+ctx->cur, ctx->chunk_len-ctx->cur, &ctx->edns);
+        ctx->cur += edns_len;
+    }
     // update the header. don't update `cur` in ctx
     dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
     return OK_CODE;
 }
 
 int dumpDnsError(struct context *ctx, int err) {
-    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, 0};
+    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
 
     SET_QR_R(hdr.flag);
     if (GET_RD(ctx->hdr.flag)) SET_RD(hdr.flag);
     SET_ERROR(hdr.flag, err);
     if (err == DNS_RCODE_NXDOMAIN) SET_AA(hdr.flag);
 
+    if (ctx->hdr.nArRR == 1) {
+        int edns_len = ctx->edns.rdlength + 11;
+        if (unlikely(contextMakeRoomForResp(ctx, edns_len) == ERR_CODE)) {
+            return ERR_CODE;
+        }
+        ednsDump(ctx->chunk+ctx->cur, ctx->chunk_len-ctx->cur, &ctx->edns);
+        ctx->cur += edns_len;
+    }
     // a little trick, overwrite the dns header, don't update `cur` in ctx
-    dnsHeader_dump(&hdr, ctx->chunk, ctx->chunk_len);
+    dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
     return OK_CODE;
 }
 
@@ -733,7 +751,13 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         goto end;
     }
     if (ctx->hdr.nArRR == 1) {
-        // TODO parse OPT message(EDNS)
+        // parse OPT message(EDNS)
+        if (ednsParse(buf+ctx->cur, sz-ctx->cur, &(ctx->edns)) == ERR_CODE) {
+            ret = ERR_CODE;
+            goto end;
+        }
+        LOG_DEBUG(USER1, "ENDS: payload: %d, version: %d, rdlength: %d",
+                  ctx->edns.payload_size, ctx->edns.version, ctx->edns.rdlength);
     }
     LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
 
@@ -770,19 +794,22 @@ end:
     return ret;
 }
 
-int processUDPDnsQuery(struct rte_mbuf *m, char *buf, size_t sz, char *resp, size_t respLen, char *src_addr,
-                       uint16_t src_port, bool is_ipv4, numaNode_t *node, int lcore_id)
+int processUDPDnsQuery(struct rte_mbuf *m, char *udp_data, size_t udp_data_len,
+                       char *src_addr, uint16_t src_port,
+                       bool is_ipv4, numaNode_t *node, int lcore_id)
 {
+    int udp_data_offset = (int)(udp_data - rte_pktmbuf_mtod(m, char*));
     struct context ctx;
     ctx.node = node;
     ctx.lcore_id = lcore_id;
-    ctx.chunk = resp;
-    ctx.chunk_len = respLen;
+    ctx.chunk = udp_data;
+    ctx.chunk_len = rte_pktmbuf_tailroom(m);
     ctx.cur = 0;
     ctx.resp_type = RESP_MBUF;
     ctx.m = m;
+    ctx.edns.payload_size = 512;
     int status;
-    status = _getDnsResponse(buf, sz, &ctx);
+    status = _getDnsResponse(udp_data, udp_data_len, &ctx);
 
     if (status != ERR_CODE && sk.query_log_fp) {
         char cip[IP_STR_LEN];
@@ -792,10 +819,17 @@ int processUDPDnsQuery(struct rte_mbuf *m, char *buf, size_t sz, char *resp, siz
         cport = ntohs(src_port);
         logQuery(&ctx, cip, cport, false);
     }
-
     struct rte_mbuf *last_m = rte_pktmbuf_lastseg(m);
     last_m->data_len += (uint16_t )ctx.cur;
     m->pkt_len += ctx.cur;
+
+    unsigned max_pkt_len = (unsigned)(ctx.edns.payload_size + udp_data_offset);
+    if (m->pkt_len > max_pkt_len) {
+        // set TC flag
+        *((uint8_t*)(udp_data+2)) |= (uint8_t )0x02;
+
+        rte_pktmbuf_trim(m, (uint16_t)(m->pkt_len - max_pkt_len));
+    }
     return status;
 }
 

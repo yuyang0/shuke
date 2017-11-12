@@ -20,6 +20,7 @@
 #include "defines.h"
 #include "str.h"
 #include "protocol.h"
+#include "edns.h"
 
 #define PARSER_OK    0
 #define PARSER_ERR  -1
@@ -81,6 +82,9 @@ struct context {
 
     uint16_t qType;
     uint16_t qClass;
+
+    // EDNS(0) related fields
+    edns_t edns;
 
     size_t ari_sz;
     size_t cps_sz;
@@ -218,6 +222,8 @@ typedef struct _zoneDict {
 #define zoneDictRUnlock(zd) rcu_read_unlock()
 #define zoneDictWLock(zd) rcu_read_lock()
 #define zoneDictWUnlock(zd) rcu_read_unlock()
+
+int contextMakeRoomForResp(struct context *ctx, int addlen);
 
 RRSet *RRSetCreate(uint16_t type, int socket_id);
 RRSet *RRSetDup(RRSet *rs, int socket_id);

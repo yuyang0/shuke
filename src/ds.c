@@ -20,7 +20,7 @@
 
 #define RRSET_MAX_PREALLOC (1024*1024)
 
-static int contextMakeRoomForResp(struct context *ctx, int addlen) {
+int contextMakeRoomForResp(struct context *ctx, int addlen) {
     int freelen = (int)(ctx->chunk_len - ctx->cur);
     if (likely(freelen >= addlen)) return OK_CODE;
     int newlen = (ctx->cur+addlen)*2;

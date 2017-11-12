@@ -6,6 +6,7 @@
 #define _CDNS_PROTOCOL_H_ 1
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define DEFAULT_LABEL_COUNT 32
 
