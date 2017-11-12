@@ -61,7 +61,7 @@ pidfile: /var/run/shuke_53.pid
 # just comment out below line to disable query log
 query_log_file:  "stdout"
 
-loglevel:  info
+loglevel:  "debug"
 logfile:   "stdout"
 
 # logging the file and line information.
