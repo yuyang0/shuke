@@ -41,7 +41,8 @@ if you use vagrant, it is very simple to try shuke
 
 4. in the host machine, run `dig www1.example.com. @172.28.128.10 -p 19899 -t A`
 
-tips: `vagrant/seetup.sh` is a good place to figure out how to build this project.
+**tips**: `vagrant/setup.sh` is a good place to figure out how to build this project 
+and prepare the running environment.
 ### buid
 
 1. build dpdk, shuke is only tested on dpdk-17.05.1. if you use linux x86-64,
@@ -110,7 +111,7 @@ SHUKE has a tcp server used to execute admin operations,
     4. `cpu`: return cpu usage information
     5. `stats`: statistics information
 
-## Limitations
-1. currently only support A,AAAA,NS,CNAME,SOA,SRV,TXT,MX.
-   support for EDNS, DNSSEC and PTR is in the plan.
-2. only support mongodb, we plan to support mysql.
+## TODO
+1. support EDNS, DNSSEC and PTR (currently only support A,AAAA,NS,CNAME,SOA,SRV,TXT,MX.).
+2. support mysql (currently only support mongodb).
+3. plugin system
