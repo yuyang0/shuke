@@ -211,18 +211,6 @@ typedef struct _zone {
     struct rcu_head rcu_head;
 } zone;
 
-typedef struct _zoneDict {
-    int socket_id;
-    // the key is the origin of the zone(len label format)
-    // the value is zone instance.
-    struct cds_lfht *ht;
-} zoneDict;
-
-#define zoneDictRLock(zd) rcu_read_lock()
-#define zoneDictRUnlock(zd) rcu_read_unlock()
-#define zoneDictWLock(zd) rcu_read_lock()
-#define zoneDictWUnlock(zd) rcu_read_unlock()
-
 int contextMakeRoomForResp(struct context *ctx, int addlen);
 
 RRSet *RRSetCreate(uint16_t type, int socket_id);
@@ -251,29 +239,6 @@ RRSet *zoneFetchTypeVal(zone *z, void *key, uint16_t type);
 int zoneReplace(zone *z, void *key, dnsDictValue *val);
 int zoneReplaceTypeVal(zone *z, char *key, RRSet *rs);
 sds zoneToStr(zone *z);
-
-/*----------------------------------------------
- *     zone dict declaration
- *---------------------------------------------*/
-int zoneDictHtMatch(struct cds_lfht_node *ht_node, const void *_key);
-void zoneDictFreeCallback(struct rcu_head *head);
-
-unsigned int zoneDictHash(char *buf, size_t len);
-zoneDict *zoneDictCreate(int socket_id);
-
-void zoneDictDestroy(zoneDict *zd);
-zone *zoneDictFetchVal(zoneDict *zd, char *key);
-
-zone *zoneDictGetZone(zoneDict *zd, char *name);
-
-int zoneDictReplace(zoneDict *zd, zone *z);
-int zoneDictAdd(zoneDict *zd, zone *z);
-
-int zoneDictDelete(zoneDict *zd, char *origin);
-int zoneDictEmpty(zoneDict *zd);
-size_t zoneDictGetNumZones(zoneDict *zd);
-int zoneDictExistZone(zoneDict *zd, char *origin);
-sds zoneDictToStr(zoneDict *zd);
 
 // parser
 RRParser *RRParserCreate(char *name, uint32_t ttl, char *dotOrigin);

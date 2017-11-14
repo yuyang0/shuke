@@ -51,7 +51,7 @@ INC_DIR_LIST=$(SHUKE_SRC_DIR) \
 				     # $(RTE_SDK)/$(RTE_TARGET)/include
 SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c \
 						ds.c debug.c edns.c mongo.c protocol.c rbtree.c rculfhash-mm-socket.c \
-						sds.c shuke.c str.c utils.c zone_parser.c zmalloc.c tcpserver.c
+						sds.c shuke.c str.c utils.c zone_parser.c zmalloc.c tcpserver.c ztree.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 

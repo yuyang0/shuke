@@ -24,6 +24,7 @@
 #include "list.h"
 #include "log.h"
 #include "ds.h"
+#include "ztree.h"
 #include "dpdk_module.h"
 
 #include "himongo/async.h"
@@ -64,7 +65,7 @@ typedef struct numaNode_s {
     int *lcore_ids;
     int min_lcore_id;
     int max_lcore_id;
-    zoneDict *zd;
+    ztree *zd;
 } numaNode_t;
 
 typedef struct _tcpServer {
@@ -210,7 +211,7 @@ struct shuke {
     // end
 
     // pointer to master numa node's zoneDict instance
-    zoneDict *zd;
+    ztree *zt;
     struct rb_root rbroot;
 
     volatile bool force_quit;

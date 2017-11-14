@@ -61,9 +61,9 @@ zone *getOldestZone() {
  * @param origin: must be absolute domain name in len label format.
  */
 void masterRefreshZone(char *origin) {
-    zoneDictRLock(sk.zd);
-    zone *z = zoneDictFetchVal(sk.zd, origin);
-    zoneDictRUnlock(sk.zd);
+    ztreeRLock(sk.zt);
+    zone *z = ztreeGetZoneExactRaw(sk.zt, origin);
+    ztreeRUnlock(sk.zt);
 
     if (z == NULL) return;
     assert(RB_EMPTY_NODE(&z->rbnode));
@@ -116,27 +116,21 @@ void zoneUpdateRoundRabinInfo(zone *z) {
  * @return
  */
 int replaceZoneAllNumaNodes(zone *z) {
-    zoneDict *zd = sk.zd;
+    int err = 0;
     z->refresh_ts = sk.unixtime + z->refresh;
     zoneUpdateRoundRabinInfo(z);
 
     replaceZoneOtherNuma(z);
 
-    int err = 1;
-    zone *old_z;
-    struct cds_lfht *ht = zd->ht;
-    struct cds_lfht_node *ht_node;
-    unsigned int hash = zoneDictHash(z->origin, z->originLen);
-    zoneDictWLock(zd);
-    ht_node = cds_lfht_add_replace(ht, hash, zoneDictHtMatch, z->origin,
-                                   &z->htnode);
-    if (ht_node) {
-        old_z = caa_container_of(ht_node, zone, htnode);
+    ztreeWLock(sk.zt);
+    zone *old_z = ztreeGetZoneExactRaw(sk.zt, z->origin);
+    if (old_z != NULL) {
         rbtreeDeleteZone(old_z);
-        call_rcu(&old_z->rcu_head, zoneDictFreeCallback);
         err = 0;
     }
-    zoneDictWUnlock(zd);
+    ztreeReplaceNoLock(sk.zt, z);
+    ztreeWUnlock(sk.zt);
+
     rbtreeInsertZone(z);
     return err;
 }
@@ -147,7 +141,7 @@ int addZoneAllNumaNodes(zone *z) {
 
     addZoneOtherNuma(z);
 
-    int err = zoneDictAdd(sk.zd, z);
+    int err = ztreeAdd(sk.zt, z);
     assert(err == DICT_OK);
     rbtreeInsertZone(z);
     return err;
@@ -159,29 +153,18 @@ int addZoneAllNumaNodes(zone *z) {
  */
 int deleteZoneAllNumaNodes(char *origin) {
     int err = 0;
-    zoneDict *zd = sk.zd;
 
     // delete the zone on non-master numa node
     deleteZoneOtherNuma(origin);
 
-    struct cds_lfht *ht = zd->ht;	/* Hash table */
-    int ret = 0;
-    struct cds_lfht_iter iter;	/* For iteration on hash table */
-    struct cds_lfht_node *ht_node;
-    unsigned int hash = zoneDictHash(origin, strlen(origin));
-
-    zoneDictWLock(zd);
-    cds_lfht_lookup(ht, hash, zoneDictHtMatch, origin, &iter);
-    ht_node = cds_lfht_iter_get_node(&iter);
-    if (ht_node) {
-        ret = cds_lfht_del(ht, ht_node);
-        if (ret == 0) {
-            zone *del_z = caa_container_of(ht_node, zone, htnode);
-            rbtreeDeleteZone(del_z);
-            call_rcu(&del_z->rcu_head, zoneDictFreeCallback);
-        }
+    ztreeWLock(sk.zt);
+    zone *del_z = ztreeGetZoneExactRaw(sk.zt, origin);
+    if (del_z != NULL) {
+        rbtreeDeleteZone(del_z);
     }
-    zoneDictWUnlock(zd);
+    ztreeDeleteNoLock(sk.zt, origin);
+
+    ztreeWUnlock(sk.zt);
     return err;
 }
 
@@ -228,8 +211,8 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
     char origin[MAX_DOMAIN_LEN+2];
     dot2lenlabel(dotOrigin, origin);
 
-    zoneDictRLock(sk.zd);
-    old_zn = zoneDictFetchVal(sk.zd, origin);
+    ztreeRLock(sk.zt);
+    old_zn = ztreeGetZoneExactRaw(sk.zt, origin);
 
     if (old_zn != NULL) {
         /*
@@ -259,7 +242,7 @@ zoneReloadContext *zoneReloadContextCreate(char *dotOrigin) {
     t->zone_exist = zone_exist;
     t->status = TASK_PENDING;
 invalid:
-    zoneDictRUnlock(sk.zd);
+    ztreeRUnlock(sk.zt);
     return t;
 }
 
@@ -318,7 +301,7 @@ void deleteZoneOtherNuma(char *origin) {
         int numa_id = sk.numa_ids[i];
         numaNode_t *node = sk.nodes[numa_id];
         if (numa_id == sk.master_numa_id) continue;
-        zoneDictDelete(node->zd, origin);
+        ztreeDelete(node->zd, origin);
     }
 }
 
@@ -330,7 +313,7 @@ void replaceZoneOtherNuma(zone *z) {
         zone *new_z = zoneCopy(z, numa_id);
         zoneUpdateRoundRabinInfo(new_z);
 
-        zoneDictReplace(node->zd, new_z);
+        ztreeReplace(node->zd, new_z);
     }
 }
 
@@ -343,7 +326,7 @@ void addZoneOtherNuma(zone *z) {
         zone *new_z = zoneCopy(z, numa_id);
         zoneUpdateRoundRabinInfo(new_z);
 
-        err = zoneDictAdd(node->zd, new_z);
+        err = ztreeAdd(node->zd, new_z);
         assert(err == DICT_OK);
     }
 }
@@ -569,7 +552,6 @@ void logQuery(struct context *ctx, char *cip, int cport, bool is_tcp) {
 
 int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     if (dv == NULL) return ERR_CODE;
-    // current start position in response buffer.
     int errcode;
     numaNode_t *node = ctx->node;
 
@@ -597,7 +579,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
             char *name = ctx->ari[0].name;
             size_t offset = ctx->ari[0].offset;
             LOG_DEBUG(USER1, "name: %s, offset: %d", name, offset);
-            zone *ns_z = zoneDictGetZone(node->zd, name);
+            zone *ns_z = ztreeGetZoneRaw(node->zd, name);
             if (ns_z) {
                 if (ns_z->ns) {
                     hdr.nNsRR += ns_z->ns->num;
@@ -639,7 +621,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         size_t offset = ctx->ari[i].offset;
 
         // TODO avoid fetch when the name belongs to z
-        ar_z = zoneDictGetZone(node->zd, name);
+        ar_z = ztreeGetZoneRaw(node->zd, name);
         if (ar_z == NULL) continue;
         RRSet *ar_a = zoneFetchTypeVal(ar_z, name, DNS_TYPE_A);
         if (ar_a) {
@@ -711,11 +693,11 @@ static inline int dumpDnsRefusedErr(struct context *ctx) {
 
 static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
 {
+    struct dname dn;
     numaNode_t *node = ctx->node;
     zone *z = NULL;
     dnsDictValue *dv = NULL;
     // int64_t now;
-    char *name;
     int ret;
 
     if (sz < 12) {
@@ -761,16 +743,9 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     }
     LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
 
-    name = ctx->name;
-
-    if (ctx->qType == DNS_TYPE_SRV) {
-        // ignore SRV service
-        name += (*name +1);
-        // ignore SRV proto
-        name += (*name +1);
-    }
-    zoneDictRLock(node->zd);
-    z = zoneDictGetZone(node->zd, name);
+    ztreeRLock(node->zd);
+    makeDname(ctx->name, &dn);
+    z = ztreeGetZone(node->zd, &dn);
     ctx->z = z;
 
     if (z == NULL) {
@@ -789,7 +764,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
             }
         }
     }
-    zoneDictRUnlock(node->zd);
+    ztreeRUnlock(node->zd);
 end:
     return ret;
 }
@@ -1029,10 +1004,10 @@ static void initShuke() {
     // create zoneDict for all numa nodes
     for (int i = 0; i < sk.nr_numa_id; ++i) {
         int numa_id = sk.numa_ids[i];
-        sk.nodes[numa_id]->zd = zoneDictCreate(numa_id);
+        sk.nodes[numa_id]->zd = ztreeCreate(numa_id);
     }
     assert(master_node->zd);
-    sk.zd = master_node->zd;
+    sk.zt = master_node->zd;
 
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
