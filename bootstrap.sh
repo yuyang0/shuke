@@ -13,5 +13,8 @@ build_dpdk() {
     fi
 }
 
+sudo apt-get -y -qq install git clang doxygen hugepages build-essential libnuma-dev libpcap-dev linux-headers-`uname -r`
 build_dpdk
+
+sudo apt-get install -y autoconf libtool
 make $*

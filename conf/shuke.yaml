@@ -1,7 +1,7 @@
 ###############################################
 #  DPDK related config
 ###############################################
-coremask:  0xff
+coremask:  "0xff"
 master_lcore_id:  0
 
 mem_channels:  4
@@ -37,8 +37,8 @@ queue_config: "[1-7].[0-1]"
 # the addresses bind to kni virtual interfaces
 # the number of address should equal to the number of enabled port, only ipv4 addresses are allowed
 bind:
-  - 192.168.0.110
-  - 92.168.10.110
+  - "192.168.0.110"
+  - "92.168.10.110"
 
 # in production environment, use 53
 port: 19899
@@ -55,13 +55,13 @@ max_tcp_connections: 1024
 
 daemonize: no
 
-pidfile: /var/run/shuke_53.pid
+pidfile: "/var/run/shuke.pid"
 
 # please note: query log hurts performance.
 # just comment out below line to disable query log
 query_log_file:  "stdout"
 
-loglevel:  info
+loglevel:  "info"
 logfile:   "stdout"
 
 # logging the file and line information.
@@ -76,7 +76,7 @@ retry_interval: 5
 #
 # if data_store is set to `file`, then zone_files_root and zone_files should be set correctly
 # if data_store is set to `mongo`, then mongo_host, mongo_port and mongo_dbname should be set correctly
-data_store:  file
+data_store:  "file"
 
 # only valid when data_store is file
 # zone_files_root: /cephfs/dpdk/shuke
@@ -88,14 +88,14 @@ zone_files:
 
 
 # only valid when data_store's value is mongo
-mongo_host: 127.0.0.1
+mongo_host: "127.0.0.1"
 mongo_port: 27017
-mongo_dbname: zone
+mongo_dbname: "zone"
 
 # address for tcp server runs in main thread,
 # this server mainly used to debug or perform admin operation.
 
-# admin_host: 127.0.0.1
+# admin_host: "127.0.0.1"
 admin_port: 14141
 
 all_reload_interval: 36000  # 10 hours

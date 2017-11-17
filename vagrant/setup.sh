@@ -212,7 +212,7 @@ set_numa_pages()
 
 # Install dependencies
 sudo apt-get -qq update
-sudo apt-get -y -qq install git clang doxygen hugepages build-essential libnuma-dev libpcap-dev inux-headers-`uname -r`
+sudo apt-get -y -qq install git clang doxygen hugepages build-essential libnuma-dev libpcap-dev linux-headers-`uname -r`
 
 echo "===> build dpdk"
 build_dpdk
