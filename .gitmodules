@@ -7,3 +7,6 @@
 [submodule "3rd/libyaml"]
 	path = 3rd/libyaml
 	url = https://github.com/yaml/libyaml.git
+[submodule "3rd/luajit"]
+	path = 3rd/luajit
+	url = https://github.com/LuaJIT/LuaJIT.git
