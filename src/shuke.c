@@ -997,7 +997,7 @@ static void initShuke() {
         sk.asyncReloadAllZone = &getAllZoneFromFile;
         sk.asyncReloadZone = &reloadZoneFromFile;
     } else {
-        LOG_FATAL(USER1, "invalid data store config %s", sk.data_store);
+        LOG_EXIT(USER1, "invalid data store config %s", sk.data_store);
     }
 
     sk.rbroot = RB_ROOT;
@@ -1011,24 +1011,24 @@ static void initShuke() {
 
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
-        LOG_FATAL(USER1, "can't load all zone data from %s", sk.data_store);
+        LOG_EXIT(USER1, "can't load all zone data from %s", sk.data_store);
     }
     sk.zone_load_time = mstime() - reload_all_start;
     LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
     sk.last_all_reload_ts = sk.unixtime;
 
     if (sk.initAsyncContext() == ERR_CODE) {
-        LOG_FATAL(USER1, "init %s async context error.", sk.data_store);
+        LOG_EXIT(USER1, "init %s async context error.", sk.data_store);
     }
     // process task queue
     if (aeCreateTimeEvent(sk.el, TIME_INTERVAL, mainThreadCron, NULL, NULL) == AE_ERR) {
-        LOG_FATAL(USER1, "Can't create time event proc");
+        LOG_EXIT(USER1, "Can't create time event proc");
     }
 
     // run admin server
     LOG_INFO(USER1, "starting admin server on %s:%d", sk.admin_host, sk.admin_port);
     if (initAdminServer() == ERR_CODE) {
-        LOG_FATAL(USER1, "can't init admin server.");
+        LOG_EXIT(USER1, "can't init admin server.");
     }
 }
 
@@ -1459,7 +1459,7 @@ int main(int argc, char *argv[]) {
             if (is_all_veth_up()) break;
             else {
                 if (i == 20) {
-                    LOG_FATAL(USER1, "can't bring all kni virtual interfaces up.");
+                    LOG_EXIT(USER1, "can't bring all kni virtual interfaces up.");
                 }
             }
         }

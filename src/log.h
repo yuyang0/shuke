@@ -60,6 +60,9 @@ static inline int __rte_log(uint32_t level, uint32_t logtype, const char *tstr, 
 #define LOG_FATAL(t, ...)                                          \
     __rte_log(RTE_LOG_ERR, RTE_LOGTYPE_ ## t, #t, "[err]: ", ##__VA_ARGS__); abort()
 
+#define LOG_EXIT(t, ...)                                          \
+    __rte_log(RTE_LOG_ERR, RTE_LOGTYPE_ ## t, #t, "[err]: ", ##__VA_ARGS__); exit(EXIT_FAILURE)
+
 #define LOG_RAW(l, t, ...)    \
     rte_log(RTE_LOG_ ## l, RTE_LOGTYPE_ ## t, __VA_ARGS__)
 
