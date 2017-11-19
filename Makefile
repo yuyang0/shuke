@@ -33,6 +33,7 @@ INSTALL=install
 HIMONGO_STATICLIB:=3rd/himongo/libhimongo.a
 URCU_STATIC_LIBS:=3rd/liburcu/src/.libs/liburcu-cds.a 3rd/liburcu/src/.libs/liburcu.a
 YAML_STATICLIB:=3rd/libyaml/src/.libs/libyaml.a
+LUAJIT_STATICLIB:=3rd/luajit/src/libluajit.a
 
 SHUKE_SRC_DIR:=src
 # Default settings
@@ -47,18 +48,21 @@ INC_DIR_LIST=$(SHUKE_SRC_DIR) \
 				     3rd     \
 						 3rd/liburcu/include \
 						 3rd/liburcu/src   \
-             3rd/libyaml/include
+             3rd/libyaml/include \
+             3rd/luajit/src
 				     # $(RTE_SDK)/$(RTE_TARGET)/include
-SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c dpdk_kni.c \
-						ds.c debug.c edns.c mongo.c protocol.c rbtree.c rculfhash-mm-socket.c \
-						sds.c shuke.c str.c utils.c zone_parser.c zmalloc.c tcpserver.c ztree.c
+SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c \
+            dpdk_kni.c ds.c debug.c edns.c mongo.c protocol.c \
+            rbtree.c rculfhash-mm-socket.c sds.c shuke.c \
+            str.c utils.c zone_parser.c zmalloc.c tcpserver.c ztree.c \
+            sk_lua_util.c sk_lua_log.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
 
 FINAL_CFLAGS=$(STD) $(WARN) $(OPT) $(DEBUG_FLAGS) $(CFLAGS) $(SHUKE_CFLAGS) $(MACROS)
 FINAL_LDFLAGS=$(LDFLAGS) $(SHUKE_LDFLAGS) $(DEBUG_FLAGS)
-FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) $(YAML_STATICLIB) -pthread -lrt
+FINAL_LIBS=$(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) $(YAML_STATICLIB) $(LUAJIT_STATICLIB) -pthread -lrt
 
 # FINAL_CFLAGS += -include $(RTE_SDK)/$(RTE_TARGET)/include/rte_config.h -msse4.2
 FINAL_CFLAGS += $(addprefix -I,$(INC_DIR_LIST))
@@ -141,7 +145,7 @@ $(SHUKE_BUILD_DIR):
 
 @PHONY: $(SHUKE_BUILD_DIR)
 
-3rd: $(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) $(YAML_STATICLIB)
+3rd: $(HIMONGO_STATICLIB) $(URCU_STATIC_LIBS) $(YAML_STATICLIB) $(LUAJIT_STATICLIB)
 
 update3rd:
 	rm -rf 3rd/himongo 3rd/liburcu && git submodule update --init
@@ -169,6 +173,12 @@ $(YAML_STATICLIB): 3rd/libyaml/Makefile
 
 3rd/libyaml/bootstrap:
 	git submodule update --init
+
+3rd/luajit/Makefile:
+	git submodule update --init
+
+$(LUAJIT_STATICLIB): 3rd/luajit/Makefile
+	make -C 3rd/luajit
 
 install: all
 	@mkdir -p $(INSTALL_BIN)

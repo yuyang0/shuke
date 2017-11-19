@@ -45,6 +45,7 @@
 #ifdef IP_FRAG
 #include <rte_ip_frag.h>
 #endif
+#include <lua.h>
 
 #define MAX_PKT_BURST     32
 #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
@@ -58,6 +59,7 @@ struct mbuf_table {
 struct numaNode_s;
 
 typedef struct lcore_conf {
+    lua_State *L;
     uint16_t lcore_id;
 
     /*

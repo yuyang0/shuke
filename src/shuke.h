@@ -26,6 +26,7 @@
 #include "ds.h"
 #include "ztree.h"
 #include "dpdk_module.h"
+#include "sk_lua.h"
 
 #include "himongo/async.h"
 
@@ -184,6 +185,8 @@ struct shuke {
 
     int all_reload_interval;
     bool minimize_resp;
+
+    char *access_by_lua_src;
     // end config
 
     /*
