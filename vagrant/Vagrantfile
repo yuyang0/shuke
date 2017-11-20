@@ -58,7 +58,6 @@ Vagrant.configure("2") do |config|
          "3rd/dpdk-stable*/x86_64-native-linuxapp-gcc",
          "3rd/himongo",
          "3rd/liburcu",
-         "3rd/libyaml",
          "3rd/luajit"
        ]
 

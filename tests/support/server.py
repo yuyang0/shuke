@@ -12,7 +12,7 @@ import time
 import tempfile
 import io
 
-import yaml
+import toml
 
 import dns.message
 import dns.query
@@ -129,22 +129,47 @@ class AdminClient(object):
         self.sock.close()
 
 
+def update_nested_dict(d, overrides):
+    def update_one(d, k, v):
+        k_list = k.split(".")
+        if len(k_list) == 0:
+            return
+        elif len(k_list) == 1:
+            d[k_list[0]] = v
+        else:
+            old_v = d[k_list[0]]
+            for kk in k_list[1:-1]:
+                old_v = old_v[kk]
+            old_v[k_list[-1]] = v
+    for k, v in overrides.items():
+        update_one(d, k, v)
+
+
 class DNSServer(object):
     def __init__(self, overrides=None, valgrind=False):
         self.pid = None
-        with open(os.path.join(constants.ASSETS_DIR, "test.yaml")) as fp:
-            self.cf = yaml.load(fp)
+        with open(os.path.join(constants.ASSETS_DIR, "test.toml")) as fp:
+            self.cf = toml.load(fp)
         if overrides:
-            self.cf.update(overrides)
-        self.cf.pop("admin_host", None)
+            update_nested_dict(self.cf, overrides)
+        self.cf["core"].pop("admin_host", None)
+        # extract some field from cf
+        self.data_store = self.cf["zone_source"]["type"].lower()
+        self.pidfile = self.cf["core"]["pidfile"]
+        self.admin_host = self.cf["core"].get("admin_host", None)
+        self.admin_port = self.cf["core"].get("admin_port", None)
+        self.dns_port = self.cf["core"]["port"]
+        self.dns_host = self.cf["core"]["bind"]
+
         # override mongo host and mongo port
-        if self.cf["data_store"].lower() == "mongo":
+        mongo_conf = self.cf["zone_source"]["mongo"]
+        if self.data_store == "mongo":
             self.zm = ZoneMongo(constants.MONGO_HOST,
                                 constants.MONGO_PORT,
-                                self.cf["mongo_dbname"])
+                                mongo_conf["dbname"])
         self.valgrind = valgrind
 
-        self.cf_str = yaml.dump(self.cf)
+        self.cf_str = toml.dumps(self.cf)
         self.fp = tempfile.NamedTemporaryFile()
         self.fp.write(self.cf_str.encode("utf8"))
         self.fp.flush()
@@ -169,17 +194,17 @@ class DNSServer(object):
             self._start_srv()
         except Exception as e:
             raise Exception("%s" % (str(e),))
-        self.admin_cli = AdminClient(self.cf.get("admin_host", None),
-                                     self.cf["admin_port"])
+        self.admin_cli = AdminClient(self.admin_host,
+                                     self.admin_port)
 
     def _start_srv(self, timeout=10):
-        self._execute(start_shuke, self.cmd, self.cf["pidfile"], self.fp.name)
+        self._execute(start_shuke, self.cmd, self.pidfile, self.fp.name)
 
     def _stop_srv(self):
-        self._execute(stop_shuke, self.cf["pidfile"])
+        self._execute(stop_shuke, self.pidfile)
 
     def isalive(self):
-        self._execute(shuke_is_running, self.cf["pidfile"])
+        self._execute(shuke_is_running, self.pidfile)
 
     def stop(self):
         self.admin_cli.close()
@@ -196,8 +221,8 @@ class DNSServer(object):
         return self.admin_cli.exec_cmd(cmd)
 
     def dns_query(self, name, ty, use_tcp=True):
-        dns_hosts = self.cf["bind"]
-        dns_port = self.cf["port"]
+        dns_hosts = self.dns_host
+        dns_port = self.dns_port
         if len(dns_hosts) > 0:
             dns_host = dns_hosts[0]
         else:

@@ -3,4 +3,4 @@ pytest
 dnspython
 python-vagrant
 fabric3
-pyyaml
+toml

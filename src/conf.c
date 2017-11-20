@@ -6,14 +6,11 @@
 #include <string.h>
 #include <stdbool.h>
 #include <limits.h>
-#include <libyaml/include/yaml.h>
-
-#include "yaml.h"
-
 #include "defines.h"
 #include "str.h"
 #include "shuke.h"
 #include "utils.h"
+#include "toml.h"
 
 #define CHECK_CONFIG(name, exp, msg)                                    \
     do{                                                                 \
@@ -27,286 +24,224 @@
 
 #define GET_STR_CONFIG(name, v, t)                                  \
     do{                                                             \
-        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,           \
-                     "Config Error: " name "should be a string");   \
-        if((v) != NULL) free(v);                                    \
-        (v) = strdup((char*)(t).data.scalar.value);                 \
+        const char *raw;                                            \
+        if ((raw = toml_raw_in(t, name))) {                         \
+            if (toml_rtos(raw, &(v)) < 0) {                         \
+                fprintf(stderr, "ERROR: bad value in %s\n", name);  \
+                exit(EXIT_FAILURE);                                 \
+            }                                                       \
+        }                                                           \
     } while(0)
 
-#define GET_INT_CONFIG(name, v, t)                                      \
-    do{                                                                 \
-        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,               \
-                     "Config Error: " name "should be a string");       \
-        char *end = NULL;                                               \
-        long lval;                                                      \
-        int base = 10;                                                  \
-        char *str_val = (char*)(t).data.scalar.value;                   \
-        if (str_val[0] == '0') base = 16;                               \
-        lval = strtol(str_val, &end, base);                             \
-        if (*end == '\0') {                                             \
-            (v) = lval;                                                 \
-        } else {                                                        \
-            fprintf(stderr, "invalid character for config %s", name);   \
-            exit(-1);                                                   \
-        }                                                               \
+#define GET_INT_CONFIG(name, v, t)                                  \
+    do{                                                             \
+        const char *raw;                                            \
+        int64_t tmp;                                                \
+        if ((raw = toml_raw_in(t, name))) {                         \
+            if (toml_rtoi(raw, &tmp) < 0) {                         \
+                fprintf(stderr, "ERROR: bad value in %s\n", name);  \
+                exit(EXIT_FAILURE);                                 \
+            }                                                       \
+            (v) = (int)tmp;                                         \
+        }                                                           \
     } while(0)
 
-#define GET_BOOL_CONFIG(name, v, t)                                     \
-    do{                                                                 \
-        CHECK_CONFIG(name, (t).type == YAML_SCALAR_EVENT,               \
-                     "Config Error: " name "should be a string");       \
-        char *str_val = (char*)(t).data.scalar.value;                   \
-        if (!strcasecmp(str_val, "on") ||                               \
-            !strcasecmp(str_val, "yes") ||                              \
-            !strcasecmp(str_val, "true")) {                             \
-            (v) = true;                                                 \
-        } else if (!strcasecmp(str_val, "off") ||                       \
-                   !strcasecmp(str_val, "no") ||                        \
-                   !strcasecmp(str_val, "false")) {                     \
-            (v) = false;                                                \
-        } else {                                                        \
-            fprintf(stderr, "only on/true/yes and off/false/no is valid for the key %s.", name); \
-            exit(-1);                                                   \
-        }                                                               \
+#define GET_BOOL_CONFIG(name, v, t)                                 \
+    do{                                                             \
+        const char *raw;                                            \
+        int tmp;                                                    \
+        if ((raw = toml_raw_in(t, name))) {                         \
+            if (toml_rtob(raw, &tmp) < 0) {                         \
+                fprintf(stderr, "ERROR: bad value in %s\n", name);  \
+                exit(EXIT_FAILURE);                                 \
+            }                                                       \
+            (v) = (bool)tmp;                                        \
+        }                                                           \
     } while(0)
 
-/*!
- * convert all the zone file name to absolute path
- * @return
- */
-static int refineZoneFileConfig() {
-    dictIterator *it = dictGetIterator(sk.zone_files_dict);
-    dictEntry *de;
-    char *dotOrigin, *fname;
-    while((de = dictNext(it)) != NULL) {
-        dotOrigin = dictGetKey(de);
-        fname = dictGetVal(de);
-        if (isAbsDotDomain(dotOrigin) == false) {
-            snprintf(sk.errstr, ERR_STR_LEN, "%s is not absolute domain name.", dotOrigin);
-            return ERR_CODE;
-        }
-        fname = toAbsPath(fname, sk.zone_files_root);
-        if (access(fname, F_OK) == -1) {
-            snprintf(sk.errstr, ERR_STR_LEN, "%s doesn't exist.", fname);
-            free(fname);
-            return ERR_CODE;
-        }
-        dictReplace(sk.zone_files_dict, dotOrigin, fname);
-        free(fname);
+static int addZoneFileToConf(char *k, char *v) {
+    dict *d = sk.zone_files_dict;
+    if (isAbsDotDomain(k) == false) {
+        fprintf(stderr, "%s is not absolute domain name.", k);
+        exit(EXIT_FAILURE);
     }
-    dictReleaseIterator(it);
-    return OK_CODE;
+    v = toAbsPath(v, sk.zone_files_root);
+    if (access(v, F_OK) == -1) {
+        fprintf(stderr, "%s doesn't exist.", v);
+        exit(EXIT_FAILURE);
+    }
+    if (dictAdd(d, k, v) != DICT_OK) {
+        fprintf(stderr, "duplicate zone file %s", k);
+        exit(EXIT_FAILURE);
+    }
+    // don't use zfree.
+    free(v);
+    return 0;
 }
 
-static int _parse_yaml_config(FILE *fh) {
-    char key[4096];
-    yaml_parser_t parser;
-    yaml_event_t  event, t;   /* New variable */
+static int _parse_toml_config(FILE *fp) {
+    toml_table_t *conf;
+    toml_table_t *dpdk, *core, *zone_source;
+    char errbuf[200];
+    conf = toml_parse_file(fp, errbuf, sizeof(errbuf));
+    if (conf == NULL) {
+        fprintf(stderr, "ERROR: %s\n", errbuf);
+        exit(EXIT_FAILURE);
+    }
+    if ((dpdk = toml_table_in(conf, "dpdk")) == NULL) {
+        fprintf(stderr, "ERROR: missing [dpdk]\n");
+        toml_free(conf);
+        exit(EXIT_FAILURE);
+    }
 
-    /* Initialize parser */
-    if(!yaml_parser_initialize(&parser))
-        fputs("Failed to initialize parser!\n", stderr);
-    if(fh == NULL)
-        fputs("Failed to open file!\n", stderr);
+    if ((core = toml_table_in(conf, "core")) == NULL) {
+        fprintf(stderr, "ERROR: missing [core]\n");
+        toml_free(conf);
+        exit(EXIT_FAILURE);
+    }
 
-    /* Set input file */
-    yaml_parser_set_input_file(&parser, fh);
+    if ((zone_source = toml_table_in(conf, "zone_source")) == NULL) {
+        fprintf(stderr, "ERROR: missing [zone_source]\n");
+        toml_free(conf);
+        exit(EXIT_FAILURE);
+    }
 
-    do {
-        if (!yaml_parser_parse(&parser, &event)) {
-            fprintf(stderr, "Parser error %d\n", parser.error);
+    // dpdk related config
+    GET_STR_CONFIG("coremask", sk.coremask, dpdk);
+    GET_INT_CONFIG("master_lcore_id", sk.master_lcore_id, dpdk);
+    GET_INT_CONFIG("mem_channels", sk.mem_channels, dpdk);
+    GET_BOOL_CONFIG("promiscuous_on", sk.promiscuous_on, dpdk);
+    GET_BOOL_CONFIG("numa_on", sk.numa_on, dpdk);
+    GET_BOOL_CONFIG("jumbo_on", sk.jumbo_on, dpdk);
+    GET_INT_CONFIG("max_pkt_len", sk.max_pkt_len, dpdk);
+    GET_STR_CONFIG("queue_config", sk.queue_config, dpdk);
+    char *portmask_str = NULL;
+    long portmask;
+    GET_STR_CONFIG("portmask", portmask_str, dpdk);
+    if (portmask_str == NULL) {
+        fprintf(stderr, "portmask can't be empty\n");
+        exit(EXIT_FAILURE);
+    }
+    if (str2long(portmask_str, &portmask) < 0) {
+        fprintf(stderr, "portmask should be a hex number.\n");
+        exit(-1);
+    }
+    sk.portmask = (int)portmask;
+
+    // core config
+    toml_array_t *bind;
+    if ((bind = toml_array_in(core, "bind")) != NULL) {
+        if (toml_array_kind(bind) != 'v') {
+            fprintf(stderr, "the value of bind should be an array of string.\n");
             exit(EXIT_FAILURE);
         }
-
-        switch(event.type)
-        {
-            case YAML_NO_EVENT:
-                /* puts("No event!"); */
-                break;
-            case YAML_STREAM_START_EVENT:
-                /* puts("STREAM START"); */
-                break;
-            case YAML_STREAM_END_EVENT:
-                /* puts("STREAM END"); */
-                break;
-                /* Block delimeters */
-            case YAML_DOCUMENT_START_EVENT:
-                /* puts("<b>Start Document</b>"); */
-                break;
-            case YAML_DOCUMENT_END_EVENT:
-                /* puts("<b>End Document</b>"); */
-                break;
-            case YAML_SEQUENCE_START_EVENT:
-                /* puts("<b>Start Sequence</b>"); */
-                break;
-            case YAML_SEQUENCE_END_EVENT:
-                /* puts("<b>End Sequence</b>"); */
-                break;
-            case YAML_MAPPING_START_EVENT:
-                /* puts("<b>Start Mapping</b>"); */
-                break;
-            case YAML_MAPPING_END_EVENT:
-                /* puts("<b>End Mapping</b>"); */
-                break;
-                /* Data */
-            case YAML_ALIAS_EVENT:
-                /* printf("Got alias (anchor %s)\n", event.data.alias.anchor); */
-                break;
-            case YAML_SCALAR_EVENT:
-                strncpy(key, (char*)event.data.scalar.value, 4096);
-                if (!yaml_parser_parse(&parser, &t)) {
-                    fprintf(stderr, "Parser error %d\n", parser.error);
-                    exit(EXIT_FAILURE);
-                }
-                if (! strcasecmp(key, "coremask")) {
-                    GET_STR_CONFIG("coremask", sk.coremask, t);
-                } else if (! strcasecmp(key, "master_lcore_id")) {
-                    GET_INT_CONFIG("master_lcore_id", sk.master_lcore_id, t);
-                } else if (! strcasecmp(key, "mem_channels")) {
-                    GET_STR_CONFIG("mem_channels", sk.mem_channels, t);
-                } else if (! strcasecmp(key, "promiscuous_on")) {
-                    GET_BOOL_CONFIG("promiscuous_on", sk.promiscuous_on, t);
-                } else if (! strcasecmp(key, "portmask")) {
-                    GET_INT_CONFIG("portmask", sk.portmask, t);
-                } else if (! strcasecmp(key, "numa_on")) {
-                    GET_BOOL_CONFIG("numa_on", sk.numa_on, t);
-                } else if (! strcasecmp(key, "jumbo_on")) {
-                    GET_BOOL_CONFIG("jumbo_on", sk.jumbo_on, t);
-                } else if (! strcasecmp(key, "max_pkt_len")) {
-                    GET_INT_CONFIG("max_pkt_len", sk.max_pkt_len, t);
-                } else if (! strcasecmp(key, "queue_config")) {
-                    GET_STR_CONFIG("queue_config", sk.queue_config, t);
-                } else if (! strcasecmp(key, "bind")) {
-                    yaml_event_t ev;
-                    if (t.type != YAML_SEQUENCE_START_EVENT) {
-                        fprintf(stderr, "config value of bind must be an array\n");
-                        exit(-1);
-                    }
-                    sk.bindaddr_count = 0;
-                    while (1) {
-                        if (!yaml_parser_parse(&parser, &ev)) {
-                            fprintf(stderr, "Parser error %d\n", parser.error);
-                            exit(EXIT_FAILURE);
-                        }
-                        if (ev.type == YAML_SEQUENCE_END_EVENT) {
-                            yaml_event_delete(&ev);
-                            break;
-                        }
-                        if (ev.type != YAML_SCALAR_EVENT) {
-                            fprintf(stderr, "config value of bind must be an array of string\n");
-                            exit(-1);
-                        }
-                        if (sk.bindaddr_count >= CONFIG_BINDADDR_MAX) {
-                            fprintf(stderr, "too many address\n");
-                            exit(-1);
-                        }
-                        sk.bindaddr[sk.bindaddr_count++] = strdup((char*)ev.data.scalar.value);
-                        yaml_event_delete(&ev);
-                    }
-                } else if (! strcasecmp(key, "port")) {
-                    GET_INT_CONFIG("port", sk.port, t);
-                } else if (! strcasecmp(key, "only_udp")) {
-                    GET_BOOL_CONFIG("only_udp", sk.only_udp, t);
-                } else if (! strcasecmp(key, "data_store")) {
-                    GET_STR_CONFIG("data_store", sk.data_store, t);
-                } else if (! strcasecmp(key, "tcp_backlog")) {
-                    GET_INT_CONFIG("tcp_backlog", sk.tcp_backlog, t);
-                } else if (! strcasecmp(key, "tcp_keepalive")) {
-                    GET_INT_CONFIG("tcp_keepalive", sk.tcp_keepalive, t);
-                } else if (! strcasecmp(key, "tcp_idle_timeout")) {
-                    GET_INT_CONFIG("tcp_idle_timeout", sk.tcp_idle_timeout, t);
-                } else if (! strcasecmp(key, "max_tcp_connections")) {
-                    GET_INT_CONFIG("max_tcp_connections", sk.max_tcp_connections, t);
-                } else if (! strcasecmp(key, "pidfile")) {
-                    GET_STR_CONFIG("pidfile", sk.pidfile, t);
-                } else if (! strcasecmp(key, "query_log_file")) {
-                    GET_STR_CONFIG("query_log_file", sk.query_log_file, t);
-                } else if (! strcasecmp(key, "logfile")) {
-                    GET_STR_CONFIG("logfile", sk.logfile, t);
-                } else if (! strcasecmp(key, "log_verbose")) {
-                    GET_BOOL_CONFIG("log_verbose", sk.logVerbose, t);
-                } else if (! strcasecmp(key, "daemonize")) {
-                    GET_BOOL_CONFIG("daemonize", sk.daemonize, t);
-                } else if (! strcasecmp(key, "loglevel")) {
-                    GET_STR_CONFIG("loglevel", sk.logLevelStr, t);
-                } else if (! strcasecmp(key, "admin_host")) {
-                    GET_STR_CONFIG("admin_host", sk.admin_host, t);
-                } else if (! strcasecmp(key, "admin_port")) {
-                    GET_INT_CONFIG("admin_port", sk.admin_port, t);
-                } else if (! strcasecmp(key, "all_reload_interval")) {
-                    GET_INT_CONFIG("all_reload_interval", sk.all_reload_interval, t);
-                } else if (! strcasecmp(key, "minimize_resp")) {
-                    GET_BOOL_CONFIG("minimize_resp", sk.minimize_resp, t);
-                } else if (! strcasecmp(key, "zone_files_root")) {
-                    GET_STR_CONFIG("zone_files_root", sk.zone_files_root, t);
-                } else if (! strcasecmp(key, "zone_files")) {
-                    sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_HEAP);
-                    if (t.type != YAML_MAPPING_START_EVENT) {
-                        fprintf(stderr, "config value of zone_files must be a map\n");
-                        exit(-1);
-                    }
-                    yaml_event_t k, v;
-                    while (1) {
-                        if (!yaml_parser_parse(&parser, &k)) {
-                            fprintf(stderr, "Parser error %d\n", parser.error);
-                            exit(EXIT_FAILURE);
-                        }
-                        if (k.type == YAML_MAPPING_END_EVENT) {
-                            yaml_event_delete(&k);
-                            break;
-                        }
-                        if (!yaml_parser_parse(&parser, &v)) {
-                            fprintf(stderr, "Parser error %d\n", parser.error);
-                            exit(EXIT_FAILURE);
-                        }
-                        if (k.type != YAML_SCALAR_EVENT || v.type != YAML_SCALAR_EVENT) {
-                            fprintf(stderr, "config value of zone_files must be a map of <zname, fname>\n");
-                            exit(-1);
-                        }
-
-                        if (dictAdd(sk.zone_files_dict, (char*)k.data.scalar.value, (char*)v.data.scalar.value) != DICT_OK) {
-                            fprintf(stderr, "duplicate zone file %s", (char*)k.data.scalar.value);
-                            exit(EXIT_FAILURE);
-                        }
-                        yaml_event_delete(&k);
-                        yaml_event_delete(&v);
-                    }
-                } else if (! strcasecmp(key, "mongo_host")) {
-                    GET_STR_CONFIG("mongo_host", sk.mongo_host, t);
-                } else if (! strcasecmp(key, "mongo_port")) {
-                    GET_INT_CONFIG("mongo_port", sk.mongo_port, t);
-                } else if (! strcasecmp(key, "mongo_dbname")) {
-                    GET_STR_CONFIG("mongo_dbname", sk.mongo_dbname, t);
-                } else if (! strcasecmp(key, "retry_interval")) {
-                    GET_INT_CONFIG("retry_interval", sk.retry_interval, t);
-                } else {
-                    fprintf(stderr, "invalid config name %s.\n", key);
-                    exit(1);
-                }
-                yaml_event_delete(&t);
-                break;
+        sk.bindaddr_count = 0;
+        int i = 0;
+        char *bindaddr;
+        const char *raw;
+        while ((raw = toml_raw_at(bind, i++)) != NULL) {
+            if (toml_rtos(raw, &bindaddr) < 0) {
+                fprintf(stderr, "the value of bind should be an array of string.\n");
+                exit(EXIT_FAILURE);
+            }
+            if (sk.bindaddr_count >= CONFIG_BINDADDR_MAX) {
+                fprintf(stderr, "too many address\n");
+                exit(-1);
+            }
+            sk.bindaddr[sk.bindaddr_count++] = bindaddr;
         }
-        if(event.type != YAML_STREAM_END_EVENT)
-            yaml_event_delete(&event);
-    } while(event.type != YAML_STREAM_END_EVENT);
-    yaml_event_delete(&event);
+    }
 
-    /* Cleanup */
-    yaml_parser_delete(&parser);
+    GET_INT_CONFIG("port", sk.port, core);
+    GET_BOOL_CONFIG("only_udp", sk.only_udp, core);
+    GET_INT_CONFIG("tcp_backlog", sk.tcp_backlog, core);
+    GET_INT_CONFIG("tcp_keepalive", sk.tcp_keepalive, core);
+    GET_INT_CONFIG("tcp_idle_timeout", sk.tcp_idle_timeout, core);
+    GET_INT_CONFIG("max_tcp_connections", sk.max_tcp_connections, core);
+    GET_STR_CONFIG("pidfile", sk.pidfile, core);
+    GET_STR_CONFIG("query_log_file", sk.query_log_file, core);
+    GET_STR_CONFIG("logfile", sk.logfile, core);
+    GET_BOOL_CONFIG("log_verbose", sk.logVerbose, core);
+    GET_BOOL_CONFIG("daemonize", sk.daemonize, core);
+    GET_STR_CONFIG("loglevel", sk.logLevelStr, core);
+    GET_STR_CONFIG("admin_host", sk.admin_host, core);
+    GET_INT_CONFIG("admin_port", sk.admin_port, core);
+    GET_BOOL_CONFIG("minimize_resp", sk.minimize_resp, core);
+
+    // zone_source related config
+    GET_INT_CONFIG("retry_interval", sk.retry_interval, zone_source);
+    GET_INT_CONFIG("all_reload_interval", sk.all_reload_interval, zone_source);
+    GET_STR_CONFIG("type", sk.data_store, zone_source);
+    if (strcasecmp(sk.data_store, "file") == 0) {
+        toml_table_t *file;
+        toml_array_t *file_list;
+        toml_table_t *entry;
+
+        if ((file = toml_table_in(zone_source, "file")) == NULL) {
+            fprintf(stderr, "ERROR: missing [zone_source.file]\n");
+            toml_free(conf);
+            exit(EXIT_FAILURE);
+        }
+        if ((file_list= toml_array_in(file, "files")) == NULL) {
+            fprintf(stderr, "ERROR: missing [zone_source.file.files]\n");
+            toml_free(conf);
+            exit(EXIT_FAILURE);
+        }
+        GET_STR_CONFIG("zone_files_root", sk.zone_files_root, file);
+
+        if (sk.zone_files_root == NULL) {
+            char cwd[MAXLINE];
+            if (getcwd(cwd, MAXLINE) == NULL) {
+                fprintf(stderr, "getcwd: %s.\n", strerror(errno));
+                exit(1);
+            }
+            sk.zone_files_root = strdup(cwd);
+        }
+        if (*(sk.zone_files_root) != '/') {
+            fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
+            exit(1);
+        }
+        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_HEAP);
+        for (int i = 0; ; i++) {
+            if ((entry = toml_table_at(file_list, i)) == NULL) break;
+            char *k=NULL, *v=NULL;
+            GET_STR_CONFIG("name", k, entry);
+            GET_STR_CONFIG("file", v, entry);
+            if (k == NULL || v == NULL) {
+                fprintf(stderr, "name and file can't be empty\n");
+                exit(EXIT_FAILURE);
+            }
+            addZoneFileToConf(k, v);
+            free(k);
+            free(v);
+        }
+    } else if (strcasecmp(sk.data_store, "mongo") == 0) {
+        toml_table_t *mongo;
+
+        if ((mongo = toml_table_in(zone_source, "mongo")) == NULL) {
+            fprintf(stderr, "ERROR: missing [zone_source.mongo]\n");
+            toml_free(conf);
+            exit(EXIT_FAILURE);
+        }
+        GET_STR_CONFIG("host", sk.mongo_host, mongo);
+        GET_INT_CONFIG("port", sk.mongo_port, mongo);
+        GET_STR_CONFIG("dbname", sk.mongo_dbname, mongo);
+
+        CHECK_CONFIG("mongo_host", sk.mongo_host != NULL, NULL);
+        CHECK_CONFIG("mongo_dbname", sk.mongo_dbname != NULL, NULL);
+    } else {
+        fprintf(stderr, "Unknown zone source type\n");
+        exit(EXIT_FAILURE);
+    }
+
     return 0;
 }
 
 
-void initConfigFromYamlFile(char *conffile) {
-    char cwd[MAXLINE];
-
+void initConfigFromTomlFile(char *conffile) {
     FILE *fp = fopen(conffile, "r");
     if (fp == NULL) {
         fprintf(stderr, "Can't open configure file(%s)\n", conffile);
-        exit(1);
-    }
-    if (getcwd(cwd, MAXLINE) == NULL) {
-        fprintf(stderr, "getcwd: %s.\n", strerror(errno));
         exit(1);
     }
 
@@ -334,34 +269,16 @@ void initConfigFromYamlFile(char *conffile) {
     sk.pidfile = strdup("/var/run/shuke.pid");
     sk.logLevelStr = strdup("info");
 
-    _parse_yaml_config(fp);
+    _parse_toml_config(fp);
 
     CHECK_CONFIG("coremask", sk.coremask != NULL,
                  "Config Error: coremask can't be empty");
-    CHECK_CONFIG("mem_channels", sk.mem_channels != NULL,
+    CHECK_CONFIG("mem_channels", sk.mem_channels > 0,
                  "Config Error: mem_channels can't be empty");
 
     CHECK_CONFIG("data_store", sk.data_store != NULL,
                  "Config Error: data_store can't be empty");
-    if (strcasecmp(sk.data_store, "file") == 0) {
-        if (sk.zone_files_root == NULL) {
-            sk.zone_files_root = strdup(cwd);
-        }
-        if (*(sk.zone_files_root) != '/') {
-            fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
-            exit(1);
-        }
-        if (refineZoneFileConfig() != OK_CODE) {
-            fprintf(stderr, "Config Error: %s.\n", sk.errstr);
-            exit(1);
-        }
-    } else if (strcasecmp(sk.data_store, "mongo") == 0) {
-        CHECK_CONFIG("mongo_host", sk.mongo_host != NULL, NULL);
-        CHECK_CONFIG("mongo_dbname", sk.mongo_dbname != NULL, NULL);
-    } else {
-        fprintf(stderr, "invalid data_store config.\n");
-        exit(1);
-    }
+
     fclose(fp);
 }
 
@@ -370,7 +287,7 @@ sds configToStr() {
             "conffile: %s\n"
             "coremask: %s\n"
             "master_lcore_id: %d\n"
-            "mem_channels: %s\n"
+            "mem_channels: %d\n"
             "portmask: %d\n"
             "promiscuous_on: %d\n"
             "numa_on: %d\n"
@@ -438,6 +355,7 @@ sds configToStr() {
     }
     return s;
 }
+
 #if defined(SK_TEST)
 #include <stdio.h>
 #include <stdlib.h>
@@ -451,7 +369,7 @@ int confTest(int argc, char *argv[]) {
         fprintf(stderr, "need conf file");
         exit(1);
     }
-    initConfigFromYamlFile(argv[3]);
+    initConfigFromTomlFile(argv[3]);
     test_cond("loglevel: ", strcmp(sk.logLevelStr, "info") == 0);
     test_cond("logfile: ", strcmp(sk.logfile, "") == 0);
     test_cond("pidfile: ", strcmp(sk.pidfile, "/var/run/shuke.pid") == 0);

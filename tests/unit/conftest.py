@@ -24,7 +24,7 @@ def dns_srv(request):
     valgrind = getattr(request.module, "valgrind", False)
 
     srv = server.DNSServer(overrides, valgrind)
-    if srv.cf["data_store"].lower() == "mongo":
+    if srv.data_store.lower() == "mongo":
         srv.mongo_clear()
         zone_init_str = getattr(request.module, "zone_init_str", None)
         if zone_init_str:

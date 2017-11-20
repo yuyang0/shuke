@@ -13,9 +13,9 @@ sys.path.insert(0, dirname(dirname(abspath(__file__))))
 from support import constants
 
 overrides = {
-    "data_store": "file",
+    "zone_source.type": "file",
     # "zone_files": {"example.com.": constants.EXAMPLE_ZONE_FILE},
-    "minimize_resp": False,
+    "core.minimize_resp": False,
 }
 valgrind = False
 

@@ -1428,7 +1428,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     getConfigFname(argc, argv);
-    initConfigFromYamlFile(sk.configfile);
+    initConfigFromTomlFile(sk.configfile);
     if (sk.daemonize) daemonize();
     // configure log as early as possible
     config_log();

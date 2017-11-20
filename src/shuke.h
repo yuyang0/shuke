@@ -145,7 +145,7 @@ struct shuke {
 
     char *coremask;
     int master_lcore_id;
-    char *mem_channels;
+    int mem_channels;
     int portmask;
     bool promiscuous_on;
     bool numa_on;
@@ -348,6 +348,6 @@ void _shukePanic(char *msg, char *file, int line);
  *     config
  *---------------------------------------------*/
 sds configToStr();
-void initConfigFromYamlFile(char *conffile);
+void initConfigFromTomlFile(char *conffile);
 
 #endif /* _SHUKE_H_ */

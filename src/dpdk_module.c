@@ -914,19 +914,21 @@ init_dpdk_eal() {
     int ret;
     char master_lcore_cmd[128];
     char log_cmd[128];
+    char mem_channel_str[128];
     int log_level = RTE_LOG_INFO;
     if ((int)str2loglevel(sk.logLevelStr) < log_level) {
         log_level = str2loglevel(sk.logLevelStr);
     }
     snprintf(master_lcore_cmd, 128, "--master-lcore=%d", sk.master_lcore_id);
     snprintf(log_cmd, 128, "--log-level=%d", log_level);
+    snprintf(mem_channel_str, 128, "%d", sk.mem_channels);
     /* initialize the rte env first*/
     char *argv[] = {
             "",
             "-l",
             sk.total_lcore_list,
             "-n",
-            sk.mem_channels,
+            mem_channel_str,
             master_lcore_cmd,
             log_cmd,
             "--proc-type=auto",

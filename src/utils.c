@@ -68,6 +68,20 @@ int intArrayToStr(int arr[], int nitems, char *seps, char *buf, size_t size) {
     return (int)offset;
 }
 
+int str2long(char *ss, long *v) {
+    char *end = NULL;
+    long lval;
+    int base = 10;
+    if (ss[0] == '0') base = 16;
+    lval = strtol(ss, &end, base);
+    if (*end == '\0') {
+        *v = lval;
+        return 0;
+    } else {
+        return -1;
+    }
+}
+
 /* Convert an amount of bytes into a human readable string in the form
  * of 100B, 2G, 100M, 4K, and so forth. */
 void bytesToHuman(char *s, unsigned long long n) {
@@ -368,4 +382,3 @@ ok:
     va_end(ap);
     return result;
 }
-
