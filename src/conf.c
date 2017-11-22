@@ -5,9 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <limits.h>
 #include "defines.h"
-#include "str.h"
 #include "shuke.h"
 #include "utils.h"
 #include "toml.h"

@@ -37,11 +37,11 @@ if you use vagrant, it is very simple to try shuke
 3. ssh to the guest machine, then run the following command:
 
        cd /shuke
-       sudo build/shuke-server -c vagrant/test.yaml
+       sudo build/shuke-server -c vagrant/test.toml
 
 4. in the host machine, run `dig www1.example.com. @172.28.128.10 -p 19899 -t A`
 
-**tips**: `vagrant/setup.sh` is a good place to figure out how to build this project 
+**tips**: `vagrant/setup.sh` is a good place to figure out how to build this project
 and prepare the running environment.
 ### buid
 
@@ -66,7 +66,7 @@ and prepare the running environment.
 3. if you want to support ip fragmentation, just run `make IP_FRAG=1`.
 
 ### run
-just run `build/shuke-server -c conf/shuke.yaml`,
+just run `build/shuke-server -c conf/shuke.toml`,
 you may need to change the config in the config file.
 
 ## mongo data schema

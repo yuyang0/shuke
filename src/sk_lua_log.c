@@ -58,7 +58,7 @@ static int sk_lua_log(lua_State *L) {
     int                          level;
 
     level = luaL_checkint(L, 1);
-    if (level < RTE_LOG_EMERG || level > RTE_LOG_DEBUG) {
+    if (level < (int)RTE_LOG_EMERG || level > (int)RTE_LOG_DEBUG) {
         msg = lua_pushfstring(L, "bad log level: %d", level);
         return luaL_argerror(L, 1, msg);
     }
@@ -72,14 +72,13 @@ static int sk_lua_log(lua_State *L) {
 static int
 log_wrapper(const char *ident, int level, lua_State *L)
 {
-    u_char              *buf;
     u_char              *p, *q;
     int                  nargs, i;
     size_t               size=0, len;
     int                  type;
     const char          *msg;
 
-    if ((level > rte_logs.level) || !(RTE_LOGTYPE_LUA & rte_logs.type))
+    if ((level > (int)rte_logs.level) || !(RTE_LOGTYPE_LUA & rte_logs.type))
         return 0;
 
     nargs = lua_gettop(L);
@@ -135,7 +134,7 @@ log_wrapper(const char *ident, int level, lua_State *L)
     // last zero
     size++;
 
-    buf = lua_newuserdata(L, size);
+    u_char buf[size];
     p = buf;
 
     for (i = 1; i <= nargs; i++) {
