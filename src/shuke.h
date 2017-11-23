@@ -143,10 +143,8 @@ struct shuke {
     // config
     char *configfile;
 
-    char *coremask;
     int master_lcore_id;
     int mem_channels;
-    int portmask;
     bool promiscuous_on;
     bool numa_on;
     bool jumbo_on;

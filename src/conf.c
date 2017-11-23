@@ -105,7 +105,6 @@ static int _parse_toml_config(FILE *fp) {
     }
 
     // dpdk related config
-    GET_STR_CONFIG("coremask", sk.coremask, dpdk);
     GET_INT_CONFIG("master_lcore_id", sk.master_lcore_id, dpdk);
     GET_INT_CONFIG("mem_channels", sk.mem_channels, dpdk);
     GET_BOOL_CONFIG("promiscuous_on", sk.promiscuous_on, dpdk);
@@ -113,18 +112,6 @@ static int _parse_toml_config(FILE *fp) {
     GET_BOOL_CONFIG("jumbo_on", sk.jumbo_on, dpdk);
     GET_INT_CONFIG("max_pkt_len", sk.max_pkt_len, dpdk);
     GET_STR_CONFIG("queue_config", sk.queue_config, dpdk);
-    char *portmask_str = NULL;
-    long portmask;
-    GET_STR_CONFIG("portmask", portmask_str, dpdk);
-    if (portmask_str == NULL) {
-        fprintf(stderr, "portmask can't be empty\n");
-        exit(EXIT_FAILURE);
-    }
-    if (str2long(portmask_str, &portmask) < 0) {
-        fprintf(stderr, "portmask should be a hex number.\n");
-        exit(-1);
-    }
-    sk.portmask = (int)portmask;
 
     // core config
     toml_array_t *bind;
@@ -269,8 +256,8 @@ void initConfigFromTomlFile(char *conffile) {
 
     _parse_toml_config(fp);
 
-    CHECK_CONFIG("coremask", sk.coremask != NULL,
-                 "Config Error: coremask can't be empty");
+    CHECK_CONFIG("mem_channels", sk.master_lcore_id >= 0,
+                 "Config Error: master_lcore_id must set correctly");
     CHECK_CONFIG("mem_channels", sk.mem_channels > 0,
                  "Config Error: mem_channels can't be empty");
 
@@ -283,10 +270,8 @@ void initConfigFromTomlFile(char *conffile) {
 sds configToStr() {
     sds s = sdsnewprintf(
             "conffile: %s\n"
-            "coremask: %s\n"
             "master_lcore_id: %d\n"
             "mem_channels: %d\n"
-            "portmask: %d\n"
             "promiscuous_on: %d\n"
             "numa_on: %d\n"
             "jumbo_on: %d\n"
@@ -315,10 +300,8 @@ sds configToStr() {
             "all_reload_interval: %d\n"
             "minimize_resp: %d\n",
             sk.configfile,
-            sk.coremask,
             sk.master_lcore_id,
             sk.mem_channels,
-            sk.portmask,
             sk.promiscuous_on,
             sk.numa_on,
             sk.jumbo_on,

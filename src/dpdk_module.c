@@ -226,7 +226,7 @@ init_mem(unsigned nb_mbuf)
 
 /* Check the link status of all ports in up to 9s, and print them finally */
 static void
-check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
+check_all_ports_link_status()
 {
 #define CHECK_INTERVAL 100 /* 100ms */
 #define MAX_CHECK_TIME 90 /* 9s (90 * 100ms) in total */
@@ -239,11 +239,11 @@ check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
         if (sk.force_quit)
             return;
         all_ports_up = 1;
-        for (portid = 0; portid < port_num; portid++) {
+
+        for (int i = 0; i < sk.nr_ports; i++) {
             if (sk.force_quit)
                 return;
-            if ((port_mask & (1 << portid)) == 0)
-                continue;
+            portid = (uint8_t )sk.port_ids[i];
             memset(&link, 0, sizeof(link));
             rte_eth_link_get_nowait(portid, &link);
             /* print link status if flag set */
@@ -1158,10 +1158,8 @@ init_dpdk_module() {
 #endif
 
     /* start ports */
-    for (portid = 0; portid < nb_dev_ports; portid++) {
-        if ((sk.portmask & (1 << portid)) == 0) {
-            continue;
-        }
+    for (int i = 0; i < sk.nr_ports; i++) {
+        portid = (uint8_t )sk.port_ids[i];
         /* Start device */
         ret = rte_eth_dev_start(portid);
         if (ret < 0)
@@ -1179,7 +1177,7 @@ init_dpdk_module() {
             rte_eth_promiscuous_enable(portid);
     }
 
-    check_all_ports_link_status((uint8_t)nb_dev_ports, (uint32_t )sk.portmask);
+    check_all_ports_link_status();
 
     rte_timer_subsystem_init();
     sk.hz = rte_get_timer_hz();
@@ -1205,17 +1203,13 @@ int start_dpdk_threads(void) {
 }
 
 int cleanup_dpdk_module(void) {
-    unsigned nb_ports;
     uint8_t portid;
 
     rte_eal_mp_wait_lcore();
 
-    nb_ports = rte_eth_dev_count();
-
     /* stop ports */
-    for (portid = 0; portid < nb_ports; portid++) {
-        if ((sk.portmask & (1 << portid)) == 0)
-            continue;
+    for (int i = 0; i < sk.nr_ports; i++) {
+        portid = (uint8_t )sk.port_ids[i];
         LOG_INFO(DPDK, "Closing port %d...", portid);
         rte_eth_dev_stop(portid);
         rte_eth_dev_close(portid);

@@ -2,11 +2,9 @@
 #  DPDK related config
 ###############################################
 [dpdk]
-coremask=  "0xff"
 master_lcore_id=  0
 
 mem_channels=  4
-portmask=  "0x3"
 promiscuous_on= false
 numa_on= true
 jumbo_on= false

@@ -1050,11 +1050,6 @@ static int construct_lcore_list() {
     return OK_CODE;
 }
 
-static int hexchar_to_int(char c) {
-    char buf[2] = {c, 0};
-    return (int)strtol(buf, NULL, 16);
-}
-
 static int parseQueueConfigNumList(char *errstr, char *s, int arr[], int *nrEle) {
     char *tokens[1024];
     int nrTokens = 1024;
@@ -1182,19 +1177,19 @@ int parseQueueConfig(char *errstr, char *s) {
                 snprintf(errstr, ERR_STR_LEN, "portid should in 0-%d, but gives %d.", RTE_MAX_ETHPORTS, port_id);
                 goto invalid;
             }
-            port_info_t *pinfo = sk.port_info[port_id];
-            if (!pinfo) {
-                snprintf(errstr, ERR_STR_LEN, "queue config: port %d is disabled.", port_id);
-                goto invalid;
+            if (! sk.port_info[port_id]) {
+                sk.port_info[port_id] = calloc(1, sizeof(port_info_t));
             }
+
+            port_info_t *pinfo = sk.port_info[port_id];
             if (pinfo->lcore_list) {
                 snprintf(errstr, ERR_STR_LEN, "duplicate queue config for port %d.", port_id);
                 goto invalid;
             }
             pinfo->lcore_list = memdup(cores, sizeof(int)*nrCores);
             pinfo->nr_lcore = nrCores;
-            for (int j = 0; j < nrCores; ++j) {
-                int lcore_id = cores[j];
+            for (int k = 0; k < nrCores; ++k) {
+                int lcore_id = cores[k];
                 if (lcore_id < 0 || lcore_id >= RTE_MAX_LCORE) {
                     snprintf(errstr, ERR_STR_LEN, "lcore should in 0-%d, but gives %d.", RTE_MAX_LCORE, lcore_id);
                     goto invalid;
@@ -1204,11 +1199,7 @@ int parseQueueConfig(char *errstr, char *s) {
                     goto invalid;
                 }
                 lcore_conf_t *qconf = &sk.lcore_conf[lcore_id];
-                if (qconf->lcore_id >= RTE_MAX_LCORE) {
-                    snprintf(errstr, ERR_STR_LEN, "queue config: lcore %d is not enabled.", lcore_id);
-                    goto invalid;
-                }
-                qconf->queue_id_list[port_id] = j;
+                qconf->queue_id_list[port_id] = k;
 
                 qconf->port_id_list[qconf->nr_ports] = port_id;
                 qconf->nr_ports++;
@@ -1221,41 +1212,6 @@ int parseQueueConfig(char *errstr, char *s) {
 invalid:
     free(ss);
     return ERR_CODE;
-}
-
-static int parse_str_coremask(char *coremask, int buf[], int *n) {
-    int max = *n;
-    int nr_id = 0;
-    // skip '0' and 'x'
-    char *start = coremask + 2;
-    char *end = coremask + strlen(coremask) - 1;
-    char *p = end;
-    for (; p >= start; --p) {
-        int char_int = hexchar_to_int(*p);
-        for (int i = 0; i < 4; ++i) {
-            if ((1 << i) & char_int) {
-                int lcore_id = (int)(4 * (end - p) + i);
-                if (nr_id >= max) return ERR_CODE;
-                buf[nr_id++] = lcore_id;
-            }
-        }
-    }
-    *n = nr_id;
-    return OK_CODE;
-}
-
-static int get_port_ids(int buf[], int *n) {
-    int max = *n;
-    int nr_id = 0;
-    int num_bits = sizeof(sk.portmask) * 8;
-    for (int i = 0; i < num_bits; ++i) {
-        if (sk.portmask & (1 << i)) {
-            if (nr_id >= max) return ERR_CODE;
-            buf[nr_id++] = i;
-        }
-    }
-    *n = nr_id;
-    return OK_CODE;
 }
 
 int initNumaConfig() {
@@ -1321,48 +1277,45 @@ int initNumaConfig() {
     return 0;
 }
 
+static int merge_int_list(int *l1, int sz1, int *l2, int sz2) {
+    int n = sz1;
+    bool found;
+    for (int i = 0; i < sz2; i++) {
+        int v = l2[i];
+        found = false;
+        for (int j = 0; j < n; j++) {
+            if (l1[j] == v) {
+                found = true;
+                break;
+            }
+        }
+        if (found == false) l1[n++] = v;
+    }
+    return n;
+}
+
 int initOtherConfig() {
     int ids[1024];
     int nr_id;
 
-    // parse coremask
-    nr_id = 1024;
-    if (parse_str_coremask(sk.coremask, ids, &nr_id) == ERR_CODE) {
-        fprintf(stderr, "error: the number of locre is bigger than %d.\n", nr_id);
-        abort();
-    }
-    sk.lcore_ids = memdup(ids, nr_id * sizeof(int));
-    sk.nr_lcore_ids = nr_id;
-    /*
-     * if master_lcore_id is not set, then use the last lcore id in coremask
-     */
-    if (sk.master_lcore_id < 0) {
-        sk.master_lcore_id = sk.lcore_ids[sk.nr_lcore_ids-1];
-    } else {
-        /*
-         * make sure master lcore id stay in lcore list
-         */
-        int found = 0;
-        for (int i = 0; i < sk.nr_lcore_ids; ++i) {
-            if (sk.lcore_ids[i] == sk.master_lcore_id) {
-                found = 1;
-                break;
-            }
-        }
-        if (! found) {
-            fprintf(stderr, "error: master lcore id(%d) is not enabled in coremask.\n", sk.master_lcore_id);
-            exit(-1);
-        }
+    // parse queue config
+    if (parseQueueConfig(sk.errstr, sk.queue_config) != OK_CODE) {
+        fprintf(stderr, "queue config: %s\n", sk.errstr);
+        exit(-1);
     }
 
-    // parse all port id
-    nr_id = 1024;
-    if (get_port_ids(ids, &nr_id) == ERR_CODE) {
-        fprintf(stderr, "error: the number of port is bigger than %d.\n", nr_id);
-        abort();
+    /*
+     * collect port id list from port info
+     */
+    nr_id = 0;
+    for (int portid = 0; portid < RTE_MAX_ETHPORTS; portid++) {
+        port_info_t *pinfo = sk.port_info[portid];
+        if (! pinfo) continue;
+        ids[nr_id++] = portid;
     }
-    sk.port_ids = memdup(ids, nr_id * sizeof(int));
+    sortIntArray(ids, nr_id);
     sk.nr_ports = nr_id;
+    sk.port_ids = memdup(ids, nr_id*sizeof(int));
 
     if (sk.bindaddr_count != sk.nr_ports) {
         fprintf(stderr, "the number of ip address should equal to number of ports.\n");
@@ -1371,8 +1324,6 @@ int initOtherConfig() {
 
     for (int i = 0; i < sk.nr_ports; ++i) {
         int portid = sk.port_ids[i];
-        assert(sk.port_info[portid] == NULL);
-        sk.port_info[portid] = calloc(1, sizeof(port_info_t));
         assert(sk.port_info[portid]);
         sk.port_info[portid]->port_id = (uint8_t)portid;
         if (!str2ipv4(sk.bindaddr[i], &sk.port_info[portid]->ipv4_addr)) {
@@ -1380,6 +1331,21 @@ int initOtherConfig() {
             exit(-1);
         }
     }
+
+    /*
+     * collect lcore id list from port info
+     */
+    nr_id = 0;
+    ids[nr_id++] = sk.master_lcore_id;
+    for (int i = 0; i < sk.nr_ports; i++) {
+        int portid = sk.port_ids[i];
+        port_info_t *pinfo = sk.port_info[portid];
+        if (! pinfo->lcore_list) continue;
+        nr_id = merge_int_list(ids, nr_id, pinfo->lcore_list, pinfo->nr_lcore);
+    }
+    sortIntArray(ids, nr_id);
+    sk.nr_lcore_ids = nr_id;
+    sk.lcore_ids = memdup(ids, nr_id*sizeof(int));
 
     if (construct_lcore_list() == ERR_CODE) {
         fprintf(stderr, "error: lcore list is too long\n");
@@ -1392,12 +1358,6 @@ int initOtherConfig() {
     init_dpdk_eal();
 
     initNumaConfig();
-
-    // parse queue config
-    if (parseQueueConfig(sk.errstr, sk.queue_config) != OK_CODE) {
-        fprintf(stderr, "queue config: %s\n", sk.errstr);
-        exit(-1);
-    }
 
     return OK_CODE;
 }
