@@ -17,7 +17,7 @@ else
     SHUKE_DIR="/shuke"
 fi
 export RTE_TARGET="x86_64-native-linuxapp-gcc"
-export RTE_SDK=`ls -d $SHUKE_DIR/3rd/dpdk-*`
+export RTE_SDK="$SHUKE_DIR/3rd/dpdk"
 HUGEPGSZ=`cat /proc/meminfo  | grep Hugepagesize | cut -d : -f 2 | tr -d ' '`
 
 echo "--------------------------------------------------------------"

@@ -7,3 +7,6 @@
 [submodule "3rd/luajit"]
 	path = 3rd/luajit
 	url = https://github.com/LuaJIT/LuaJIT.git
+[submodule "3rd/dpdk"]
+	path = 3rd/dpdk
+	url = git://dpdk.org/dpdk-stable

@@ -3,7 +3,7 @@ TOPDIR ?= ${CURDIR}
 include config.mk
 
 RTE_TARGET ?= x86_64-native-linuxapp-gcc
-RTE_SDK = $(shell ls -d $(TOPDIR)/3rd/dpdk-*)
+RTE_SDK = $(TOPDIR)/3rd/dpdk
 ifeq ($(shell test -e $(RTE_SDK)/$(RTE_TARGET) || echo -n no),no)
 $(error please build DPDK first. build command: 'make -C $(RTE_SDK) install T=$(RTE_TARGET)')
 endif

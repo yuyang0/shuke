@@ -5,7 +5,7 @@
 
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 RTE_TARGET="x86_64-native-linuxapp-gcc"
-RTE_SDK=`ls -d $BASEDIR/3rd/dpdk-*`
+RTE_SDK="$BASEDIR/3rd/dpdk"
 
 build_dpdk() {
     if [ ! -d "$RTE_SDK/$RTE_TARGET" ]; then
