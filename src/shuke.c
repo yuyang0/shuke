@@ -9,7 +9,7 @@
 
 #include "utils.h"
 #include "version.h"
-#include "ds.h"
+#include "dnspacket.h"
 #include "zmalloc.h"
 #include "edns.h"
 

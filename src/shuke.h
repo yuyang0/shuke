@@ -23,9 +23,11 @@
 #include "endianconv.h"
 #include "list.h"
 #include "log.h"
-#include "ds.h"
+#include "dnspacket.h"
 #include "ltree.h"
 #include "dpdk_module.h"
+#include "zparser.h"
+#include "zone.h"
 #include "sk_lua.h"
 
 #include "himongo/async.h"

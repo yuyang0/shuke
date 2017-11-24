@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "str.h"
 
 #define DEFAULT_LABEL_COUNT 32
 
@@ -316,6 +317,10 @@ int dnsRR_load(char *buf, size_t size, dnsRR_t *rr) {
 
 int parseDname(char *name, size_t max, dname_t *dname);
 void resetDname(dname_t *dname);
+
+static inline bool isAbsDotDomain(char *ss) {
+    return endswith(ss, ".");
+}
 
 #if defined(CDNS_TEST)
 int dnsTest(int argc, char *argv[]);

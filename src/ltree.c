@@ -3,7 +3,7 @@
 //
 #include <string.h>
 #include "log.h"
-#include "ds.h"
+#include "dnspacket.h"
 #include "ltree.h"
 #include "zmalloc.h"
 
