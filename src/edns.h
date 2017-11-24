@@ -50,6 +50,34 @@ typedef struct {
     char *rdata;
 } edns_t;
 
+/*
+ * client subnet opt format
+
+                +0 (MSB)                            +1 (LSB)
+      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+   0: |                          OPTION-CODE                          |
+      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+   2: |                         OPTION-LENGTH                         |
+      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+   4: |                            FAMILY                             |
+      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+   6: |     SOURCE PREFIX-LENGTH      |     SCOPE PREFIX-LENGTH       |
+      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+   8: |                           ADDRESS...                          /
+      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+
+  family list: https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml
+*/
+struct clientSubnetOpt {
+    uint16_t family;
+    uint8_t source_prefix_len;
+    uint8_t scope_prefix_len;
+    char addr[16];
+};
+
 int ednsParse(char *buf, size_t size, edns_t *edns);
 int ednsDump(char *buf, int size, edns_t *edns);
+
+int parseClientSubnet(char *buf, int size, struct clientSubnetOpt *opt);
+
 #endif //SHUKE_EDNS_H

@@ -85,6 +85,7 @@ struct context {
 
     // EDNS(0) related fields
     edns_t edns;
+    struct clientSubnetOpt subnet_opt;
 
     size_t ari_sz;
     size_t cps_sz;

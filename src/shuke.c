@@ -740,6 +740,27 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         }
         LOG_DEBUG(USER1, "ENDS: payload: %d, version: %d, rdlength: %d",
                   ctx->edns.payload_size, ctx->edns.version, ctx->edns.rdlength);
+        if (ctx->edns.rdlength > 4) {
+            struct clientSubnetOpt *opt;
+            uint16_t opt_code = load16be(ctx->edns.rdata);
+            uint16_t opt_len = load16be(ctx->edns.rdata+2);
+            switch (opt_code) {
+                case OPT_CLIENT_SUBNET_CODE:
+                    opt  = &ctx->subnet_opt;
+                    if (opt_len >= 4) {
+                        if (parseClientSubnet(ctx->edns.rdata+4, ctx->edns.rdlength-4, opt) != OK_CODE) {
+                            dumpDnsFormatErr(ctx);
+                            ret = OK_CODE;
+                            goto end;
+                        }
+                        LOG_DEBUG(USER1, "family: %d, prefix: %d addr: %#010x", opt->family, opt->source_prefix_len, opt->addr);
+                        // printf("%i.%i.%i.%i\n\n", opt->addr[0], opt->addr[1], opt->addr[2], opt->addr[3]);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
     }
     LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
 

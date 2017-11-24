@@ -47,3 +47,22 @@ int ednsDump(char *buf, int size, edns_t *edns) {
     if (edns->rdlength > 0) rte_memcpy(p, edns->rdata, edns->rdlength);
     return OK_CODE;
 }
+
+int parseClientSubnet(char *buf, int size, struct clientSubnetOpt *opt) {
+    static uint8_t max_addr_size[3] = {0, 4, 16};
+    char *p = buf;
+    opt->family = load16be(p);
+    p += 2;
+    opt->source_prefix_len = (uint8_t)(*p++);
+    opt->scope_prefix_len = (uint8_t)(*p++);
+    if (opt->scope_prefix_len != 0) return ERR_CODE;
+
+    // only support ipv4 and ipv6 address
+    if (opt->family != 1 && opt->family != 2) return ERR_CODE;
+    int addrlen = (opt->source_prefix_len+7U)/8U;
+    if (size < addrlen+4) return ERR_CODE;
+    if (addrlen > max_addr_size[opt->family]) return ERR_CODE;
+
+    memcpy(opt->addr, p, addrlen);
+    return OK_CODE;
+}
