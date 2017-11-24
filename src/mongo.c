@@ -252,7 +252,7 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
         }
         // only reload the zone doesn't exist in zone dict
         dot2lenlabel(dotOrigin, origin);
-        if (!ztreeExistZone(sk.zt, origin)) {
+        if (!ltreeExistZone(sk.lt, origin)) {
             asyncReloadZoneRaw(dotOrigin);
         }
     }

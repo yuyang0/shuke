@@ -24,7 +24,7 @@
 #include "list.h"
 #include "log.h"
 #include "ds.h"
-#include "ztree.h"
+#include "ltree.h"
 #include "dpdk_module.h"
 #include "sk_lua.h"
 
@@ -66,7 +66,7 @@ typedef struct numaNode_s {
     int *lcore_ids;
     int min_lcore_id;
     int max_lcore_id;
-    ztree *zd;
+    ltree *lt;
 } numaNode_t;
 
 typedef struct _tcpServer {
@@ -212,7 +212,7 @@ struct shuke {
     // end
 
     // pointer to master numa node's zoneDict instance
-    ztree *zt;
+    ltree *lt;
     struct rb_root rbroot;
 
     volatile bool force_quit;

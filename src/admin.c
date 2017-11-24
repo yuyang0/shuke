@@ -498,7 +498,7 @@ static sds genInfoString(char *section) {
                           (long long unsigned)(nr_req/uptime),
                           (long long unsigned)((nr_req - prev_nr_req)/(interval/1000.0)),
                           (long long unsigned)((nr_dropped - prev_nr_dropped)/(interval/1000.0)),
-                          ztreeGetNumZones(sk.zt));
+                          ltreeGetNumZones(sk.lt));
         prev_nr_req = nr_req;
         prev_nr_dropped = nr_dropped;
 
@@ -776,15 +776,15 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
             strcat(dotOrigin, ".");
         }
         dot2lenlabel(dotOrigin, origin);
-        ztreeRLock(sk.zt);
-        z = ztreeGetZoneExactRaw(sk.zt, origin);
+        ltreeRLock(sk.lt);
+        z = ltreeGetZoneExactRaw(sk.lt, origin);
         if (z == NULL) {
             s = sdsnewprintf("zone %s not found", dotOrigin);
-            ztreeRUnlock(sk.zt);
+            ltreeRUnlock(sk.lt);
             goto end;
         }
         s = zoneToStr(z);
-        ztreeRUnlock(sk.zt);
+        ltreeRUnlock(sk.lt);
     } else if (strcasecmp(argv[1], "GET_RRSET") == 0) {
         if (argc != 4) {
             s = sdsnewprintf("ZONE GET_RRSET needs 2 argument, but gives %d.", argc-2);
@@ -801,24 +801,24 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         }
         dot2lenlabel(dotOrigin, origin);
 
-        ztreeRLock(sk.zt);
-        z = ztreeGetZoneRaw(sk.zt, origin);
+        ltreeRLock(sk.lt);
+        z = ltreeGetZoneRaw(sk.lt, origin);
 
         if (z == NULL) {
-            ztreeRUnlock(sk.zt);
+            ltreeRUnlock(sk.lt);
             s = sdsnewprintf("zone %s not found.", argv[2]);
             goto end;
         }
         RRSet *rs = zoneFetchTypeVal(z, origin, (uint16_t)type);
         if (rs == NULL) s = sdsnewprintf("RRSet <%s %s> not found.", argv[2], argv[3]);
         else s = RRSetToStr(rs);
-        ztreeRUnlock(sk.zt);
+        ltreeRUnlock(sk.lt);
     } else if (strcasecmp(argv[1], "GETALL") == 0) {
         if (argc != 2) {
             s = sdsnewprintf("ZONE GETALL needs no arguments, but gives %d.", argc-2);
             goto end;
         }
-        s = ztreeToStr(sk.zt);
+        s = ltreeToStr(sk.lt);
     } else if (strcasecmp(argv[1], "RELOAD") == 0) {
         if (argc < 3) {
             s = sdsnewprintf("ZONE RELOAD command needs at least 1 arguments but gives  %d.", argc-2);
@@ -846,7 +846,7 @@ static void zoneCommand(int argc, char *argv[], adminConn *c) {
         }
         triggerReloadAllZone();
     } else if (strcasecmp(argv[1], "GET_NUMZONES") == 0) {
-        size_t n = ztreeGetNumZones(sk.zt);
+        size_t n = ltreeGetNumZones(sk.lt);
         s = sdsnewprintf("%lu", n);
     } else {
         s = sdsnewprintf("unknown subcommand %s for ZONE.", argv[1]);
