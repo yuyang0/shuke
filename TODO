@@ -1,2 +1,0 @@
-1. try use radix tree to implement zoneDict(radix tree must works well with urcu).
-2. support EDNS and more dns types

@@ -115,3 +115,5 @@ SHUKE has a tcp server used to execute admin operations,
 1. support EDNS, DNSSEC and PTR (currently only support A,AAAA,NS,CNAME,SOA,SRV,TXT,MX.).
 2. support mysql (currently only support mongodb).
 3. plugin system
+4. some anti-attack mechanisms such as white list, black list, response rate limit(RRL), etc.
+5. HTTP api
