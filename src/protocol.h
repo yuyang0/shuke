@@ -9,23 +9,6 @@
 #include <stdbool.h>
 #include "str.h"
 
-#define DEFAULT_LABEL_COUNT 32
-
-typedef struct _dname {
-    char *name;
-    uint8_t nameLen;
-    uint8_t offsets[DEFAULT_LABEL_COUNT];
-    /*
-     * when the label count smaller than DEFAULT_LABEL_COUNT, then this pointer will point to offsets,
-     * otherwise it will point to memory allocated in heap.
-     */
-    uint8_t *label_offset;
-    uint8_t label_count;
-} dname_t;
-
-#define PROTO_OK     0
-#define PROTO_ERR   -1
-
 #define DNS_HDR_SIZE 12
 
 // limit
@@ -265,65 +248,8 @@ typedef struct {
     char *target;    // multiple
 }SRVRecord;
 
-bool isSupportDnsType(uint16_t type);
-int checkLenLabel(char *name, size_t max);
-char *abs2relative(char *name, char *origin);
-int getNumLabels(char *name);
-size_t domainlen(char *len_label);
-
-int strToDNSType(const char *ss);
-char *DNSTypeToStr(int ty);
-
-int parseDNSHeader(char *buf, size_t size, uint16_t *xid, uint16_t *flag,
-                   uint16_t *nQd, uint16_t *nAn, uint16_t *nNs, uint16_t *nAr);
-int dumpDNSHeader(char *buf, size_t size, uint16_t xid, uint16_t flag,
-                  uint16_t nQd, uint16_t nAn, uint16_t nNs, uint16_t nAr);
-
-static inline int dnsHeader_load(char *buf, size_t size, dnsHeader_t *hdr) {
-    return parseDNSHeader(buf, size, &(hdr->xid), &(hdr->flag), &(hdr->nQd),
-                          &(hdr->nAnRR), &(hdr->nNsRR), &(hdr->nArRR));
-}
-static inline int dnsHeader_dump(dnsHeader_t *hdr, char *buf, size_t size) {
-    return dumpDNSHeader(buf, size, hdr->xid, hdr->flag, hdr->nQd, hdr->nAnRR, hdr->nNsRR, hdr->nArRR);
-}
-
-int parseDnsQuestion(char *buf, size_t size, char **name, uint16_t *qType, uint16_t *qClass);
-int dumpDnsQuestion(char *buf, size_t size, char *name, uint16_t qType, uint16_t qClass);
-static inline
-int dnsQuestion_load(char *buf, size_t size, dnsQuestion_t *q) {
-    return parseDnsQuestion(buf, size, &(q->name), &(q->qType), &(q->qClass));
-}
-
-static inline
-int dnsQuestion_dump(dnsQuestion_t *q, char *buf, size_t size) {
-    return dumpDnsQuestion(buf, size, q->name, q->qType, q->qClass);
-}
-
-int parseDnsRRInfo(char *buf, size_t sz, char *name, uint16_t *type, uint16_t *cls,
-                   uint32_t *ttl, uint16_t *rdlength, void *rdata);
-int dumpDnsRRInfo(char *buf, size_t sz, char *name, uint16_t type,
-                  uint16_t cls, uint32_t ttl, uint16_t rdlength, void *rdata);
-static inline
-int dnsRR_dump(dnsRR_t *rr, char *buf, size_t size) {
-    return dumpDnsRRInfo(buf, size, rr->name, rr->rrType,
-                         rr->rrClass, rr->ttl, rr->rdlength, rr->rdata);
-}
-
-static inline
-int dnsRR_load(char *buf, size_t size, dnsRR_t *rr) {
-    return parseDnsRRInfo(buf, size, rr->name, &(rr->rrType), &(rr->rrClass),
-                          &(rr->ttl), &(rr->rdlength), rr->rdata);
-}
-
-int parseDname(char *name, size_t max, dname_t *dname);
-void resetDname(dname_t *dname);
-
 static inline bool isAbsDotDomain(char *ss) {
     return endswith(ss, ".");
 }
-
-#if defined(CDNS_TEST)
-int dnsTest(int argc, char *argv[]);
-#endif
 
 #endif /* _DNS_H_ */

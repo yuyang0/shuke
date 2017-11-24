@@ -331,7 +331,7 @@ zone *zoneCreate(char *ss, int socket_id) {
         origin = ss;
     }
     zn->origin = socket_strdup(socket_id, origin);
-    if (checkLenLabel(zn->origin, 0) == PROTO_ERR) {
+    if (checkLenLabel(zn->origin, 0) == ERR_CODE) {
         LOG_ERROR(USER1, "origin %s is invalid.", dotOrigin);
         socket_free(socket_id, zn->origin);
         socket_free(socket_id, zn);

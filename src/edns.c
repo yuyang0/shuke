@@ -8,16 +8,7 @@
 #include "endianconv.h"
 
 int ednsParse(char *buf, size_t size, edns_t *edns) {
-    uint16_t type;
     char *p = buf;
-    if (size < 11) return ERR_CODE;
-    // skip name
-    if (*p != 0) return ERR_CODE;
-    p++;
-    type = load16be(p);
-    p += 2;
-    if (type != DNS_TYPE_OPT) return ERR_CODE;
-
     edns->payload_size = load16be(p);
     p += 2;
     edns->rcode = (uint8_t )(*p);
@@ -27,6 +18,7 @@ int ednsParse(char *buf, size_t size, edns_t *edns) {
     edns->rdlength = load16be(p);
     p += 2;
     edns->rdata = p;
+    if (size < edns->rdlength + 8) return ERR_CODE;
     return OK_CODE;
 }
 

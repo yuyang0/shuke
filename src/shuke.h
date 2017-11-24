@@ -184,6 +184,7 @@ struct shuke {
     int admin_port;
 
     int all_reload_interval;
+    int max_resp_size;
     bool minimize_resp;
 
     char *access_by_lua_src;

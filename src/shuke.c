@@ -550,110 +550,6 @@ void logQuery(struct context *ctx, char *cip, int cport, bool is_tcp) {
     fprintf(sk.query_log_fp, "%s queries: client %s#%d%s: query %s IN %s \n", buf, cip, cport, tcpstr, dotName, ty_str);
 }
 
-int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
-    if (dv == NULL) return ERR_CODE;
-    int errcode;
-    numaNode_t *node = ctx->node;
-
-    compressInfo temp = {ctx->name, DNS_HDR_SIZE, ctx->nameLen+1};
-    ctx->cps[0] = temp;
-    ctx->cps_sz = 1;
-    ctx->ari_sz = 0;
-
-    RRSet *cname;
-    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
-
-    SET_QR_R(hdr.flag);
-    SET_AA(hdr.flag);
-    if (GET_RD(ctx->hdr.flag)) SET_RD(hdr.flag);
-
-    cname = dnsDictValueGet(dv, DNS_TYPE_CNAME);
-    if (cname) {
-        hdr.nAnRR = 1;
-        errcode = RRSetCompressPack(ctx, cname, DNS_HDR_SIZE);
-        if (errcode == ERR_CODE) {
-            return ERR_CODE;
-        }
-        // dump NS records of the zone this CNAME record's value belongs to to authority section
-        if (!sk.minimize_resp) {
-            char *name = ctx->ari[0].name;
-            size_t offset = ctx->ari[0].offset;
-            LOG_DEBUG(USER1, "name: %s, offset: %d", name, offset);
-            zone *ns_z = ltreeGetZoneRaw(node->lt, name);
-            if (ns_z) {
-                if (ns_z->ns) {
-                    hdr.nNsRR += ns_z->ns->num;
-                    size_t nameOffset = offset + strlen(name) - strlen(ns_z->origin);
-                    errcode = RRSetCompressPack(ctx, ns_z->ns, nameOffset);
-                    if (errcode == ERR_CODE) {
-                        return ERR_CODE;
-                    }
-                }
-            }
-        }
-    } else {
-        // dump answer section.
-        RRSet *rs = dnsDictValueGet(dv, ctx->qType);
-        if (rs) {
-            hdr.nAnRR = rs->num;
-            errcode = RRSetCompressPack(ctx, rs, DNS_HDR_SIZE);
-            if (errcode == ERR_CODE) {
-                return ERR_CODE;
-            }
-        }
-        if (!sk.minimize_resp) {
-            // dump NS section
-            if (z->ns && (ctx->qType != DNS_TYPE_NS || strcasecmp(z->origin, ctx->name) != 0)) {
-                hdr.nNsRR += z->ns->num;
-                size_t nameOffset = DNS_HDR_SIZE + ctx->nameLen - strlen(z->origin);
-                errcode = RRSetCompressPack(ctx, z->ns, nameOffset);
-                if (errcode == ERR_CODE) {
-                    return ERR_CODE;
-                }
-            }
-        }
-    }
-    // MX, NS, SRV records cause additional section processing.
-    //TODO avoid duplication
-    for (size_t i = 0; i < ctx->ari_sz; i++) {
-        zone *ar_z;
-        char *name = ctx->ari[i].name;
-        size_t offset = ctx->ari[i].offset;
-
-        // TODO avoid fetch when the name belongs to z
-        ar_z = ltreeGetZoneRaw(node->lt, name);
-        if (ar_z == NULL) continue;
-        RRSet *ar_a = zoneFetchTypeVal(ar_z, name, DNS_TYPE_A);
-        if (ar_a) {
-            hdr.nArRR += ar_a->num;
-            errcode = RRSetCompressPack(ctx, ar_a, offset);
-            if (errcode == ERR_CODE) {
-                return ERR_CODE;
-            }
-        }
-        RRSet *ar_aaaa = zoneFetchTypeVal(ar_z, name, DNS_TYPE_AAAA);
-        if (ar_aaaa) {
-            hdr.nArRR += ar_aaaa->num;
-            errcode = RRSetCompressPack(ctx, ar_aaaa, offset);
-            if (errcode == ERR_CODE) {
-                return ERR_CODE;
-            }
-        }
-    }
-    // dump edns
-    if (ctx->hdr.nArRR == 1) {
-        int edns_len = ctx->edns.rdlength + 11;
-        if (unlikely(contextMakeRoomForResp(ctx, edns_len) == ERR_CODE)) {
-            return ERR_CODE;
-        }
-        ednsDump(ctx->chunk+ctx->cur, ctx->chunk_len-ctx->cur, &ctx->edns);
-        ctx->cur += edns_len;
-    }
-    // update the header. don't update `cur` in ctx
-    dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
-    return OK_CODE;
-}
-
 int dumpDnsError(struct context *ctx, int err) {
     dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
 
@@ -698,75 +594,22 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     zone *z = NULL;
     dnsDictValue *dv = NULL;
     // int64_t now;
-    int ret;
-
-    if (sz < 12) {
-        LOG_DEBUG(USER1, "receive bad dns query message with only %d bytes, drop it", sz);
-        // just ignore this packet(don't send response)
-        return ERR_CODE;
+    int ret = OK_CODE;
+    decodeRcode res = decodeQuery(buf, sz, ctx);
+    switch (res) {
+        case DECODE_IGNORE:
+            return ERR_CODE;
+        case DECODE_FORMERR:
+            dumpDnsFormatErr(ctx);
+            return OK_CODE;
+        case DECODE_NOTIMP:
+            dumpDnsNotImplErr(ctx);
+            return OK_CODE;
+        case DECODE_BADVERS:
+            break;
+        default:
+            break;
     }
-    dnsHeader_load(buf, sz, &(ctx->hdr));
-    ret = parseDnsQuestion(buf+DNS_HDR_SIZE, sz-DNS_HDR_SIZE, &(ctx->name), &(ctx->qType), &(ctx->qClass));
-    if (ret == PROTO_ERR) {
-        LOG_DEBUG(USER1, "parse dns question error.");
-        return ERR_CODE;
-    }
-    // skip dns header and dns question.
-    ctx->cur = DNS_HDR_SIZE + ret;
-
-    LOG_DEBUG(USER1, "receive dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar:%d)",
-              ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
-    // in order to support EDNS, nArRR can bigger than 0
-    if (ctx->hdr.nQd != 1 || ctx->hdr.nAnRR > 0 || ctx->hdr.nNsRR > 0) {
-        LOG_DEBUG(USER1, "receive bad dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar: %d), drop it",
-                  ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
-        dumpDnsFormatErr(ctx);
-        ret = OK_CODE;
-        goto end;
-    }
-
-    ctx->nameLen = lenlabellen(ctx->name);
-
-    if (isSupportDnsType(ctx->qType) == false) {
-        dumpDnsNotImplErr(ctx);
-        ret = OK_CODE;
-        goto end;
-    }
-    /*
-     * parse OPT message(EDNS)
-     */
-    if (ctx->hdr.nArRR > 0
-        && likely(sz-ctx->cur >= 11)
-        && likely(buf[ctx->cur] == '\0')) {
-        if (ednsParse(buf+ctx->cur, sz-ctx->cur, &(ctx->edns)) == ERR_CODE) {
-            ret = ERR_CODE;
-            goto end;
-        }
-        LOG_DEBUG(USER1, "ENDS: payload: %d, version: %d, rdlength: %d",
-                  ctx->edns.payload_size, ctx->edns.version, ctx->edns.rdlength);
-        if (ctx->edns.rdlength > 4) {
-            struct clientSubnetOpt *opt;
-            uint16_t opt_code = load16be(ctx->edns.rdata);
-            uint16_t opt_len = load16be(ctx->edns.rdata+2);
-            switch (opt_code) {
-                case OPT_CLIENT_SUBNET_CODE:
-                    opt  = &ctx->subnet_opt;
-                    if (opt_len >= 4) {
-                        if (parseClientSubnet(ctx->edns.rdata+4, ctx->edns.rdlength-4, opt) != OK_CODE) {
-                            dumpDnsFormatErr(ctx);
-                            ret = OK_CODE;
-                            goto end;
-                        }
-                        LOG_DEBUG(USER1, "family: %d, prefix: %d addr: %#010x", opt->family, opt->source_prefix_len, opt->addr);
-                        // printf("%i.%i.%i.%i\n\n", opt->addr[0], opt->addr[1], opt->addr[2], opt->addr[3]);
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
-    }
-    LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
 
     ltreeRLock(node->lt);
     makeDname(ctx->name, &dn);
@@ -790,7 +633,6 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         }
     }
     ltreeRUnlock(node->lt);
-end:
     return ret;
 }
 
@@ -846,6 +688,7 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     ctx.chunk_len = respLen;
     ctx.cur = 0;
     ctx.resp_type = RESP_STACK;
+    ctx.edns.payload_size = (uint16_t )sk.max_resp_size;
 
     status = _getDnsResponse(buf, sz, &ctx);
 

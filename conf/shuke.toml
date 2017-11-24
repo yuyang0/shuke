@@ -74,6 +74,8 @@ log_verbose= true
 # admin_host= "127.0.0.1"
 admin_port= 14141
 
+# min: 4096, max: 64000
+max_resp_size = 16384
 # if minimize_resp is enabled, then dns server won't return some optional records(such as NS records) in response.
 # so it can decrease the response size
 minimize_resp= true

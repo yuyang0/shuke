@@ -151,6 +151,7 @@ static int _parse_toml_config(FILE *fp) {
     GET_STR_CONFIG("loglevel", sk.logLevelStr, core);
     GET_STR_CONFIG("admin_host", sk.admin_host, core);
     GET_INT_CONFIG("admin_port", sk.admin_port, core);
+    GET_INT_CONFIG("max_resp_size", sk.max_resp_size, core);
     GET_BOOL_CONFIG("minimize_resp", sk.minimize_resp, core);
 
     // zone_source related config
@@ -250,6 +251,7 @@ void initConfigFromTomlFile(char *conffile) {
 
     sk.admin_port = 14141;
     sk.all_reload_interval = 36000;
+    sk.max_resp_size = 16384;
     sk.minimize_resp = true;
     sk.pidfile = strdup("/var/run/shuke.pid");
     sk.logLevelStr = strdup("info");
@@ -260,7 +262,8 @@ void initConfigFromTomlFile(char *conffile) {
                  "Config Error: master_lcore_id must set correctly");
     CHECK_CONFIG("mem_channels", sk.mem_channels > 0,
                  "Config Error: mem_channels can't be empty");
-
+    CHECK_CONFIG("max_resp_size", sk.max_resp_size >= 4096 || sk.max_resp_size <= 64000,
+                 "Config Error: max_resp_size should in 4096-64000");
     fclose(fp);
 }
 

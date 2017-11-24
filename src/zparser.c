@@ -11,7 +11,7 @@
 
 #include "str.h"
 #include "endianconv.h"
-#include "protocol.h"
+#include "dnspacket.h"
 #include "zparser.h"
 #include "log.h"
 #include "utils.h"
