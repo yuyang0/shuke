@@ -9,11 +9,12 @@ RTE_SDK="$BASEDIR/3rd/dpdk"
 
 build_dpdk() {
     if [ ! -d "$RTE_SDK/$RTE_TARGET" ]; then
+        git submodule update --init
         make -C $RTE_SDK install T=$RTE_TARGET
     fi
 }
-
 sudo apt-get -y -qq install git clang doxygen hugepages build-essential libnuma-dev libpcap-dev linux-headers-`uname -r`
+
 build_dpdk
 
 sudo apt-get install -y autoconf libtool
