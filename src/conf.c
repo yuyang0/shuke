@@ -256,13 +256,10 @@ void initConfigFromTomlFile(char *conffile) {
 
     _parse_toml_config(fp);
 
-    CHECK_CONFIG("mem_channels", sk.master_lcore_id >= 0,
+    CHECK_CONFIG("master_lcore_id", sk.master_lcore_id >= 0,
                  "Config Error: master_lcore_id must set correctly");
     CHECK_CONFIG("mem_channels", sk.mem_channels > 0,
                  "Config Error: mem_channels can't be empty");
-
-    CHECK_CONFIG("data_store", sk.data_store != NULL,
-                 "Config Error: data_store can't be empty");
 
     fclose(fp);
 }

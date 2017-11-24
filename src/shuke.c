@@ -717,7 +717,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
     LOG_DEBUG(USER1, "receive dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar:%d)",
               ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
     // in order to support EDNS, nArRR can bigger than 0
-    if (ctx->hdr.nQd != 1 || ctx->hdr.nAnRR > 0 || ctx->hdr.nNsRR > 0 || ctx->hdr.nArRR > 1) {
+    if (ctx->hdr.nQd != 1 || ctx->hdr.nAnRR > 0 || ctx->hdr.nNsRR > 0) {
         LOG_DEBUG(USER1, "receive bad dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar: %d), drop it",
                   ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
         dumpDnsFormatErr(ctx);
@@ -732,8 +732,12 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
         ret = OK_CODE;
         goto end;
     }
-    if (ctx->hdr.nArRR == 1) {
-        // parse OPT message(EDNS)
+    /*
+     * parse OPT message(EDNS)
+     */
+    if (ctx->hdr.nArRR > 0
+        && likely(sz-ctx->cur >= 11)
+        && likely(buf[ctx->cur] == '\0')) {
         if (ednsParse(buf+ctx->cur, sz-ctx->cur, &(ctx->edns)) == ERR_CODE) {
             ret = ERR_CODE;
             goto end;
