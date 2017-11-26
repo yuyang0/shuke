@@ -54,6 +54,21 @@ enum ctxRespType {
     RESP_MBUF,
 };
 
+typedef struct {
+    union {
+        struct sockaddr_in6 sin6;
+        struct sockaddr_in  sin;
+        struct sockaddr     sa;
+    };
+    socklen_t len;
+} genericAddr_t;
+
+struct clientInfo {
+    genericAddr_t dns_source;       // address of last source DNS cache/forwarder
+    genericAddr_t edns_client;      // edns-client-subnet address portion
+    unsigned edns_client_mask; // edns-client-subnet mask portion
+};
+
 struct context {
     // information relate to response
     enum ctxRespType resp_type;
@@ -82,14 +97,22 @@ struct context {
     uint16_t qClass;
 
     // EDNS(0) related fields
-    edns_t edns;
-    struct clientSubnetOpt subnet_opt;
+    bool hasEdns;
+    bool hasClientSubnetOpt;
+    uint16_t max_resp_size;
+
+    struct clientInfo cinfo;
+
+    // the OPT RR for response
+    uint8_t opt_rr[11+24];
+    uint16_t opt_rr_len;
 
     size_t ari_sz;
     size_t cps_sz;
     arInfo ari[AR_INFO_SIZE];
     compressInfo cps[CPS_INFO_SIZE];
 };
+
 typedef enum {
     DECODE_IGNORE  = -4, // totally invalid packet (len < header len or unparseable question, and we do not respond)
     DECODE_FORMERR = -3, // slightly better but still invalid input, we return FORMERR
@@ -121,6 +144,7 @@ static inline int dnsHeader_dump(dnsHeader_t *hdr, char *buf, size_t size) {
 int parseDnsQuestion(char *buf, size_t size, char **name, uint16_t *qType, uint16_t *qClass);
 decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx);
 int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z);
+int dumpDnsError(struct context *ctx, int err);
 
 int contextMakeRoomForResp(struct context *ctx, int addlen);
 

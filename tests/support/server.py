@@ -220,7 +220,7 @@ class DNSServer(object):
     def admin_cmd(self, cmd):
         return self.admin_cli.exec_cmd(cmd)
 
-    def dns_query(self, name, ty, use_tcp=True):
+    def dns_query(self, name, ty, use_tcp=True, edns_options=None):
         dns_hosts = self.dns_host
         dns_port = self.dns_port
         if len(dns_hosts) > 0:
@@ -228,6 +228,8 @@ class DNSServer(object):
         else:
             dns_host = ""
         q = dns.message.make_query(name, ty)
+        if isinstance(edns_options, list):
+            q.use_edns(options=edns_options)
         if use_tcp:
             return dns.query.tcp(q, dns_host, port=dns_port)
         else:

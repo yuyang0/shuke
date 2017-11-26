@@ -5,6 +5,8 @@
 #ifndef SHUKE_EDNS_H
 #define SHUKE_EDNS_H
 
+#include <stdint.h>
+
 #define DNSSEC_OK_MASK  0x8000U         /* DO bit mask */
 
 /*
@@ -42,13 +44,23 @@
        +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
  */
 typedef struct {
+    // skip name.
+    uint16_t type;
     uint16_t payload_size;
     uint8_t rcode;
     uint8_t version;
     uint16_t flags;
     uint16_t rdlength;
-    char *rdata;
-} edns_t;
+    char rdata[0];
+} __attribute__((__packed__)) optRR_t ;
+
+// extract value from optRR_t
+#define DNS_OPTRR_GET_TYPE(_r)     (ntohs((_r)->type))
+#define DNS_OPTRR_GET_MAXSIZE(_r)  (ntohs((_r)->payload_size))
+#define DNS_OPTRR_GET_EXTRCODE(_r) ((uint8_t)(ntohl((_r)->extflags) >> 24))
+// #define DNS_OPTRR_GET_VERSION(_r) ((uint8_t)((ntohl((_r)->extflags) & 0x00FF0000) >> 16)
+#define DNS_OPTRR_GET_VERSION(_r) ((uint8_t)((_r)->version))
+#define DNS_OPTRR_GET_RDLENGTH(_r) (ntohs((_r)->rdlength))
 
 /*
  * client subnet opt format
@@ -68,16 +80,12 @@ typedef struct {
 
   family list: https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml
 */
-struct clientSubnetOpt {
+struct clientSubnetOption {
     uint16_t family;
     uint8_t source_prefix_len;
     uint8_t scope_prefix_len;
-    char addr[16];
-};
+    char addr[0];
+}__attribute__((__packed__));
 
-int ednsParse(char *buf, size_t size, edns_t *edns);
-int ednsDump(char *buf, int size, edns_t *edns);
-
-int parseClientSubnet(char *buf, int size, struct clientSubnetOpt *opt);
 
 #endif //SHUKE_EDNS_H
