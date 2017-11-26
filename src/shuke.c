@@ -550,27 +550,6 @@ void logQuery(struct context *ctx, char *cip, int cport, bool is_tcp) {
     fprintf(sk.query_log_fp, "%s queries: client %s#%d%s: query %s IN %s \n", buf, cip, cport, tcpstr, dotName, ty_str);
 }
 
-int dumpDnsError(struct context *ctx, int err) {
-    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
-
-    SET_QR_R(hdr.flag);
-    if (GET_RD(ctx->hdr.flag)) SET_RD(hdr.flag);
-    SET_ERROR(hdr.flag, err);
-    if (err == DNS_RCODE_NXDOMAIN) SET_AA(hdr.flag);
-
-    if (ctx->hdr.nArRR == 1) {
-        int edns_len = ctx->edns.rdlength + 11;
-        if (unlikely(contextMakeRoomForResp(ctx, edns_len) == ERR_CODE)) {
-            return ERR_CODE;
-        }
-        ednsDump(ctx->chunk+ctx->cur, ctx->chunk_len-ctx->cur, &ctx->edns);
-        ctx->cur += edns_len;
-    }
-    // a little trick, overwrite the dns header, don't update `cur` in ctx
-    dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
-    return OK_CODE;
-}
-
 static inline int dumpDnsNameErr(struct context *ctx) {
     return dumpDnsError(ctx, DNS_RCODE_NXDOMAIN);
 }
@@ -649,7 +628,7 @@ int processUDPDnsQuery(struct rte_mbuf *m, char *udp_data, size_t udp_data_len,
     ctx.cur = 0;
     ctx.resp_type = RESP_MBUF;
     ctx.m = m;
-    ctx.edns.payload_size = 512;
+    ctx.max_resp_size = 512;
     int status;
     status = _getDnsResponse(udp_data, udp_data_len, &ctx);
 
@@ -665,7 +644,7 @@ int processUDPDnsQuery(struct rte_mbuf *m, char *udp_data, size_t udp_data_len,
     last_m->data_len += (uint16_t )ctx.cur;
     m->pkt_len += ctx.cur;
 
-    unsigned max_pkt_len = (unsigned)(ctx.edns.payload_size + udp_data_offset);
+    unsigned max_pkt_len = (unsigned)(ctx.max_resp_size + udp_data_offset);
     if (m->pkt_len > max_pkt_len) {
         // set TC flag
         *((uint8_t*)(udp_data+2)) |= (uint8_t )0x02;
@@ -688,7 +667,7 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     ctx.chunk_len = respLen;
     ctx.cur = 0;
     ctx.resp_type = RESP_STACK;
-    ctx.edns.payload_size = (uint16_t )sk.max_resp_size;
+    ctx.max_resp_size = (uint16_t )sk.max_resp_size;
 
     status = _getDnsResponse(buf, sz, &ctx);
 
@@ -697,6 +676,11 @@ int processTCPDnsQuery(tcpConn *conn, char *buf, size_t sz)
     }
 
     snpack(ctx.chunk, DNS_HDR_SIZE, respLen, "m>hh", ctx.name, ctx.nameLen+1, ctx.qType, ctx.qClass);
+    if (ctx.cur > ctx.max_resp_size) {
+        // set TC flag
+        *((uint8_t*)(ctx.chunk+2)) |= (uint8_t )0x02;
+        ctx.cur = ctx.max_resp_size;
+    }
     tcpConnAppendDnsResponse(conn, ctx.chunk, ctx.cur);
     if(ctx.resp_type == RESP_HEAP) zfree(ctx.chunk);
     return status;

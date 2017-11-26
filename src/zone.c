@@ -17,6 +17,8 @@
 
 #define RRSET_MAX_PREALLOC (1024*1024)
 
+extern int checkLenLabel(char *name, size_t max);
+
 dnsDictValue *dnsDictValueCreate(int socket_id) {
     dnsDictValue *dv = socket_calloc(socket_id, 1, sizeof(*dv));
     return dv;

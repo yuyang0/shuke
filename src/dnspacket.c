@@ -141,7 +141,7 @@ int parseDNSHeader(char *buf, size_t size, uint16_t *xid, uint16_t *flag, uint16
         return ERR_CODE;
     }
     // ignore the byte order of xid.
-    memcpy(xid, buf, 2);
+    rte_memcpy(xid, buf, 2);
     buf += 2;
     *flag = load16be(buf);
     buf += 2;
@@ -190,7 +190,7 @@ int parseDnsQuestion(char *buf, size_t size, char **name, uint16_t *qType, uint1
 }
 
 int contextMakeRoomForResp(struct context *ctx, int addlen) {
-    int freelen = (int)(ctx->chunk_len - ctx->cur);
+    int freelen = (ctx->chunk_len - ctx->cur);
     if (likely(freelen >= addlen)) return OK_CODE;
     int newlen = (ctx->cur+addlen)*2;
     char *new_buf;
@@ -415,9 +415,49 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
     return OK_CODE;
 }
 
+int parseClientSubnet(char *buf, int size, struct clientInfo *cinfo) {
+    char *p = buf;
+    uint16_t family = load16be(p);
+    p += 2;
+    uint8_t source_prefix_len = (uint8_t)(*p++);
+    uint8_t scope_prefix_len = (uint8_t)(*p++);
+    if (scope_prefix_len != 0) return ERR_CODE;
+
+    // only support ipv4 and ipv6 address
+    unsigned addrlen = (source_prefix_len+7U)/8U;
+    if (size < (int)(addrlen+4)) return ERR_CODE;
+
+    switch (family) {
+        case 1:
+            if (source_prefix_len > 32) {
+                LOG_DEBUG(USER1, "edns_client_subnet: invalid src_mask of %u for IPv4",
+                          source_prefix_len);
+                return ERR_CODE;
+            }
+            cinfo->edns_client.sa.sa_family = AF_INET;
+            memcpy(&cinfo->edns_client.sin.sin_addr.s_addr, p, addrlen);
+            break;
+        case 2:
+            if (source_prefix_len > 128) {
+                LOG_DEBUG(USER1, "edns_client_subnet: invalid src_mask of %u for IPv6",
+                          source_prefix_len);
+                cinfo->edns_client.sa.sa_family = AF_INET6;
+                memcpy(cinfo->edns_client.sin6.sin6_addr.s6_addr, p, addrlen);
+                return ERR_CODE;
+            }
+            break;
+        default:
+            //FIXME: just skip seems a good choice.
+            return ERR_CODE;
+    }
+    cinfo->edns_client_mask = source_prefix_len;
+    return OK_CODE;
+}
+/*
+ * parse rdata in OPT RR.
+ */
 static int
 parseEdnsOptions(char *rdata, unsigned rdlength, struct context *ctx) {
-    struct clientSubnetOpt *opt = &ctx->subnet_opt;
     while(rdlength) {
         if (rdlength < 4) {
             return ERR_CODE;
@@ -426,12 +466,16 @@ parseEdnsOptions(char *rdata, unsigned rdlength, struct context *ctx) {
         rdata += 2;
         uint16_t opt_len = load16be(rdata);
         rdata += 2;
-        rdlength -=2;
+        rdlength -= 4;
         if (opt_len > rdlength) return ERR_CODE;
         if (opt_code == OPT_CLIENT_SUBNET_CODE) {
-            if (parseClientSubnet(rdata, rdlength, opt) != OK_CODE) {
+            if (parseClientSubnet(rdata, rdlength, &ctx->cinfo) != OK_CODE) {
                 return ERR_CODE;
             }
+            ctx->hasClientSubnetOpt = true;
+            // copy ecs in query buffer to response buffer
+            rte_memcpy(ctx->opt_rr+ctx->opt_rr_len, rdata-4, opt_len+4);
+            ctx->opt_rr_len += (opt_len+4);
         }
         rdata += opt_len;
         rdlength -= opt_len;
@@ -439,15 +483,55 @@ parseEdnsOptions(char *rdata, unsigned rdlength, struct context *ctx) {
     return OK_CODE;
 }
 
+decodeRcode decodeOptRR(char *buf, size_t sz, optRR_t *opt_rr, struct context *ctx) {
+
+    uint16_t rdlength = DNS_OPTRR_GET_RDLENGTH(opt_rr);
+    ctx->max_resp_size = DNS_OPTRR_GET_MAXSIZE(opt_rr);
+    LOG_DEBUG(USER1, "ENDS: payload: %d, rdlength: %d",
+              ctx->max_resp_size, rdlength);
+    if (unlikely(ctx->max_resp_size > sk.max_resp_size))
+        ctx->max_resp_size = (uint16_t )sk.max_resp_size;
+    if (unlikely(ctx->max_resp_size < 512U))
+        ctx->max_resp_size = (uint16_t )512;
+
+    if (sz < rdlength+10U) {
+        return DECODE_FORMERR;
+    }
+    if (DNS_OPTRR_GET_VERSION(opt_rr) != 0) {
+        return DECODE_BADVERS;
+    }
+    ctx->hasEdns = true;
+
+    rte_memcpy(ctx->opt_rr, buf-1, 11);
+    ctx->opt_rr_len = 11U;
+
+    if (rdlength) {
+        if (parseEdnsOptions(opt_rr->rdata, rdlength, ctx) == ERR_CODE) {
+            return DECODE_FORMERR;
+        }
+        if (ctx->hasClientSubnetOpt) {
+            uint16_t ecs_opt_len = ctx->opt_rr_len - (uint16_t )11U;
+            dump16be(ecs_opt_len, buf+8);
+        } else {
+            // set rdlength to 0
+            dump16be(0, buf+8);
+        }
+    }
+    return DECODE_OK;
+}
+
 decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx) {
     int n;
-    if (sz < 12) {
+    decodeRcode rcode = DECODE_OK;
+    // 5 is the minimal question length (1 byte root, 2 bytes each type and class)
+    if (sz < DNS_HDR_SIZE + 5) {
         LOG_DEBUG(USER1, "receive bad dns query message with only %d bytes, drop it", sz);
         // just ignore this packet(don't send response)
         return DECODE_IGNORE;
     }
     dnsHeader_load(buf, sz, &(ctx->hdr));
-    n = parseDnsQuestion(buf+DNS_HDR_SIZE, sz-DNS_HDR_SIZE, &(ctx->name), &(ctx->qType), &(ctx->qClass));
+    n = parseDnsQuestion(buf+DNS_HDR_SIZE, sz-DNS_HDR_SIZE,
+                         &(ctx->name), &(ctx->qType), &(ctx->qClass));
     if (n == ERR_CODE) {
         LOG_DEBUG(USER1, "parse dns question error.");
         return DECODE_IGNORE;
@@ -461,7 +545,15 @@ decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx) {
     if (ctx->hdr.nQd != 1 || ctx->hdr.nAnRR > 0 || ctx->hdr.nNsRR > 0) {
         LOG_DEBUG(USER1, "receive bad dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar: %d), drop it",
                   ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
-        return DECODE_FORMERR;
+        return DECODE_IGNORE;
+    }
+    if (unlikely(GET_QR(ctx->hdr.flag))) {
+        LOG_DEBUG(USER1, "receive bad dns query packet(QR is set), drop it");
+        return DECODE_IGNORE;
+    }
+    if (unlikely(GET_TC(ctx->hdr.flag))) {
+        LOG_DEBUG(USER1, "receive bad dns query packet(TC is set), drop it");
+        return DECODE_IGNORE;
     }
 
     ctx->nameLen = lenlabellen(ctx->name);
@@ -471,28 +563,33 @@ decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx) {
     }
     /*
      * parse OPT message(EDNS)
+     * we assume the first rr in additional section is OPT RR,
+     * TODO search the additional section to get OPT RR
      */
+    ctx->hasEdns = false;
+    ctx->hasClientSubnetOpt = false;
+    ctx->opt_rr_len = 0;
+    optRR_t *opt_rr = (optRR_t*)(buf+ctx->cur+1);
     if (ctx->hdr.nArRR > 0
         && likely(sz-ctx->cur >= 11)
-        && likely(buf[ctx->cur] == '\0'
-        && likely(load16be(buf+ctx->cur+1) == DNS_TYPE_OPT))) {
-        ctx->cur += 3;
-        if (ednsParse(buf+ctx->cur, sz-ctx->cur, &(ctx->edns)) == ERR_CODE) {
-            return DECODE_FORMERR;
-        }
-        if (ctx->edns.version != 0) {
-            return DECODE_BADVERS;
-        }
-        LOG_DEBUG(USER1, "ENDS: payload: %d, version: %d, rdlength: %d",
-                  ctx->edns.payload_size, ctx->edns.version, ctx->edns.rdlength);
-        if (ctx->edns.rdlength) {
-            if (parseEdnsOptions(ctx->edns.rdata, ctx->edns.rdlength, ctx) == ERR_CODE) {
-                return DECODE_FORMERR;
-            }
-        }
+        && likely(buf[ctx->cur] == '\0')
+        && likely(DNS_OPTRR_GET_TYPE(opt_rr) == DNS_TYPE_OPT))
+    {
+        rcode = decodeOptRR(buf+ctx->cur+1, sz - ctx->cur - 1, opt_rr, ctx);
     }
     LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
-    return DECODE_OK;
+    return rcode;
+}
+
+static int
+encodeOptRR(struct context *ctx) {
+    int opt_rr_len = ctx->opt_rr_len;
+    if (unlikely(contextMakeRoomForResp(ctx, opt_rr_len) == ERR_CODE)) {
+        return ERR_CODE;
+    }
+    rte_memcpy(ctx->chunk+ctx->cur, ctx->opt_rr, opt_rr_len);
+    ctx->cur += opt_rr_len;
+    return OK_CODE;
 }
 
 int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
@@ -506,7 +603,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
     ctx->ari_sz = 0;
 
     RRSet *cname;
-    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
+    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, 0};
 
     SET_QR_R(hdr.flag);
     SET_AA(hdr.flag);
@@ -586,15 +683,27 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         }
     }
     // dump edns
-    if (ctx->hdr.nArRR == 1) {
-        int edns_len = ctx->edns.rdlength + 11;
-        if (unlikely(contextMakeRoomForResp(ctx, edns_len) == ERR_CODE)) {
-            return ERR_CODE;
-        }
-        ednsDump(ctx->chunk+ctx->cur, ctx->chunk_len-ctx->cur, &ctx->edns);
-        ctx->cur += edns_len;
+    if (ctx->hasEdns) {
+        if (unlikely(encodeOptRR(ctx) == ERR_CODE)) return ERR_CODE;
+        hdr.nArRR += 1;
     }
     // update the header. don't update `cur` in ctx
+    dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
+    return OK_CODE;
+}
+
+int dumpDnsError(struct context *ctx, int err) {
+    dnsHeader_t hdr = {ctx->hdr.xid, 0, 1, 0, 0, ctx->hdr.nArRR};
+
+    SET_QR_R(hdr.flag);
+    if (GET_RD(ctx->hdr.flag)) SET_RD(hdr.flag);
+    SET_ERROR(hdr.flag, err);
+    if (err == DNS_RCODE_NXDOMAIN) SET_AA(hdr.flag);
+
+    if (ctx->hasEdns) {
+        if (unlikely(encodeOptRR(ctx) == ERR_CODE)) return ERR_CODE;
+    }
+    // a little trick, overwrite the dns header, don't update `cur` in ctx
     dnsHeader_dump(&hdr, ctx->chunk, DNS_HDR_SIZE);
     return OK_CODE;
 }

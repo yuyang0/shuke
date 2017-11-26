@@ -7,7 +7,12 @@
 from __future__ import print_function, division, absolute_import
 import sys
 from os.path import dirname, abspath
+import socket
+import struct
+
 import pytest
+from clientsubnetoption import ClientSubnetOption
+import clientsubnetoption
 
 sys.path.insert(0, dirname(dirname(abspath(__file__))))
 from support import constants
@@ -180,3 +185,23 @@ def test_query_subsub(dns_srv):
 
     add_rdata = collect_rdata(msg.additional)
     assert add_rdata == {"10.0.1.1", "aaaa:bbbb::1", "10.0.1.2", "aaaa:bbbb::2"}
+
+
+def test_edns(dns_srv):
+    cip = "1.2.3.4"
+    mask = 24
+    cso = ClientSubnetOption(ip=cip, bits=mask)
+    r = dns_srv.dns_query("test-a.example.com.", "A", edns_options=[cso])
+    assert len(r.question) == 1 and len(r.answer) == 1 and \
+        len(r.authority) == 1 and len(r.additional) == 4
+    nb_ecs = 0
+    for option in r.options:
+        if isinstance(option, ClientSubnetOption):
+            nb_ecs += 1
+            # do stuff here
+            assert option.family == clientsubnetoption.FAMILY_IPV4
+            n = socket.inet_pton(socket.AF_INET, "1.2.3.0")
+            assert option.ip == struct.unpack('!L', n)[0]
+            assert option.mask == mask
+            # assert option.
+    assert nb_ecs == 1

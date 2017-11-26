@@ -1,6 +1,7 @@
 pymongo
 pytest
 dnspython
+clientsubnetoption
 python-vagrant
 fabric3
 toml
