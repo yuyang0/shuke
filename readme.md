@@ -45,10 +45,10 @@ if you use vagrant, it is very simple to try shuke
 and prepare the running environment.
 ### buid
 
-1. build dpdk, shuke is only tested on dpdk-17.05.1. if you use linux x86-64,
-   you can run `bash 3rd/dpdk-stable-<version>/usertools/dpdk-setup.sh`,
-   then perform the following
-   instructions.
+1. clone source code: `git clone --recursive https://github.com/yuyang0/shuke.git`
+2. build dpdk, shuke is only tested on dpdk-17.05.2. if you use linux x86-64,
+   you can run `bash 3rd/dpdk/usertools/dpdk-setup.sh`,
+   then perform the following instructions.
     + press `[12]` to compile dpdk for linux x86-64 target.
     + press `[15]` to insert UIO
     + press `[17]` to insert KNI
@@ -57,13 +57,14 @@ and prepare the running environment.
     + press `[21]` to bind NIC device
     + press `[32]` to quit
 
-2. install autoconf and libtool
-3. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
+3. install autoconf and libtool
+4. run `make` at the top of source tree, then you will get a binary file named `build/shuke-server`.
 
 ### tips
-1. if you want to build shuke in DEBUG mode, just run `make DEBUG=1`
-2. if you want to see the compiler command, just run `make V=1`
-3. if you want to support ip fragmentation, just run `make IP_FRAG=1`.
+1. if you use ubuntu, you can just run `bash ./bootstrap.sh` to build shuke
+2. if you want to build shuke in DEBUG mode, just run `make DEBUG=1`
+3. if you want to see the compiler command, just run `make V=1`
+4. if you want to support ip fragmentation, just run `make IP_FRAG=1`.
 
 ### run
 just run `build/shuke-server -c conf/shuke.toml`,
