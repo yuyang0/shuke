@@ -111,6 +111,6 @@ dbname= "zone"
 package_path="$prefix/lualib"
 package_cpath="$prefix/luaclib"
 access_by_lua = '''
-sk.log(sk.INFO, "hello world")
-sk.log(sk.INFO, "package path: %s", package.path)
+sk.log(sk.INFO, "hello world\n")
+sk.log(sk.INFO, "package path: %s\n", package.path)
 '''

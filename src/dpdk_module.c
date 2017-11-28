@@ -842,6 +842,13 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     rcu_register_thread();
     qconf->L = sk_lua_new_state(&sk.lconf);
 
+    /* if (luaL_loadstring(qconf->L, sk.lconf.access_by_lua_src)) { */
+    /*     LOG_ERR(DPDK, "ca't load string %s", lua_tostring(qconf->L, -1)); */
+    /* } */
+    /* if (lua_pcall (qconf->L, 0, 0, 0)){ */
+    /*     LOG_ERR(DPDK, "can't  pcall %s", lua_tostring(qconf->L, -1)); */
+    /* } */
+
     prev_tsc = 0;
 
     init_per_lcore();

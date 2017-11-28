@@ -54,7 +54,7 @@ SRC_LIST := admin.c ae.c anet.c conf.c dict.c dpdk_module.c \
             rbtree.c rculfhash-mm-socket.c sds.c shuke.c \
             str.c utils.c zparser.c zmalloc.c tcpserver.c \
             ltree.c toml.c zone.c \
-            sk_lua_util.c sk_lua_log.c
+            sk_lua_util.c sk_lua_log.c sk_lua_var.c
 SHUKE_SRC := $(foreach v, $(SRC_LIST), $(SHUKE_SRC_DIR)/$(v))
 SHUKE_OBJ := $(patsubst %.c,$(SHUKE_BUILD_DIR)/%.o,$(SRC_LIST))
 
