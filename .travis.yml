@@ -12,3 +12,8 @@ install:
 
 script:
   - bash bootstrap.sh V=1
+
+branches:
+  only:
+  - master
+  - stable
