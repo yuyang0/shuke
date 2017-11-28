@@ -840,7 +840,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
         US_PER_S * BURST_TX_DRAIN_US;
 
     rcu_register_thread();
-    qconf->L = sk_lua_new_state();
+    qconf->L = sk_lua_new_state(&sk.lconf);
 
     prev_tsc = 0;
 

@@ -408,6 +408,7 @@ static void daemonize(void) {
 
 static void usage() {
     printf("-c /path/to/shuke.conf    configure file.\n"
+           "-p prefix                 set prefix path(current work directory).\n"
            "-h                        print this help and exit. \n"
            "-v                        print version. \n");
 }
@@ -455,7 +456,6 @@ void setupSignalHandlers(void) {
     sigaction(SIGBUS, &act, NULL);
     sigaction(SIGFPE, &act, NULL);
     sigaction(SIGILL, &act, NULL);
-    return;
 }
 
 /*----------------------------------------------
@@ -784,15 +784,20 @@ dictType commandTableDictType = {
 static char *getConfigFname(int argc, char **argv) {
     int c;
     char *conffile = NULL;
+    char *prefix = NULL;
     char cwd[MAXLINE];
     if (getcwd(cwd, MAXLINE) == NULL) {
         fprintf(stderr, "getcwd: %s.\n", strerror(errno));
         exit(1);
     }
+
     while ((c = getopt(argc, argv, "c:hv")) != -1) {
         switch (c) {
             case 'c':
                 conffile = optarg;
+                break;
+            case 'p':
+                prefix = toAbsPath(optarg, cwd);
                 break;
             case 'h':
                 usage();
@@ -810,6 +815,10 @@ static char *getConfigFname(int argc, char **argv) {
         exit(1);
     }
     sk.configfile = toAbsPath(conffile, cwd);
+    if (prefix == NULL) {
+        prefix = strdup(cwd);
+    }
+    sk.prefix = prefix;
     return sk.configfile;
 }
 

@@ -106,3 +106,11 @@ files = [
 host= "127.0.0.1"
 port= 27017
 dbname= "zone"
+
+[lua]
+package_path="$prefix/lualib"
+package_cpath="$prefix/luaclib"
+access_by_lua = '''
+sk.log(sk.INFO, "hello world")
+sk.log(sk.INFO, "package path: %s", package.path)
+'''

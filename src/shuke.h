@@ -144,6 +144,7 @@ struct shuke {
 
     // config
     char *configfile;
+    char *prefix;
 
     int master_lcore_id;
     int mem_channels;
@@ -187,7 +188,7 @@ struct shuke {
     int max_resp_size;
     bool minimize_resp;
 
-    char *access_by_lua_src;
+    struct lua_conf lconf;
     // end config
 
     /*
