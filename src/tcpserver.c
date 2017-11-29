@@ -3,7 +3,7 @@
 //
 #include "shuke.h"
 
-#define RTE_LOGTYPE_TCP RTE_LOGTYPE_USER1
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "TCP");
 
 static void tcpReadHandler(struct aeEventLoop *el, int fd, void *privdata, int mask);
 static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, int mask);
@@ -22,7 +22,7 @@ int tcpServerCron(struct aeEventLoop *el, long long id, void *clientData) {
         tcpConn *c = list_entry(pos, tcpConn, node);
         if (sk.unixtime - c->lastActiveTs < sk.tcp_idle_timeout) break;
 
-        LOG_INFO(TCP, "tcp connection is idle more than %ds, close it.", sk.tcp_idle_timeout);
+        LOG_INFO("tcp connection is idle more than %ds, close it.", sk.tcp_idle_timeout);
         tcpConnDestroy(c);
     }
     // check if needs to stop the event loop
@@ -47,7 +47,7 @@ tcpServer *tcpServerCreate() {
     int j;
     for (j = 0; j < srv->ipfd_count; ++j) {
         if (aeCreateFileEvent(srv->el, srv->ipfd[j], AE_READABLE, tcpAcceptHandler, srv) == AE_ERR) {
-            LOG_ERROR(TCP, "Can't create file event for listen socket %d", srv->ipfd[j]);
+            LOG_ERROR("Can't create file event for listen socket %d", srv->ipfd[j]);
             return NULL;
         }
     }
@@ -71,11 +71,11 @@ void tcpConnAppendDnsResponse(tcpConn *conn, char *resp, size_t respLen) {
     struct tcpContext **tail = &(conn->wtail);
     aeFileProc *cb = tcpWriteHandler;
 
-    LOG_DEBUG(TCP, "append context(%d) to write list", ctx->wsize);
+    LOG_DEBUG("append context(%d) to write list", ctx->wsize);
 
     if (*head == NULL) {
         if (aeCreateFileEvent(el, fd, AE_WRITABLE, cb, conn) == AE_ERR) {
-            LOG_ERROR(TCP, "Can't add write event callback for %d: %s", fd, strerror(errno));
+            LOG_ERROR("Can't add write event callback for %d: %s", fd, strerror(errno));
             tcpContextDestroy(ctx);
             return;
         }
@@ -149,7 +149,7 @@ static int tcpBindAddrs(tcpServer *srv) {
                 (*count)++;
             } else if (errno == EAFNOSUPPORT) {
                 unsupported++;
-                LOG_WARN(TCP, "Not listening to IPv6: unsupproted");
+                LOG_WARN("Not listening to IPv6: unsupproted");
             }
 
             if (*count == 1 || unsupported) {
@@ -160,7 +160,7 @@ static int tcpBindAddrs(tcpServer *srv) {
                     (*count)++;
                 } else if (errno == EAFNOSUPPORT) {
                     unsupported++;
-                    LOG_WARN(TCP, "Not listening to IPv4: unsupproted");
+                    LOG_WARN("Not listening to IPv4: unsupproted");
                 }
             }
             /* Exit the loop if we were able to bind * on IPv4 and IPv6,
@@ -175,13 +175,13 @@ static int tcpBindAddrs(tcpServer *srv) {
             fds[*count] = anetTcpServer(srv->errstr, port, bindaddr[j], sk.tcp_backlog, 1);
         }
         if (fds[*count] == ANET_ERR) {
-            LOG_WARN(TCP, "Creating Server TCP listening socket %s:%d: %s",
+            LOG_WARN("Creating Server TCP listening socket %s:%d: %s",
                      bindaddr[j] ? bindaddr[j] : "*",
                      port, srv->errstr);
             return ERR_CODE;
         }
 
-        LOG_INFO(TCP, "dns tcp server listening %s:%d.", bindaddr[j], port);
+        LOG_INFO("dns tcp server listening %s:%d.", bindaddr[j], port);
 
         anetNonBlock(NULL, fds[*count]);
         (*count)++;
@@ -206,11 +206,11 @@ static void tcpReadHandler(struct aeEventLoop *el, int fd,
                 n = read(conn->fd, conn->len + conn->nRead, remain);
                 if (n < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) goto end;
-                    LOG_WARN(TCP, "tcp read: %s", strerror(errno));
+                    LOG_WARN("tcp read: %s", strerror(errno));
                     goto closing;
                 } else if (n == 0) {
                     if (conn->nRead > 0) {
-                        LOG_WARN(TCP, "the connection peer closed socket prematurely.");
+                        LOG_WARN("the connection peer closed socket prematurely.");
                     }
                     goto closing;
                 }
@@ -231,10 +231,10 @@ static void tcpReadHandler(struct aeEventLoop *el, int fd,
                     n = read(conn->fd, conn->data + conn->nRead, remain);
                     if (n < 0) {
                         if (errno == EAGAIN || errno == EWOULDBLOCK) goto end;
-                        LOG_WARN(TCP, "tcp read: %s", strerror(errno));
+                        LOG_WARN("tcp read: %s", strerror(errno));
                         goto closing;
                     } else if (n == 0) {   // the peer close the socket prematurely.
-                        LOG_WARN(TCP, "the connection peer closed socket prematurely.");
+                        LOG_WARN("the connection peer closed socket prematurely.");
                         goto closing;
                     }
                 }
@@ -250,7 +250,7 @@ static void tcpReadHandler(struct aeEventLoop *el, int fd,
                 }
                 break;
             default:
-                LOG_FATAL(TCP, "BUG: invalid conn state");
+                LOG_FATAL("BUG: invalid conn state");
         }
     }
 closing:
@@ -280,7 +280,7 @@ static void tcpWriteHandler(struct aeEventLoop *el, int fd, void *privdata, int 
         nwritten = write(c->fd, ctx->reply + ctx->wcur, remain);
         if (nwritten <= 0) {
             if ((nwritten < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) goto end;
-            LOG_ERROR(TCP, "error writing to client: %s", strerror(errno));
+            LOG_ERROR("error writing to client: %s", strerror(errno));
             tcpConnDestroy(c);
             goto end;
         }
@@ -318,7 +318,7 @@ static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, 
         cfd = anetTcpAccept(srv->errstr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
-                LOG_ERROR(TCP, "Accepting client connection: %s", srv->errstr);
+                LOG_ERROR("Accepting client connection: %s", srv->errstr);
             return;
         }
         if (++sk.num_tcp_conn > (unsigned)sk.max_tcp_connections) {
@@ -328,7 +328,7 @@ static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, 
             ++sk.rejected_tcp_conn;
             continue;
         }
-        LOG_DEBUG(TCP, "tcp server accepted %s:%d", cip, cport);
+        LOG_DEBUG("tcp server accepted %s:%d", cip, cport);
         anetNonBlock(NULL, cfd);
         anetEnableTcpNoDelay(NULL, cfd);
         if (sk.tcp_keepalive) {
@@ -339,7 +339,7 @@ static void tcpAcceptHandler(struct aeEventLoop *el, int fd, void *privateData, 
         conn->cport = cport;
 
         if (aeCreateFileEvent(el, cfd, AE_READABLE, tcpReadHandler, conn) == AE_ERR) {
-            LOG_ERROR(TCP, "Can't create file event for client..");
+            LOG_ERROR("Can't create file event for client..");
             tcpConnDestroy(conn);
             return;
         }

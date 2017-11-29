@@ -19,6 +19,8 @@
 #include "utils.h"
 #include "zmalloc.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "UTILS");
+
 void freev(void **pp) {
     if (!pp) return;
     for (int i = 0; pp[i] != NULL; ++i) {
@@ -370,7 +372,7 @@ int snpack(char *buf, int offset, size_t size, char const *fmt, ...) {
                 remain -= mem_len;
                 break;
             default:
-                LOG_FATAL(USER1, "BUG: unknown format %s", fmt);
+                LOG_FATAL("BUG: unknown format %s", fmt);
         }
         f++;
     }

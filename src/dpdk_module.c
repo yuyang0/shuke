@@ -7,7 +7,7 @@
 #include "shuke.h"
 #include "utils.h"
 
-#define RTE_LOGTYPE_DPDK RTE_LOGTYPE_USER1
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "DPDK");
 
 #define NB_SOCKETS        8
 
@@ -135,7 +135,7 @@ static void log_packet(struct rte_mbuf *m) {
     default:
         return;
     }
-    LOG_RAW(DEBUG, DPDK, "%s", buf);
+    LOG_RAW(DEBUG, "%s", buf);
 }
 #else
 #define log_packet(m)
@@ -184,7 +184,7 @@ init_mem(unsigned nb_mbuf)
                          "Cannot init mbuf pool on socket %d\n",
                          socketid);
             else
-                LOG_INFO(DPDK, "Allocated mbuf pool on socket %d.", socketid);
+                LOG_INFO("Allocated mbuf pool on socket %d.", socketid);
 
         }
 
@@ -192,28 +192,28 @@ init_mem(unsigned nb_mbuf)
         struct rte_mempool *mp;
 
         if (socket_direct_pool[socketid] == NULL) {
-            LOG_INFO(DPDK, "Creating direct mempool on socket %i\n",
+            LOG_INFO("Creating direct mempool on socket %i\n",
                     socketid);
             snprintf(s, sizeof(s), "pool_direct_%i", socketid);
 
             mp = rte_pktmbuf_pool_create(s, IP_FRAG_NB_MBUF, 32,
                                          0, RTE_MBUF_DEFAULT_BUF_SIZE, socketid);
             if (mp == NULL) {
-                LOG_ERR(DPDK, "Cannot create direct mempool\n");
+                LOG_ERR("Cannot create direct mempool\n");
                 return -1;
             }
             socket_direct_pool[socketid] = mp;
         }
 
         if (socket_indirect_pool[socketid] == NULL) {
-            LOG_INFO(DPDK, "Creating indirect mempool on socket %i\n",
+            LOG_INFO("Creating indirect mempool on socket %i\n",
                     socketid);
             snprintf(s, sizeof(s), "pool_indirect_%i", socketid);
 
             mp = rte_pktmbuf_pool_create(s, IP_FRAG_NB_MBUF, 32, 0, 0,
                                          socketid);
             if (mp == NULL) {
-                LOG_ERR(DPDK, "Cannot create indirect mempool\n");
+                LOG_ERR("Cannot create indirect mempool\n");
                 return -1;
             }
             socket_indirect_pool[socketid] = mp;
@@ -233,7 +233,7 @@ check_all_ports_link_status()
     uint8_t portid, count, all_ports_up, print_flag = 0;
     struct rte_eth_link link;
 
-    LOG_RAW(INFO, DPDK, "\nChecking link status");
+    LOG_RAW(INFO, "\nChecking link status");
     fflush(stdout);
     for (count = 0; count <= MAX_CHECK_TIME; count++) {
         if (sk.force_quit)
@@ -249,14 +249,14 @@ check_all_ports_link_status()
             /* print link status if flag set */
             if (print_flag == 1) {
                 if (link.link_status)
-                    LOG_RAW(INFO, DPDK,
+                    LOG_RAW(INFO,
                             "Port %d Link Up - speed %u "
                             "Mbps - %s\n", (uint8_t)portid,
                             (unsigned)link.link_speed,
                             (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
                             ("full-duplex") : ("half-duplex\n"));
                 else
-                    LOG_RAW(INFO, DPDK, "Port %d Link Down\n", (uint8_t)portid);
+                    LOG_RAW(INFO, "Port %d Link Down\n", (uint8_t)portid);
                 continue;
             }
             /* clear all_ports_up flag if any link down */
@@ -270,7 +270,7 @@ check_all_ports_link_status()
             break;
 
         if (all_ports_up == 0) {
-            LOG_RAW(INFO, DPDK, ".");
+            LOG_RAW(INFO, ".");
             fflush(sk.log_fp);
             rte_delay_ms(CHECK_INTERVAL);
         }
@@ -278,7 +278,7 @@ check_all_ports_link_status()
         /* set the print_flag if all ports up or timeout */
         if (all_ports_up == 1 || count == (MAX_CHECK_TIME - 1)) {
             print_flag = 1;
-            LOG_RAW(INFO, DPDK, "done\n");
+            LOG_RAW(INFO, "done\n");
         }
     }
 }
@@ -295,7 +295,7 @@ send_burst(lcore_conf_t *qconf, uint16_t n, uint8_t port)
     m_table = (struct rte_mbuf **)qconf->tx_mbufs[port].m_table;
 
     ret = rte_eth_tx_burst(port, queueid, m_table, n);
-    LOG_DEBUG(DPDK, "burst send %d packets", ret);
+    LOG_DEBUG("burst send %d packets", ret);
     if (unlikely(ret < n)) {
         do {
             rte_pktmbuf_free(m_table[ret]);
@@ -404,7 +404,7 @@ setup_ip_frag_tbl()
                                                         max_flow_num, frag_cycles,
                                                         socket)) == NULL)
         {
-            RTE_LOG(ERR, DPDK, "ip_frag_tbl_create(%u) on "
+            RTE_LOG(ERR, "ip_frag_tbl_create(%u) on "
                     "lcore: %u failed\n",
                     max_flow_num, lcore_id);
             return -1;
@@ -496,7 +496,7 @@ ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m,
     struct rte_mempool *indirect_pool = socket_indirect_pool[qconf->node->numa_id];
 
     len = qconf->tx_mbufs[port].len;
-    LOG_DEBUG(DPDK, "ip fragmentation %d", m->pkt_len);
+    LOG_DEBUG("ip fragmentation %d", m->pkt_len);
 
     rte_pktmbuf_adj(m, (uint16_t)sizeof(struct ether_hdr));
 
@@ -520,7 +520,7 @@ ip_fragmentation(lcore_conf_t *qconf, struct rte_mbuf *m,
             goto end;
     }
 
-    LOG_DEBUG(DPDK, "response splits to %d fragments.", len2);
+    LOG_DEBUG("response splits to %d fragments.", len2);
 
     for (int i = len; i < len + len2; i ++) {
         new_m = qconf->tx_mbufs[port].m_table[i];
@@ -571,7 +571,7 @@ int sk_handle_arp_request(struct rte_mbuf *m, int portid) {
     uint16_t arp_op_type = rte_be_to_cpu_16(arp_h->arp_op);
     if (arp_op_type == ARP_OP_REQUEST) {
         if (memcmp(&arp_h->arp_data.arp_tip, &pinfo->ipv4_addr, 4) == 0) {
-            LOG_DEBUG(DPDK, "got arp request for port %d.", portid);
+            LOG_DEBUG("got arp request for port %d.", portid);
             arp_h->arp_op = rte_cpu_to_be_16(ARP_OP_REPLY);
 
             struct arp_ipv4 *arp_data = &arp_h->arp_data;
@@ -595,7 +595,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 {
     port_info_t *pinfo = sk.port_info[portid];
     if (pinfo->hw_features.rx_csum && !verify_cksum(m)) {
-        LOG_DEBUG(DPDK, "invalid cksum");
+        LOG_DEBUG("invalid cksum");
         goto invalid;
     }
 
@@ -628,7 +628,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
 
     switch (ether_type) {
         case ETHER_TYPE_ARP:
-            LOG_DEBUG(DPDK, "port %d got a arp packet.", portid);
+            LOG_DEBUG("port %d got a arp packet.", portid);
             if (sk_handle_arp_request(m, portid) == OK_CODE) {
                 send_single_packet(qconf, m, portid);
                 return;
@@ -642,7 +642,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             if (! pinfo->hw_features.rx_csum) {
                 // using software to verify cksum
                 if (rte_ipv4_cksum(ipv4_h) != 0xFFFF) {
-                    LOG_DEBUG(DPDK, "wrong ipv4 checksum, drop it.");
+                    LOG_DEBUG("wrong ipv4 checksum, drop it.");
                     goto invalid;
                 }
             }
@@ -668,7 +668,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             ipproto = ipv6_h->proto;
             break;
         default:
-            LOG_DEBUG(DPDK, "invalid l3 proto");
+            LOG_DEBUG("invalid l3 proto");
             goto invalid;
     }
     switch (ipproto) {
@@ -677,13 +677,13 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             if (! pinfo->hw_features.rx_csum) {
                 // using software to verify cksum
                 if (get_udptcp_checksum(l3_h, udp_h, is_ipv4) != 0xFFFF) {
-                    LOG_DEBUG(DPDK, "wrong udp checksum, drop it.");
+                    LOG_DEBUG("wrong udp checksum, drop it.");
                     goto invalid;
                 }
             }
             // check the udp port
             if (rte_be_to_cpu_16(udp_h->dst_port) != sk.port) {
-                LOG_DEBUG(DPDK, "invalid udp port %d", rte_be_to_cpu_16(udp_h->dst_port));
+                LOG_DEBUG("invalid udp port %d", rte_be_to_cpu_16(udp_h->dst_port));
                 goto invalid;
             }
             break;
@@ -694,20 +694,20 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
             if (! pinfo->hw_features.rx_csum) {
                 // using software to verify cksum
                 if (get_udptcp_checksum(l3_h, tcp_h, is_ipv4) != 0xFFFF) {
-                    LOG_DEBUG(DPDK, "wrong udp checksum, drop it.");
+                    LOG_DEBUG("wrong udp checksum, drop it.");
                     goto invalid;
                 }
             }
             // check the tcp port
             if (rte_be_to_cpu_16(tcp_h->dst_port) != sk.port) {
-                LOG_DEBUG(DPDK, "invalid tcp port %d", rte_be_to_cpu_16(tcp_h->dst_port));
+                LOG_DEBUG("invalid tcp port %d", rte_be_to_cpu_16(tcp_h->dst_port));
                 goto invalid;
             }
-            LOG_DEBUG(DPDK, "port %d got a tcp packet.", portid);
+            LOG_DEBUG("port %d got a tcp packet.", portid);
             kni_send_single_packet(qconf, m ,portid);
             return;
         default:
-            LOG_DEBUG(DPDK, "invalid l4 proto");
+            LOG_DEBUG("invalid l4 proto");
             goto invalid;
     }
 
@@ -726,7 +726,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
     total_h_len = (int)(m->l2_len + m->l3_len + m->l4_len);
     n = rte_pktmbuf_pkt_len(m) - total_h_len;
-    LOG_DEBUG(DPDK, "pkt_len: %u, udp len: %zu, port: %d",
+    LOG_DEBUG("pkt_len: %u, udp len: %zu, port: %d",
               rte_pktmbuf_pkt_len(m), udp_data_len, rte_be_to_cpu_16(udp_h->src_port));
 
     ++qconf->nr_req;
@@ -769,10 +769,10 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     if (pinfo->hw_features.tx_csum_l4) {
         m->ol_flags |= PKT_TX_UDP_CKSUM;
         udp_h->dgram_cksum = get_psd_sum(l3_h, is_ipv4, m->ol_flags);
-        LOG_DEBUG(DPDK, "udp psd checksum: 0x%x.", udp_h->dgram_cksum);
+        LOG_DEBUG("udp psd checksum: 0x%x.", udp_h->dgram_cksum);
     } else {
         udp_h->dgram_cksum = get_udptcp_checksum(l3_h, udp_h, is_ipv4);
-        LOG_DEBUG(DPDK, "udp checksum: 0x%x.", udp_h->dgram_cksum);
+        LOG_DEBUG("udp checksum: 0x%x.", udp_h->dgram_cksum);
     }
 
     /*
@@ -797,7 +797,7 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     return;
 
 dropped:
-    // LOG_DEBUG(DPDK, "drop packet.");
+    // LOG_DEBUG("drop packet.");
     ++qconf->nr_dropped;
 invalid:
     rte_pktmbuf_free(m);
@@ -854,19 +854,18 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
     init_per_lcore();
 
     if (qconf->nr_ports == 0) {
-        LOG_INFO(DPDK, "lcore %u has nothing to do.", lcore_id);
+        LOG_INFO("lcore %u has nothing to do.", lcore_id);
         return 0;
     }
 
-    LOG_INFO(DPDK, "entering main loop on lcore %u.", lcore_id);
+    LOG_INFO("entering main loop on lcore %u.", lcore_id);
 
     for (i = 0; i < qconf->nr_ports; i++) {
 
         portid = (uint8_t )qconf->port_id_list[i];
         queueid = (uint8_t )qconf->queue_id_list[portid];
-        LOG_INFO(DPDK,
-                " -- lcoreid=%u portid=%hhu rxqueueid=%hhu.",
-                lcore_id, portid, queueid);
+        LOG_INFO( " -- lcoreid=%u portid=%hhu rxqueueid=%hhu.",
+                  lcore_id, portid, queueid);
     }
 
     while (!sk.force_quit) {
@@ -906,7 +905,7 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
             if (nb_rx == 0)
                 continue;
             qconf->received_req += nb_rx;
-            // LOG_DEBUG(DPDK, "lcore %d recv port %d, queue %d, nb_rx: %d\n", qconf->lcore_id, portid, queueid, nb_rx);
+            // LOG_DEBUG("lcore %d recv port %d, queue %d, nb_rx: %d\n", qconf->lcore_id, portid, queueid, nb_rx);
 
             handle_packets(nb_rx, pkts_burst, portid, qconf);
         }
@@ -991,19 +990,19 @@ void prepare_eth_port_conf(struct rte_eth_conf *port_conf,
     if ((dev_info->rx_offload_capa & DEV_RX_OFFLOAD_IPV4_CKSUM) &&
         (dev_info->rx_offload_capa & DEV_RX_OFFLOAD_UDP_CKSUM) &&
         (dev_info->rx_offload_capa & DEV_RX_OFFLOAD_TCP_CKSUM)) {
-        LOG_INFO(DPDK, "PORT %d RX checksum offload supported", pinfo->port_id);
+        LOG_INFO("PORT %d RX checksum offload supported", pinfo->port_id);
         port_conf->rxmode.hw_ip_checksum = 1;
         pinfo->hw_features.rx_csum = 1;
     }
 
     if ((dev_info->tx_offload_capa & DEV_TX_OFFLOAD_IPV4_CKSUM)) {
-        LOG_INFO(DPDK, "PORT %d TX ip checksum offload supported", pinfo->port_id);
+        LOG_INFO("PORT %d TX ip checksum offload supported", pinfo->port_id);
         pinfo->hw_features.tx_csum_ip = 1;
     }
 
     if ((dev_info->tx_offload_capa & DEV_TX_OFFLOAD_UDP_CKSUM) &&
         (dev_info->tx_offload_capa & DEV_TX_OFFLOAD_TCP_CKSUM)) {
-        LOG_INFO(DPDK, "PORT %d TX TCP&UDP checksum offload supported", pinfo->port_id);
+        LOG_INFO("PORT %d TX TCP&UDP checksum offload supported", pinfo->port_id);
         pinfo->hw_features.tx_csum_l4 = 1;
     }
 }
@@ -1051,7 +1050,7 @@ init_dpdk_module() {
     nb_dev_ports = rte_eth_dev_count();
 
     nb_lcores = rte_lcore_count();
-    LOG_INFO(DPDK, "found %d cores, master cores: %d, %d",
+    LOG_INFO("found %d cores, master cores: %d, %d",
              nb_lcores, rte_get_master_lcore(), rte_lcore_id());
 
 
@@ -1065,7 +1064,7 @@ init_dpdk_module() {
         }
         port_info_t *pinfo = sk.port_info[portid];
         /* init port */
-        LOG_INFO(DPDK, "Initializing port %d ... ", portid );
+        LOG_INFO("Initializing port %d ... ", portid );
 
         rte_eth_dev_info_get(portid, &dev_info);
 
@@ -1089,7 +1088,7 @@ init_dpdk_module() {
 
         prepare_eth_port_conf(&port_conf, &dev_info, pinfo);
         prepare_eth_rx_tx_conf(&dev_info);
-        LOG_INFO(DPDK, "Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
+        LOG_INFO("Creating queues: port=%d nb_rxq=%d nb_txq=%u...",
                  portid, nb_rx_queue, (unsigned)nb_tx_queue );
         ret = rte_eth_dev_configure(portid, nb_rx_queue,
                                     (uint16_t)nb_tx_queue, &port_conf);
@@ -1102,7 +1101,7 @@ init_dpdk_module() {
         ether_format_addr(sk.port_info[portid]->eth_addr_s,
                           ETHER_ADDR_FMT_SIZE,
                           &sk.port_info[portid]->eth_addr);
-        LOG_INFO(DPDK, "port %d mac address: %s.", portid,
+        LOG_INFO("port %d mac address: %s.", portid,
                  sk.port_info[portid]->eth_addr_s);
 
         /* init memory */
@@ -1133,7 +1132,7 @@ init_dpdk_module() {
             else
                 socketid = 0;
 
-            LOG_INFO(DPDK, "txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>",
+            LOG_INFO("txq=<< lcore:%u, port: %d, queue:%d, socket:%d >>",
                      lcore_id, portid, queueid, socketid);
 
             // if (default_port_conf.rxmode.jumbo_frame)
@@ -1145,7 +1144,7 @@ init_dpdk_module() {
                          "rte_eth_tx_queue_setup: err=%d, "
                          "port=%d\n", ret, portid);
 
-            LOG_INFO(DPDK, "rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>",
+            LOG_INFO("rxq=<< lcore:%u, port:%d, queue:%d, socket:%d >>",
                      lcore_id, portid, queueid, socketid);
             ret = rte_eth_rx_queue_setup(portid, queueid, nb_rxd,
                                          socketid,
@@ -1216,10 +1215,10 @@ int cleanup_dpdk_module(void) {
     /* stop ports */
     for (int i = 0; i < sk.nr_ports; i++) {
         portid = (uint8_t )sk.port_ids[i];
-        LOG_INFO(DPDK, "Closing port %d...", portid);
+        LOG_INFO("Closing port %d...", portid);
         rte_eth_dev_stop(portid);
         rte_eth_dev_close(portid);
-        LOG_INFO(DPDK, "port %d Done.", portid);
+        LOG_INFO("port %d Done.", portid);
     }
     return 0;
 }

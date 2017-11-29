@@ -5,7 +5,7 @@
 #include "shuke.h"
 #include "utils.h"
 
-#define RTE_LOGTYPE_MONGO RTE_LOGTYPE_USER1
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "MONGO");
 
 /* ======================= himongo ae.c adapters =============================
  * Note: this implementation is taken from himongo/adapters/ae.h, however
@@ -127,7 +127,7 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         goto error;
     }
 
-    LOG_DEBUG(MONGO, "RRSET cb %s %d", ctx->dotOrigin, reply->numberReturned);
+    LOG_DEBUG("RRSET cb %s %d", ctx->dotOrigin, reply->numberReturned);
 
     if (reply->numberReturned > 0) {
         if (ctx->new_zn == NULL) ctx->new_zn = zoneCreate(ctx->dotOrigin, sk.master_numa_id);
@@ -140,7 +140,7 @@ static void RRSetGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
             type = bson_extract_string(b, "type");
             rdata = bson_extract_string(b, "rdata");
             if (RRParserFeedRdata(ctx->psr, rdata, name, ttl, type, ctx->new_zn) == ERR_CODE) {
-                LOG_ERR(MONGO, "parse rdata error %d.", ctx->psr->errstr);
+                LOG_ERR("parse rdata error %d.", ctx->psr->errstr);
                 goto error;
             }
         }
@@ -152,20 +152,20 @@ error:
 ok:
     if (!reply || reply->cursorID == 0) {
         if (ctx->status == TASK_ERROR) {
-            LOG_ERROR(MONGO, "failed to reload zone %s asynchronously.", ctx->dotOrigin);
+            LOG_ERROR("failed to reload zone %s asynchronously.", ctx->dotOrigin);
             if (asyncRereloadZone(ctx) == ERR_CODE) {
                 zoneReloadContextDestroy(ctx);
             }
         } else if (ctx->new_zn == NULL) {
-            LOG_WARN(MONGO, "zone %s is not in mongodb.", ctx->dotOrigin);
+            LOG_WARN("zone %s is not in mongodb.", ctx->dotOrigin);
             zoneReloadContextDestroy(ctx);
         } else if (ctx->new_zn->soa == NULL) {
-            LOG_ERROR(MONGO, "zone %s must contain a SOA record.", ctx->dotOrigin);
+            LOG_ERROR("zone %s must contain a SOA record.", ctx->dotOrigin);
             if (asyncRereloadZone(ctx) == ERR_CODE) {
                 zoneReloadContextDestroy(ctx);
             }
         } else {
-            LOG_INFO(MONGO, "reload zone %s successfully. ", ctx->dotOrigin);
+            LOG_INFO("reload zone %s successfully. ", ctx->dotOrigin);
             replaceZoneAllNumaNodes(ctx->new_zn);
             ctx->new_zn = NULL;
             zoneReloadContextDestroy(ctx);
@@ -189,7 +189,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     if (reply == NULL) goto error;
     if (reply->numberReturned == 0) {
         // remove the zone
-        LOG_INFO(MONGO, "zone %s is removed.", ctx->dotOrigin);
+        LOG_INFO("zone %s is removed.", ctx->dotOrigin);
         dot2lenlabel(ctx->dotOrigin, origin);
         deleteZoneAllNumaNodes(origin);
         zoneReloadContextDestroy(ctx);
@@ -200,15 +200,15 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
     assert(strcasecmp(type, "SOA") == 0);
 
     if (parseSOASn(errstr, rdata, &sn) != PARSER_OK) {
-        LOG_WARN(MONGO, "Error SOA record: %s.", errstr);
+        LOG_WARN("Error SOA record: %s.", errstr);
         goto error;
     }
-    LOG_DEBUG(MONGO, "sn cb: %d %d", sn, ctx->sn);
+    LOG_DEBUG("sn cb: %d %d", sn, ctx->sn);
 
 
     if (ctx->sn >= sn) {
         // update zone's ts field
-        LOG_INFO(MONGO, "reload zone %s successfully(unchanged).", ctx->dotOrigin);
+        LOG_INFO("reload zone %s successfully(unchanged).", ctx->dotOrigin);
         dot2lenlabel(ctx->dotOrigin, origin);
         masterRefreshZone(origin);
 
@@ -221,7 +221,7 @@ static void zoneSOAGetCallback(mongoAsyncContext *c, void *r, void *privdata) {
         errcode = mongoAsyncFindAll(c, RRSetGetCallback, ctx, sk.mongo_dbname,
                                     col_name, NULL, NULL, 0);
         if (errcode != MONGO_OK) {
-            LOG_ERROR(MONGO, "MONGO ERROR: %s", c->errstr);
+            LOG_ERROR("MONGO ERROR: %s", c->errstr);
             goto error;
         }
     }
@@ -247,7 +247,7 @@ static void reloadAllCallback(mongoAsyncContext *c, void *r, void *privdata) {
     for (p = namev; *p != NULL; ++p) {
         snprintf(dotOrigin, MAX_DOMAIN_LEN, "%s.", *p);
         if (!isAbsDotDomain(dotOrigin)) {
-            LOG_WARN(MONGO, "%s is too long, ignore it.", dotOrigin);
+            LOG_WARN("%s is too long, ignore it.", dotOrigin);
             continue;
         }
         // only reload the zone doesn't exist in zone dict
@@ -265,20 +265,20 @@ error:
 
 static void connectCallback(const mongoAsyncContext *c, int status) {
     if (status != OK_CODE) {
-        LOG_ERROR(MONGO, "Failed to connect to mongodb: %s", c->errstr);
+        LOG_ERROR("Failed to connect to mongodb: %s", c->errstr);
         sk.mongo_ctx = NULL;
         return;
     }
     assert(sk.mongo_ctx == c);
-    LOG_INFO(MONGO, "mongodb connected..");
+    LOG_INFO("mongodb connected..");
 }
 
 static void disconnectCallback(const mongoAsyncContext *c, int status) {
     sk.mongo_ctx = NULL;
     if (status != MONGO_OK) {
-        LOG_ERROR(MONGO, "Error: %s", c->errstr);
+        LOG_ERROR("Error: %s", c->errstr);
     }
-    LOG_WARN(MONGO, "Disconnected...");
+    LOG_WARN("Disconnected...");
     // only reconnect in cron callback in main thread
     return;
 }
@@ -302,7 +302,7 @@ int initMongo() {
 
     mongoAsyncContext *ac = mongoAsyncConnect(sk.mongo_host, sk.mongo_port);
     if (ac->err) {
-        LOG_ERROR(MONGO, "Failed to init mongodb: %s", ac->errstr);
+        LOG_ERROR("Failed to init mongodb: %s", ac->errstr);
         sk.mongo_ctx = NULL;
         return ERR_CODE;
     }
@@ -331,7 +331,7 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
             ttl = (uint32_t)bson_extract_int32(b, "ttl");
             type = bson_extract_string(b, "type");
             rdata = bson_extract_string(b, "rdata");
-            LOG_DEBUG(MONGO, "RR%d: %s, %d, %s, %s", j, name, ttl, type, rdata);
+            LOG_DEBUG("RR%d: %s, %d, %s, %s", j, name, ttl, type, rdata);
             if (RRParserFeedRdata(psr, rdata, name, ttl, type, z) == ERR_CODE) {
                 goto error;
             }
@@ -339,8 +339,8 @@ static zone *_mongoGetZone(mongoContext *c, RRParser *psr, char *db, char *col, 
     }
     goto ok;
 error:
-    if (c->err != MONGO_OK) LOG_ERROR(MONGO, "Mongo Error: %s", c->errstr);
-    if (psr->err != PARSER_OK) LOG_ERROR(MONGO, "Parser: %s", psr->errstr);
+    if (c->err != MONGO_OK) LOG_ERROR("Mongo Error: %s", c->errstr);
+    if (psr->err != PARSER_OK) LOG_ERROR("Parser: %s", psr->errstr);
     zoneDestroy(z);
     z = NULL;
 ok:
@@ -359,10 +359,10 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
     mongoContext *c = mongoConnect(host, port);
     if (c == NULL || c->err) {
         if (c) {
-            LOG_ERROR(MONGO, "Error: %s\n", c->errstr);
+            LOG_ERROR("Error: %s\n", c->errstr);
             goto error;
         } else {
-            LOG_ERROR(MONGO, "Can't allocate mongo context\n");
+            LOG_ERROR("Can't allocate mongo context\n");
             goto error;
         }
     }
@@ -371,7 +371,7 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
         col = *p;
         snprintf(dotOrigin, MAX_DOMAIN_LEN, "%s.", *p);
         if (!isAbsDotDomain(dotOrigin)) {
-            LOG_WARN(MONGO, "%s is too long, ignore it.");
+            LOG_WARN("%s is too long, ignore it.");
             continue;
         }
         RRParserSetDotOrigin(psr, dotOrigin);
@@ -381,7 +381,7 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
             goto error;
         }
         if (z->soa == NULL) {
-            LOG_ERROR(MONGO, "zone %s must contains a SOA record.", z->dotOrigin);
+            LOG_ERROR("zone %s must contains a SOA record.", z->dotOrigin);
             zoneDestroy(z);
             goto error;
         }
@@ -389,7 +389,7 @@ static int _mongoGetAllZone(char *host, int port, char *db) {
     }
     goto ok;
 error:
-    if (c->err != 0) LOG_ERROR(MONGO, "Mongo Error: %s", c->errstr);
+    if (c->err != 0) LOG_ERROR("Mongo Error: %s", c->errstr);
     errcode = ERR_CODE;
 ok:
     freev((void **)namev);
@@ -399,7 +399,7 @@ ok:
 }
 
 int mongoGetAllZone() {
-    LOG_INFO(MONGO, "Synchronous get all zones from mongodb.");
+    LOG_INFO("Synchronous get all zones from mongodb.");
     return _mongoGetAllZone(sk.mongo_host, sk.mongo_port, sk.mongo_dbname);
 }
 
@@ -413,9 +413,9 @@ int mongoAsyncReloadZone(zoneReloadContext *t) {
     prepareColName(t->dotOrigin, col_name);
 
     t->status = TASK_RUNNING;
-    LOG_INFO(MONGO, "asynchronous reload zone %s.", t->dotOrigin);
+    LOG_INFO("asynchronous reload zone %s.", t->dotOrigin);
 
-    LOG_DEBUG(MONGO, "async sn: %d.", t->sn);
+    LOG_DEBUG("async sn: %d.", t->sn);
     if (t->zone_exist) {
         bson_t *q = BCON_NEW("type", BCON_UTF8("SOA"));
         errcode = mongoAsyncFindOne(sk.mongo_ctx, zoneSOAGetCallback, t,
@@ -429,7 +429,7 @@ int mongoAsyncReloadZone(zoneReloadContext *t) {
                                     col_name, NULL, NULL, 0);
     }
     if (errcode != MONGO_OK) {
-        LOG_ERROR(MONGO, "MONGO ERROR: %s", sk.mongo_ctx->errstr);
+        LOG_ERROR("MONGO ERROR: %s", sk.mongo_ctx->errstr);
         goto error;
     }
     goto ok;
@@ -444,11 +444,11 @@ ok:
 
 int mongoAsyncReloadAllZone() {
     if (sk.mongo_ctx == NULL) return ERR_CODE;
-    LOG_INFO(MONGO, "Asynchronous get all zones from mongodb");
+    LOG_INFO("Asynchronous get all zones from mongodb");
     int errcode;
     errcode = mongoAsyncGetCollectionNames(sk.mongo_ctx, reloadAllCallback, NULL, sk.mongo_dbname);
     if (errcode != MONGO_OK) {
-        LOG_ERROR(MONGO, "Mongo ERROR: %s", sk.mongo_ctx->errstr);
+        LOG_ERROR("Mongo ERROR: %s", sk.mongo_ctx->errstr);
         return ERR_CODE;
     }
     // we need set last_all_reload_ts here, otherwise it will trigger many reloadAll task in cron callback

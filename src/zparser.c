@@ -17,6 +17,8 @@
 #include "utils.h"
 #include "zmalloc.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "ZPARSER");
+
 #define RECORD_SIZE 8192
 
 static bool isttl(const char *ss);
@@ -78,7 +80,7 @@ static int RRParserTokenize(RRParser *psr, char *s) {
     int ntokens = 4096;
     int maxTokens = (int)(sizeof(psr->tokens)/sizeof(char*));
     if (tokenize(s, tokens, &ntokens, " \t") < 0) {
-        LOG_ERR(USER1, "parser error");
+        LOG_ERR("parser error");
         return -1;
     }
     if (ntokens > maxTokens) {
@@ -565,7 +567,7 @@ static char *findChar(char *start, char c) {
         if (*start == c) return start;
     }
     if (literal) {  // unbalance double quotes
-        LOG_WARN(USER1, "unbalanced double quotes");
+        LOG_WARN("unbalanced double quotes");
     }
     return NULL;
 }
@@ -589,7 +591,7 @@ static void replaceInvisibleChar(char *start) {
             *start = ' ';
     }
     if (literal) {  // unbalance double quotes
-        LOG_WARN(USER1, "unbalanced double quotes");
+        LOG_WARN("unbalanced double quotes");
     }
 }
 
@@ -740,7 +742,7 @@ int loadZoneFromStr(char *errstr, int socket_id, char *zbuf, zone **zpp) {
     if(readDirectives(errstr, &ss, dotOrigin, &default_ttl, &line_idx) == ERR_CODE) {
         goto error;
     }
-    LOG_DEBUG(USER1, "origin: %s, default ttl: %d", dotOrigin, default_ttl);
+    LOG_DEBUG("origin: %s, default ttl: %d", dotOrigin, default_ttl);
     if (strlen(dotOrigin) == 0) {
         snprintf(errstr, ERR_STR_LEN, "line %d syntax error: no origin", line_idx);
         goto error;
@@ -750,7 +752,7 @@ int loadZoneFromStr(char *errstr, int socket_id, char *zbuf, zone **zpp) {
     z->default_ttl = default_ttl;
 
     while ((err= readFullRecord(errstr, &ss, rbuf, RECORD_SIZE, &line_idx)) == OK_CODE) {
-        LOG_DEBUG(USER1, "line: %s", rbuf);
+        LOG_DEBUG("line: %s", rbuf);
         if (RRParserFeed(psr, rbuf, NULL, z) == ERR_CODE) {
             snprintf(errstr, ERR_STR_LEN, "Line %d %s", line_idx, psr->errstr);
             goto error;
@@ -776,7 +778,7 @@ int loadZoneFromFile(int socket_id, const char *fname, zone **zpp) {
 
     zbuf = zreadFile(fname);
     if (zbuf == NULL) {
-        LOG_ERROR(USER1, "Can't read zone file %s.", fname);
+        LOG_ERROR("Can't read zone file %s.", fname);
         return ERR_CODE;
     }
     err = loadZoneFromStr(errstr, socket_id, zbuf, zpp);

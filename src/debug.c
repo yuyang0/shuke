@@ -10,10 +10,11 @@
 #include <ucontext.h>
 #include <fcntl.h>
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "DBG");
+
 /* =========================== Crash handling  ============================== */
 void _shukeAssert(char *estr, char *file, int line) {
-    LOG_WARN(USER1,
-             "=== ASSERTION FAILED ===\n"
+    LOG_WARN("=== ASSERTION FAILED ===\n"
              "==> %s:%d '%s' is not true\n"
              "(forcing SIGSEGV to print the bug report.)",
              file,line,estr);
@@ -21,8 +22,7 @@ void _shukeAssert(char *estr, char *file, int line) {
 }
 
 void _shukePanic(char *msg, char *file, int line) {
-    LOG_WARN(USER1,
-             "------------------------------------------------\n"
+    LOG_WARN("------------------------------------------------\n"
              "!!! Software Failure. Press left mouse button to continue\n"
              "Guru Meditation: %s #%s:%d\n"
              "(forcing SIGSEGV in order to print the stack trace)\n"
@@ -183,7 +183,7 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
     /* Log dump of processor registers */
     registersToStr(uc, regbuf, 4096);
 
-    LOG_WARN(USER1,
+    LOG_WARN(
             "\n======================\n"
             "    SHUKE %s crashed by signal: %d\n"
             "%s"

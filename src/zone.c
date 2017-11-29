@@ -15,6 +15,8 @@
 #include "log.h"
 #include "zone.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "ZONE");
+
 #define RRSET_MAX_PREALLOC (1024*1024)
 
 extern int checkLenLabel(char *name, size_t max);
@@ -64,7 +66,7 @@ RRSet *dnsDictValueGet(dnsDictValue *dv, int type) {
         case DNS_TYPE_PTR:
             return dv->v.tv.PTR;
         default:
-            LOG_FATAL(USER1, "invalid RR type");
+            LOG_FATAL("invalid RR type");
     }
 }
 
@@ -100,7 +102,7 @@ void dnsDictValueSet(dnsDictValue *dv, RRSet *rs) {
             dv->v.tv.PTR = rs;
             break;
         default:
-            LOG_FATAL(USER1, "invalid RR type");
+            LOG_FATAL("invalid RR type");
     }
 }
 
@@ -311,7 +313,7 @@ sds RRSetToStr(RRSet *rs) {
             }
             break;
         default:
-            LOG_FATAL(USER1, "invalid RR type");
+            LOG_FATAL("invalid RR type");
     }
     return s;
 }
@@ -334,7 +336,7 @@ zone *zoneCreate(char *ss, int socket_id) {
     }
     zn->origin = socket_strdup(socket_id, origin);
     if (checkLenLabel(zn->origin, 0) == ERR_CODE) {
-        LOG_ERROR(USER1, "origin %s is invalid.", dotOrigin);
+        LOG_ERROR("origin %s is invalid.", dotOrigin);
         socket_free(socket_id, zn->origin);
         socket_free(socket_id, zn);
         return NULL;
@@ -344,7 +346,7 @@ zone *zoneCreate(char *ss, int socket_id) {
     zn->socket_id = socket_id;
     zn->d = dictCreate(&dnsDictType, NULL, socket_id);
     rb_init_node(&zn->rbnode);
-    LOG_DEBUG(USER1, "create zone (dotOrigin=>%s, sid=> %d)", zn->dotOrigin, socket_id);
+    LOG_DEBUG("create zone (dotOrigin=>%s, sid=> %d)", zn->dotOrigin, socket_id);
     return zn;
 }
 
@@ -366,7 +368,7 @@ zone *zoneCopy(zone *z, int socket_id) {
 
 void zoneDestroy(zone *zn) {
     if (zn == NULL) return;
-    LOG_DEBUG(USER1, "zone %s is destroyed(socket_id %d)", zn->dotOrigin, zn->socket_id);
+    LOG_DEBUG("zone %s is destroyed(socket_id %d)", zn->dotOrigin, zn->socket_id);
     dictRelease(zn->d);
     socket_free(zn->socket_id, zn->origin);
     socket_free(zn->socket_id, zn->dotOrigin);

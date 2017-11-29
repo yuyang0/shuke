@@ -16,6 +16,8 @@
 #include "shuke.h"
 #include "edns.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "PACKET");
+
 static const unsigned char _dnsValidCharTable[256] = {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -341,7 +343,7 @@ int RRSetCompressPack(struct context *ctx, RRSet *rs, size_t nameOffset)
         int idx = ctx->lcore_id - z->start_core_idx;
         uint8_t *arr = (uint8_t *)(z->rr_offset_array) + z->rr_offset_array[idx];
         start_idx = (++ arr[rs->z_rr_idx]) % rs->num;
-        LOG_DEBUG(USER1, "core: %d, rr idx: %d", ctx->lcore_id, arr[rs->z_rr_idx]);
+        LOG_DEBUG("core: %d, rr idx: %d", ctx->lcore_id, arr[rs->z_rr_idx]);
     }
 
     for (int i = 0; i < rs->num; ++i) {
@@ -430,7 +432,7 @@ int parseClientSubnet(char *buf, int size, struct clientInfo *cinfo) {
     switch (family) {
         case 1:
             if (source_prefix_len > 32) {
-                LOG_DEBUG(USER1, "edns_client_subnet: invalid src_mask of %u for IPv4",
+                LOG_DEBUG("edns_client_subnet: invalid src_mask of %u for IPv4",
                           source_prefix_len);
                 return ERR_CODE;
             }
@@ -439,7 +441,7 @@ int parseClientSubnet(char *buf, int size, struct clientInfo *cinfo) {
             break;
         case 2:
             if (source_prefix_len > 128) {
-                LOG_DEBUG(USER1, "edns_client_subnet: invalid src_mask of %u for IPv6",
+                LOG_DEBUG("edns_client_subnet: invalid src_mask of %u for IPv6",
                           source_prefix_len);
                 cinfo->edns_client.sa.sa_family = AF_INET6;
                 memcpy(cinfo->edns_client.sin6.sin6_addr.s6_addr, p, addrlen);
@@ -487,7 +489,7 @@ decodeRcode decodeOptRR(char *buf, size_t sz, optRR_t *opt_rr, struct context *c
 
     uint16_t rdlength = DNS_OPTRR_GET_RDLENGTH(opt_rr);
     ctx->max_resp_size = DNS_OPTRR_GET_MAXSIZE(opt_rr);
-    LOG_DEBUG(USER1, "ENDS: payload: %d, rdlength: %d",
+    LOG_DEBUG("ENDS: payload: %d, rdlength: %d",
               ctx->max_resp_size, rdlength);
     if (unlikely(ctx->max_resp_size > sk.max_resp_size))
         ctx->max_resp_size = (uint16_t )sk.max_resp_size;
@@ -525,7 +527,7 @@ decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx) {
     decodeRcode rcode = DECODE_OK;
     // 5 is the minimal question length (1 byte root, 2 bytes each type and class)
     if (sz < DNS_HDR_SIZE + 5) {
-        LOG_DEBUG(USER1, "receive bad dns query message with only %d bytes, drop it", sz);
+        LOG_DEBUG("receive bad dns query message with only %d bytes, drop it", sz);
         // just ignore this packet(don't send response)
         return DECODE_IGNORE;
     }
@@ -533,26 +535,26 @@ decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx) {
     n = parseDnsQuestion(buf+DNS_HDR_SIZE, sz-DNS_HDR_SIZE,
                          &(ctx->name), &(ctx->qType), &(ctx->qClass));
     if (n == ERR_CODE) {
-        LOG_DEBUG(USER1, "parse dns question error.");
+        LOG_DEBUG("parse dns question error.");
         return DECODE_IGNORE;
     }
     // skip dns header and dns question.
     ctx->cur = DNS_HDR_SIZE + n;
 
-    LOG_DEBUG(USER1, "receive dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar:%d)",
+    LOG_DEBUG("receive dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar:%d)",
               ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
     // in order to support EDNS, nArRR can bigger than 0
     if (ctx->hdr.nQd != 1 || ctx->hdr.nAnRR > 0 || ctx->hdr.nNsRR > 0) {
-        LOG_DEBUG(USER1, "receive bad dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar: %d), drop it",
+        LOG_DEBUG("receive bad dns query message(xid: %d, qd: %d, an: %d, ns: %d, ar: %d), drop it",
                   ctx->hdr.xid, ctx->hdr.nQd, ctx->hdr.nAnRR, ctx->hdr.nNsRR, ctx->hdr.nArRR);
         return DECODE_IGNORE;
     }
     if (unlikely(GET_QR(ctx->hdr.flag))) {
-        LOG_DEBUG(USER1, "receive bad dns query packet(QR is set), drop it");
+        LOG_DEBUG("receive bad dns query packet(QR is set), drop it");
         return DECODE_IGNORE;
     }
     if (unlikely(GET_TC(ctx->hdr.flag))) {
-        LOG_DEBUG(USER1, "receive bad dns query packet(TC is set), drop it");
+        LOG_DEBUG("receive bad dns query packet(TC is set), drop it");
         return DECODE_IGNORE;
     }
 
@@ -577,7 +579,7 @@ decodeRcode decodeQuery(char *buf, size_t sz, struct context *ctx) {
     {
         rcode = decodeOptRR(buf+ctx->cur+1, sz - ctx->cur - 1, opt_rr, ctx);
     }
-    LOG_DEBUG(USER1, "dns question: %s, %d", ctx->name, ctx->qType);
+    LOG_DEBUG("dns question: %s, %d", ctx->name, ctx->qType);
     return rcode;
 }
 
@@ -620,7 +622,7 @@ int dumpDnsResp(struct context *ctx, dnsDictValue *dv, zone *z) {
         if (!sk.minimize_resp) {
             char *name = ctx->ari[0].name;
             size_t offset = ctx->ari[0].offset;
-            LOG_DEBUG(USER1, "name: %s, offset: %d", name, offset);
+            LOG_DEBUG("name: %s, offset: %d", name, offset);
             zone *ns_z = ltreeGetZoneRaw(node->lt, name);
             if (ns_z) {
                 if (ns_z->ns) {

@@ -16,6 +16,7 @@
 #include "shuke.h"
 #include "asciilogo.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "SHUKE");
 
 struct shuke sk;
 
@@ -376,7 +377,7 @@ void config_log() {
 }
 
 static void printAsciiLogo() {
-    LOG_RAW(INFO, USER1, "SHUKE %s\n\n%s\n", SHUKE_VERSION, shuke_ascii_logo);
+    LOG_RAW(INFO, "SHUKE %s\n\n%s\n", SHUKE_VERSION, shuke_ascii_logo);
 }
 
 void createPidFile(void) {
@@ -431,7 +432,7 @@ static void sigShutdownHandler(int sig) {
             msg = "Received shutdown signal, scheduling shutdown...";
     };
 
-    LOG_WARN(USER1, msg);
+    LOG_WARN(msg);
     sk.force_quit = true;
     aeStop(sk.el);
     if (sk.daemonize)
@@ -480,7 +481,7 @@ static int _getAllZoneFromFile(bool is_first) {
             return ERR_CODE;
         } else {
             if (strcasecmp(z->dotOrigin, dotOrigin) != 0) {
-                LOG_ERROR(USER1, "the origin(%s) of zone in file %s is not %s", z->dotOrigin, fname, dotOrigin);
+                LOG_ERROR("the origin(%s) of zone in file %s is not %s", z->dotOrigin, fname, dotOrigin);
                 zoneDestroy(z);
                 return ERR_CODE;
             }
@@ -513,7 +514,7 @@ int reloadZoneFromFile(zoneReloadContext *t) {
             return ERR_CODE;
         } else {
             if (strcasecmp(z->dotOrigin, t->dotOrigin) != 0) {
-                LOG_ERROR(USER1, "the origin(%s) of zone in file %s is not %s", z->dotOrigin, fname, t->dotOrigin);
+                LOG_ERROR("the origin(%s) of zone in file %s is not %s", z->dotOrigin, fname, t->dotOrigin);
                 zoneDestroy(z);
                 return ERR_CODE;
             }
@@ -597,7 +598,7 @@ static int _getDnsResponse(char *buf, size_t sz, struct context *ctx)
 
     if (z == NULL) {
         // zone is not managed by this server
-        LOG_DEBUG(USER1, "zone is NULL, name: %s", ctx->name);
+        LOG_DEBUG("zone is NULL, name: %s", ctx->name);
         dumpDnsRefusedErr(ctx);
         ret = OK_CODE;
     } else {
@@ -708,7 +709,7 @@ static int mainThreadCron(struct aeEventLoop *el, long long id, void *clientData
         }
         // check if need to do all reload
         if (sk.unixtime - sk.last_all_reload_ts > sk.all_reload_interval) {
-            LOG_INFO(USER1, "start reloading all zone asynchronously.");
+            LOG_INFO("start reloading all zone asynchronously.");
             sk.asyncReloadAllZone();
         }
         while ((ctx = __shiftZoneReloadContext()) != NULL) {
@@ -858,7 +859,7 @@ static void initShuke() {
         sk.asyncReloadAllZone = &getAllZoneFromFile;
         sk.asyncReloadZone = &reloadZoneFromFile;
     } else {
-        LOG_EXIT(USER1, "invalid data store config %s", sk.data_store);
+        LOG_EXIT("invalid data store config %s", sk.data_store);
     }
 
     sk.rbroot = RB_ROOT;
@@ -872,24 +873,24 @@ static void initShuke() {
 
     long long reload_all_start = mstime();
     if (sk.syncGetAllZone() == ERR_CODE) {
-        LOG_EXIT(USER1, "can't load all zone data from %s", sk.data_store);
+        LOG_EXIT("can't load all zone data from %s", sk.data_store);
     }
     sk.zone_load_time = mstime() - reload_all_start;
-    LOG_INFO(USER1, "loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
+    LOG_INFO("loading all zone from %s to memory cost %lld milliseconds.", sk.data_store, sk.zone_load_time);
     sk.last_all_reload_ts = sk.unixtime;
 
     if (sk.initAsyncContext() == ERR_CODE) {
-        LOG_EXIT(USER1, "init %s async context error.", sk.data_store);
+        LOG_EXIT("init %s async context error.", sk.data_store);
     }
     // process task queue
     if (aeCreateTimeEvent(sk.el, TIME_INTERVAL, mainThreadCron, NULL, NULL) == AE_ERR) {
-        LOG_EXIT(USER1, "Can't create time event proc");
+        LOG_EXIT("Can't create time event proc");
     }
 
     // run admin server
-    LOG_INFO(USER1, "starting admin server on %s:%d", sk.admin_host, sk.admin_port);
+    LOG_INFO("starting admin server on %s:%d", sk.admin_host, sk.admin_port);
     if (initAdminServer() == ERR_CODE) {
-        LOG_EXIT(USER1, "can't init admin server.");
+        LOG_EXIT("can't init admin server.");
     }
 }
 
@@ -1134,7 +1135,7 @@ int initNumaConfig() {
         }
     }
     sk.nr_numa_id = n;
-    LOG_INFO(USER1, "lcore list: %s, numa: %d.", sk.total_lcore_list, sk.nr_numa_id);
+    LOG_INFO("lcore list: %s, numa: %d.", sk.total_lcore_list, sk.nr_numa_id);
     return 0;
 }
 
@@ -1280,11 +1281,11 @@ int main(int argc, char *argv[]) {
             if (is_all_veth_up()) break;
             else {
                 if (i == 20) {
-                    LOG_EXIT(USER1, "can't bring all kni virtual interfaces up.");
+                    LOG_EXIT("can't bring all kni virtual interfaces up.");
                 }
             }
         }
-        LOG_INFO(USER1, "starting dns tcp server.");
+        LOG_INFO("starting dns tcp server.");
         sk.tcp_srv = tcpServerCreate();
         assert(sk.tcp_srv);
     }

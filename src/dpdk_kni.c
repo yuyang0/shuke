@@ -10,6 +10,8 @@
 
 #include "shuke.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_KNI, "KNI");
+
 /* Total octets in ethernet header */
 #define KNI_ENET_HEADER_SIZE    14
 
@@ -59,7 +61,7 @@ kni_ifconfig(int portid, char *ipaddr) {
     ifr.ifr_hwaddr.sa_family = ARPHRD_ETHER;
     ret = ioctl(sockfd, SIOCSIFHWADDR, &ifr);
     if (ret < 0) {
-        LOG_ERROR(KNI, "set mac address error %s\n", strerror(errno));
+        LOG_ERROR("set mac address error %s\n", strerror(errno));
         exit(-1);
     }
     /* config ipv4 address */
@@ -67,13 +69,13 @@ kni_ifconfig(int portid, char *ipaddr) {
     inet_pton(AF_INET, ipaddr, &addr->sin_addr);
     ret = ioctl(sockfd, SIOCSIFADDR, &ifr);
     if (ret < 0) {
-        LOG_ERROR(KNI, "set ipv4 address error %s\n", strerror(errno));
+        LOG_ERROR("set ipv4 address error %s\n", strerror(errno));
         exit(-1);
     }
     /* get flags */
     ret = ioctl(sockfd, SIOCGIFFLAGS, &ifr);
     if (ret < 0) {
-        LOG_ERROR(KNI, "get flags error %s\n", strerror(errno));
+        LOG_ERROR("get flags error %s\n", strerror(errno));
         exit(-1);
     }
     ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
@@ -81,7 +83,7 @@ kni_ifconfig(int portid, char *ipaddr) {
     /* set flags */
     ret = ioctl(sockfd, SIOCSIFFLAGS, &ifr);
     if (ret < 0) {
-        LOG_ERROR(KNI, "set flags error %s\n", strerror(errno));
+        LOG_ERROR("set flags error %s\n", strerror(errno));
         exit(-1);
     }
     close(sockfd);
@@ -111,11 +113,11 @@ bool is_all_veth_up() {
         memset(&ifr, 0, sizeof(ifr));
         strcpy(ifr.ifr_name, ifname);
         if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
-            LOG_WARN(KNI, "SIOCGIFFLAGS %s", strerror(errno));
+            LOG_WARN("SIOCGIFFLAGS %s", strerror(errno));
         }
         close(sock);
         if((ifr.ifr_flags & IFF_UP) == 0) {
-            LOG_DEBUG(KNI, "%s is not up.", ifname);
+            LOG_DEBUG("%s is not up.", ifname);
             return false;
         }
     }
@@ -137,11 +139,11 @@ kni_config_network_interface(uint8_t port_id, uint8_t if_up)
     int ret = 0;
 
     if (port_id >= rte_eth_dev_count() || port_id >= RTE_MAX_ETHPORTS) {
-        LOG_ERR(KNI, "Invalid port id %d\n", port_id);
+        LOG_ERR("Invalid port id %d\n", port_id);
         return -EINVAL;
     }
 
-    LOG_INFO(KNI, "Configure network interface of %d %s.",
+    LOG_INFO("Configure network interface of %d %s.",
             port_id, if_up ? "up" : "down");
 
     return ret;
@@ -255,7 +257,7 @@ kni_process_tx(lcore_conf_t *qconf, uint8_t port_id)
         }
         kconf->rx_packets += nb_kni_tx;
 
-        LOG_DEBUG(KNI, "port %d got %d packets and send %d packets to kni.", port_id, nb_tx, nb_kni_tx);
+        LOG_DEBUG("port %d got %d packets and send %d packets to kni.", port_id, nb_tx, nb_kni_tx);
     }
     rte_kni_handle_request(kconf->kni);
     return 0;
@@ -273,7 +275,7 @@ kni_process_rx(uint8_t port_id, uint16_t queue_id,
 
     if (nb_kni_rx > 0) {
         nb_rx = rte_eth_tx_burst(port_id, queue_id, pkts_burst, nb_kni_rx);
-        LOG_DEBUG(KNI, "recieve %d packets from KNI and send %d packet to port %d, queue %d.", nb_kni_rx, nb_rx, port_id, queue_id);
+        LOG_DEBUG("recieve %d packets from KNI and send %d packet to port %d, queue %d.", nb_kni_rx, nb_rx, port_id, queue_id);
         if (nb_rx < nb_kni_rx) {
             uint16_t i;
             for(i = nb_rx; i < nb_kni_rx; ++i)
@@ -323,7 +325,7 @@ cleanup_kni_module()
         int portid = sk.port_ids[i];
         kconf = kni_conf_list[portid];
         if (rte_kni_release(kconf->kni))
-            LOG_ERR(KNI, "Fail to release kni\n");
+            LOG_ERR("Fail to release kni\n");
     }
 #ifdef RTE_LIBRTE_XEN_DOM0
     rte_kni_close();

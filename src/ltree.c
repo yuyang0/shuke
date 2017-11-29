@@ -7,6 +7,7 @@
 #include "ltree.h"
 #include "zmalloc.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "LTREE");
 
 /*----------------------------------------------
  *     label tree definition
@@ -47,7 +48,7 @@ static void ltreeNodeDestroy(ltreeNode *lnode) {
         }
         int err = cds_lfht_destroy(lnode->children, NULL);
         if (err) {
-            LOG_ERR(USER1, "destroy cru hash table failed.");
+            LOG_ERR("destroy cru hash table failed.");
         }
     }
     socket_free(lnode->socket_id, lnode);
@@ -129,7 +130,7 @@ zone *ltreeGetZone(ltree *lt, struct dname *dn) {
 
     for (int i = max_count-1; i >= 0; i--) {
         char *label = dn->name + dn->label_offset[i];
-        LOG_DEBUG(USER1, "get zone exact: label %s, %d", label, label[0]);
+        LOG_DEBUG("get zone exact: label %s, %d", label, label[0]);
 
         lnode = rcu_ht_fetch_value(parent_lnode->children, label);
         if (lnode == NULL) break;
@@ -157,7 +158,7 @@ zone *ltreeGetZoneExact(ltree *lt, struct dname *dn) {
     for (int i = max_count-1; i >= 0; i--) {
         char *label = dn->name + dn->label_offset[i];
 
-        LOG_DEBUG(USER1, "get zone exact: label %s, %d", label, label[0]);
+        LOG_DEBUG("get zone exact: label %s, %d", label, label[0]);
         lnode = rcu_ht_fetch_value(parent_lnode->children, label);
         if (lnode == NULL) break;
         parent_lnode = lnode;
@@ -353,7 +354,7 @@ static sds ltreeNodeToStr(ltreeNode *lnode, sds s) {
             zone_s = zoneToStr(lnode->z);
             s = sdscatsds(s, zone_s);
             sdsfree(zone_s);
-            LOG_DEBUG(USER1, "label: %s %d", lnode->label, strlen(lnode->label));
+            LOG_DEBUG("label: %s %d", lnode->label, strlen(lnode->label));
         }
         s = ltreeNodeToStr(lnode, s);
     }

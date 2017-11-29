@@ -2,6 +2,9 @@
 // Created by Yu Yang <yyangplus@NOSPAM.gmail.com> on 2017-11-28
 //
 #include "sk_lua.h"
+#include "shuke.h"
+
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "LUA");
 
 static int sk_lua_var_get(lua_State *L);
 static int sk_lua_var_set(lua_State *L);
@@ -25,6 +28,7 @@ sk_lua_inject_variable_api(lua_State *L)
 static int
 sk_lua_var_get(lua_State *L)
 {
+    LOG_DEBUG("in get var");
     return 1;
 }
 

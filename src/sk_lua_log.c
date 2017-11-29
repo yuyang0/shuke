@@ -5,7 +5,7 @@
 #include "sk_lua.h"
 #include "log.h"
 
-#define RTE_LOGTYPE_LUA RTE_LOGTYPE_USER1
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "LUA");
 
 static void sk_lua_inject_log_consts(lua_State *L);
 static int sk_lua_log(lua_State *L);
@@ -78,7 +78,7 @@ log_wrapper(const char *ident, int level, lua_State *L)
     int                  type;
     const char          *msg;
 
-    if ((level > (int)rte_logs.level) || !(RTE_LOGTYPE_LUA & rte_logs.type))
+    if ((level > (int)rte_logs.level) || !(MODULE_LOGTYPE & rte_logs.type))
         return 0;
 
     nargs = lua_gettop(L);
@@ -195,7 +195,7 @@ log_wrapper(const char *ident, int level, lua_State *L)
                           (int) size);
     }
 
-    rte_log((uint32_t )level, RTE_LOGTYPE_LUA, "%s%s", ident, buf);
+    rte_log((uint32_t )level, MODULE_LOGTYPE, "%s%s", ident, buf);
 
     return 0;
 }

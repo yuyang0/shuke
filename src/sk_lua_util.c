@@ -5,6 +5,8 @@
 #include "sk_lua.h"
 #include "shuke.h"
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "LUA");
+
 #ifndef LUA_PATH_SEP
 #define LUA_PATH_SEP ";"
 #endif
@@ -27,7 +29,7 @@ sk_lua_set_path(lua_State *L, int tab_idx, const char *fieldname, const char *pa
     tmp_path = luaL_gsub(L, tmp_path, "${prefix}", prefix);
     lua_pop(L, 3);
 
-    LOG_DEBUG(USER1, "tmp_path path: %s", tmp_path);
+    LOG_DEBUG("tmp_path path: %s", tmp_path);
 
     luaL_gsub(L, tmp_path, AUX_MARK, default_path);
 
@@ -53,7 +55,7 @@ sk_lua_inject_all_api(lua_State *L)
 }
 
 /* static int panic (lua_State *L) { */
-/*     LOG_ERR(USER1, "PANIC: unprotected error in call to Lua API (%s)\n", */
+/*     LOG_ERR("PANIC: unprotected error in call to Lua API (%s)\n", */
 /*             lua_tostring(L, -1)); */
 /*     return 0;  /\* return to Lua to abort *\/ */
 /* } */
@@ -87,7 +89,7 @@ lua_State *sk_lua_new_state(struct lua_conf *lconf) {
     luaL_openlibs(L);
     lua_getglobal(L, "package");
     if (!lua_istable(L, -1)) {
-        LOG_ERR(USER1, "the \"package\" table does not exist");
+        LOG_ERR("the \"package\" table does not exist");
         return NULL;
     }
 #ifdef LUA_DEFAULT_PATH
@@ -116,11 +118,11 @@ lua_State *sk_lua_new_state(struct lua_conf *lconf) {
     lua_setfield(L, -2, "cpath"); /* package */
 #endif
     if (lconf->package_path) {
-        LOG_DEBUG(USER1, "pacakge path %s", lconf->package_path);
+        LOG_DEBUG("pacakge path %s", lconf->package_path);
         lua_getfield(L, -1, "path"); /* get original package.path */
         old_path = lua_tolstring(L, -1, &old_path_len);
 
-        LOG_DEBUG(USER1, "old path: %s", old_path);
+        LOG_DEBUG("old path: %s", old_path);
 
         lua_pushstring(L, lconf->package_path);
         new_path = lua_tostring(L, -1);
@@ -133,7 +135,7 @@ lua_State *sk_lua_new_state(struct lua_conf *lconf) {
         lua_getfield(L, -1, "cpath"); /* get original package.cpath */
         old_cpath = lua_tolstring(L, -1, &old_cpath_len);
 
-        LOG_DEBUG(USER1, "old cpath: %s", old_cpath);
+        LOG_DEBUG("old cpath: %s", old_cpath);
 
         lua_pushstring(L, lconf->package_cpath);
         new_cpath = lua_tostring(L, -1);

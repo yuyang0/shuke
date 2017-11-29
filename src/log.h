@@ -14,6 +14,16 @@
 #define SK_LOG_DP_LEVEL RTE_LOG_DEBUG
 #endif
 
+struct logModuleCfg{
+    uint32_t logtype;
+    char* ty_name;
+};
+
+#define DEF_LOG_MODULE(ty, ty_name)                       \
+    static struct logModuleCfg  __log_cfg = {ty, ty_name}
+
+#define MODULE_LOGTYPE  __log_cfg.logtype
+
 static inline int __rte_log(uint32_t level, uint32_t logtype, const char *tstr, const char *lstr, const char *fmt, ...) {
     if ((level > rte_logs.level) || !(logtype & rte_logs.type))
         return 0;
@@ -35,36 +45,36 @@ static inline int __rte_log(uint32_t level, uint32_t logtype, const char *tstr, 
     return ret;
 }
 
-#define LOG_DEBUG(t, ...)                                          \
-    (void)((RTE_LOG_DEBUG <= SK_LOG_DP_LEVEL)?                         \
-           __rte_log(RTE_LOG_DEBUG, RTE_LOGTYPE_ ## t, #t, "[debug]: ", ##__VA_ARGS__): \
+#define LOG_DEBUG(...)                                                  \
+    (void)((RTE_LOG_DEBUG <= SK_LOG_DP_LEVEL)?                          \
+           __rte_log(RTE_LOG_DEBUG, __log_cfg.logtype, __log_cfg.ty_name, "[debug]: ", ##__VA_ARGS__): \
            0)
 
-#define LOG_INFO(t, ...)                                           \
-    __rte_log(RTE_LOG_INFO, RTE_LOGTYPE_ ## t, #t, "[info]: ", ##__VA_ARGS__)
+#define LOG_INFO(...)                                                   \
+    __rte_log(RTE_LOG_INFO, __log_cfg.logtype, __log_cfg.ty_name, "[info]: ", ##__VA_ARGS__)
 
-#define LOG_NOTICE(t, ...)                                         \
-    __rte_log(RTE_LOG_NOTICE, RTE_LOGTYPE_ ## t, #t, "[notice]: ", ##__VA_ARGS__)
+#define LOG_NOTICE(...)                                                 \
+    __rte_log(RTE_LOG_NOTICE, __log_cfg.logtype, __log_cfg.ty_name, "[notice]: ", ##__VA_ARGS__)
 
-#define LOG_WARNING(t, ...)                                        \
-    __rte_log(RTE_LOG_WARNING, RTE_LOGTYPE_ ## t, #t, "[warn]: ", ##__VA_ARGS__)
 
-#define LOG_WARN(t, ...)                                           \
-    __rte_log(RTE_LOG_WARNING, RTE_LOGTYPE_ ## t, #t, "[warn]: ", ##__VA_ARGS__)
+#define LOG_WARN(...)                                                   \
+    __rte_log(RTE_LOG_WARNING, __log_cfg.logtype, __log_cfg.ty_name, "[warn]: ", ##__VA_ARGS__)
 
-#define LOG_ERR(t, ...)                                          \
-    __rte_log(RTE_LOG_ERR, RTE_LOGTYPE_ ## t, #t, "[err]: ", ##__VA_ARGS__)
+#define LOG_WARNING  LOG_WARN
+
+#define LOG_ERR(...)                                                    \
+    __rte_log(RTE_LOG_ERR, __log_cfg.logtype, __log_cfg.ty_name, "[err]: ", ##__VA_ARGS__)
 
 #define LOG_ERROR LOG_ERR
 
-#define LOG_FATAL(t, ...)                                          \
-    __rte_log(RTE_LOG_ERR, RTE_LOGTYPE_ ## t, #t, "[err]: ", ##__VA_ARGS__); abort()
+#define LOG_FATAL(...)                                                  \
+    __rte_log(RTE_LOG_ERR, __log_cfg.logtype, __log_cfg.ty_name, "[err]: ", ##__VA_ARGS__); abort()
 
-#define LOG_EXIT(t, ...)                                          \
-    __rte_log(RTE_LOG_ERR, RTE_LOGTYPE_ ## t, #t, "[err]: ", ##__VA_ARGS__); exit(EXIT_FAILURE)
+#define LOG_EXIT(...)                                                   \
+    __rte_log(RTE_LOG_ERR, __log_cfg.logtype, __log_cfg.ty_name, "[err]: ", ##__VA_ARGS__); exit(EXIT_FAILURE)
 
-#define LOG_RAW(l, t, ...)    \
-    rte_log(RTE_LOG_ ## l, RTE_LOGTYPE_ ## t, __VA_ARGS__)
+#define LOG_RAW(l, ...)                                     \
+    rte_log(RTE_LOG_ ## l, __log_cfg.logtype, __VA_ARGS__)
 
 static inline uint32_t
 str2loglevel(char *ss) {

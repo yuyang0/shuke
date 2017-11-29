@@ -8,6 +8,8 @@
 #include <sys/resource.h>
 #include <sys/utsname.h>
 
+DEF_LOG_MODULE(RTE_LOGTYPE_USER1, "ADMIN");
+
 #define LEN_BYTES 4
 #define ADMIN_CONN_EXPIRE 3600
 
@@ -77,7 +79,7 @@ int initAdminServer(void) {
     for (int j = 0; j < numcommands; j++) {
         adminCommand *c = adminCommandTable+j;
         if (dictAdd(sk.commands, zstrdup(c->name), c) != DICT_OK) {
-            LOG_FATAL(USER1, "can't add command %s to dict", c->name);
+            LOG_FATAL("can't add command %s to dict", c->name);
         }
     }
     INIT_LIST_HEAD(&(sk.head));
@@ -97,7 +99,7 @@ int initAdminServer(void) {
     }
     anetNonBlock(NULL,sk.fd);
     if (aeCreateFileEvent(sk.el, sk.fd, AE_READABLE, adminAcceptHandler, NULL) == AE_ERR) {
-        LOG_ERROR(USER1, "Can't create file event for listen socket %d", sk.fd);
+        LOG_ERROR("Can't create file event for listen socket %d", sk.fd);
         return ERR_CODE;
     }
     if (aeCreateTimeEvent(sk.el, TIME_INTERVAL, adminCron, NULL, NULL) == AE_ERR) {
@@ -144,7 +146,7 @@ static adminConn* adminConnCreate(int fd) {
 
 static void adminConnAppendW(adminConn *c, adminReply *rep) {
     if (c->replyList == NULL) {
-        LOG_DEBUG(USER1, "admin add write event");
+        LOG_DEBUG("admin add write event");
         aeCreateFileEvent(c->el, c->fd, AE_WRITABLE, adminWriteHandler, c);
     }
     rep->next = c->replyList;
@@ -182,7 +184,7 @@ static void dispatchCommand(adminConn *c) {
     }
 
     strtoupper(argv[0]);
-    LOG_INFO(USER1, "receive %s command.", argv[0]);
+    LOG_INFO("receive %s command.", argv[0]);
     adminCommand *cmd = dictFetchValue(sk.commands, argv[0]);
     if (cmd == NULL) goto error;
     cmd->proc(argc, argv, c);
@@ -192,14 +194,14 @@ error:
     if (s == NULL) {
         s = sdsnewprintf("invalid command %s.", argv[0]);
     }
-    LOG_DEBUG(USER1, "Buf: %s, cmd: %s", s, argv[0]);
+    LOG_DEBUG("Buf: %s, cmd: %s", s, argv[0]);
     adminReply *rep = adminReplyCreate(s);
     adminConnAppendW(c, rep);
     return;
 }
 
 static int adminCron(struct aeEventLoop *el, long long id, void *clientData) {
-    // LOG_DEBUG(USER1, "admin time event");
+    // LOG_DEBUG("admin time event");
     ((void) el); ((void) id); ((void) clientData);
 
     struct list_head *pos, *temp;
@@ -207,7 +209,7 @@ static int adminCron(struct aeEventLoop *el, long long id, void *clientData) {
         adminConn *c = list_entry(pos, adminConn, node);
         if (sk.unixtime - c->lastActiveTs < ADMIN_CONN_EXPIRE) break;
 
-        LOG_INFO(USER1, "admin connection is idle more than %ds, close it.", ADMIN_CONN_EXPIRE);
+        LOG_INFO("admin connection is idle more than %ds, close it.", ADMIN_CONN_EXPIRE);
         adminConnDestroy(c);
     }
     return TIME_INTERVAL;
@@ -231,13 +233,13 @@ static void adminReadHandler(struct aeEventLoop *el, int fd, void *privdata, int
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     return;
                 }
-                LOG_WARN(USER1, "tcp read: %s", strerror(errno));
+                LOG_WARN("tcp read: %s", strerror(errno));
                 adminConnDestroy(conn);
                 return;
             }
             if (n == 0) {   // the peer close the socket prematurely.
                 if (conn->nRead > 0) {
-                    LOG_WARN(USER1, "the connection peer closed socket prematurely.");
+                    LOG_WARN("the connection peer closed socket prematurely.");
                 }
                 adminConnDestroy(conn);
                 return;
@@ -258,11 +260,11 @@ static void adminReadHandler(struct aeEventLoop *el, int fd, void *privdata, int
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
                         return;
                     }
-                    LOG_WARN(USER1, "tcp read: %s", strerror(errno));
+                    LOG_WARN("tcp read: %s", strerror(errno));
                     adminConnDestroy(conn);
                     return;
                 } else if (n == 0) {   // the peer close the socket prematurely.
-                    LOG_WARN(USER1, "the connection peer closed socket prematurely.");
+                    LOG_WARN("the connection peer closed socket prematurely.");
                     adminConnDestroy(conn);
                     return;
                 }
@@ -300,7 +302,7 @@ static void adminWriteHandler(struct aeEventLoop *el, int fd,
             n = write(fd, rep->len+rep->wcur, remainWrite);
             if (n <= 0) {
                 if ((n < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-                LOG_WARN(USER1, "admin server can't write data to client: %s", strerror(errno));
+                LOG_WARN("admin server can't write data to client: %s", strerror(errno));
                 adminConnDestroy(c);
                 return;
             }
@@ -314,7 +316,7 @@ static void adminWriteHandler(struct aeEventLoop *el, int fd,
             n = write(fd, rep->data+rep->wcur, rep->wsize-rep->wcur);
             if (n <= 0) {
                 if ((n < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-                LOG_WARN(USER1, "admin server can't write data to client: %s", strerror(errno));
+                LOG_WARN("admin server can't write data to client: %s", strerror(errno));
                 adminConnDestroy(c);
                 return;
             }
@@ -328,7 +330,7 @@ static void adminWriteHandler(struct aeEventLoop *el, int fd,
         n = write(fd, rep->data+rep->wcur, rep->wsize-rep->wcur);
         if (n <= 0) {
             if ((n < 0) && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-            LOG_WARN(USER1, "admin server can't write data to client: %s", strerror(errno));
+            LOG_WARN("admin server can't write data to client: %s", strerror(errno));
             adminConnDestroy(c);
             return;
         }
@@ -338,7 +340,7 @@ static void adminWriteHandler(struct aeEventLoop *el, int fd,
             adminReplyDestroy(rep);
         }
     }
-    LOG_DEBUG(USER1, "admin delete write event");
+    LOG_DEBUG("admin delete write event");
     aeDeleteFileEvent(el, fd, AE_WRITABLE);
 }
 
@@ -353,10 +355,10 @@ static void adminAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask
         cfd = anetTcpAccept(sk.errstr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
-                LOG_WARN(USER1, "Accepting client connection: %s", sk.errstr);
+                LOG_WARN("Accepting client connection: %s", sk.errstr);
             return;
         }
-        LOG_INFO(USER1, "Admin server accepted %s:%d", cip, cport);
+        LOG_INFO("Admin server accepted %s:%d", cip, cport);
         anetNonBlock(NULL, cfd);
         anetEnableTcpNoDelay(NULL, cfd);
         if (sk.tcp_keepalive) {
@@ -365,7 +367,7 @@ static void adminAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask
         adminConn *c = adminConnCreate(cfd);
 
         if (aeCreateFileEvent(el, cfd, AE_READABLE, adminReadHandler, c) == AE_ERR) {
-            LOG_ERROR(USER1, "admin server can't create file event for client. %s", strerror(errno));
+            LOG_ERROR("admin server can't create file event for client. %s", strerror(errno));
             return;
         }
     }
@@ -518,7 +520,7 @@ static sds genInfoString(char *section) {
         for (int i = 0; i < sk.nr_ports; i++) {
             uint8_t portid = (uint8_t )sk.port_ids[i];
             if (rte_eth_stats_get(portid, &eth_stats) != 0) {
-                LOG_WARN(USER1, "can't get stats of port %d.", portid);
+                LOG_WARN("can't get stats of port %d.", portid);
                 continue;
             }
             s = sdscat(s, "\r\n");
