@@ -53,7 +53,7 @@ typedef struct _RRSet{
 } RRSet;
 
 // CNAME record sets cannot coexist with other record sets with the same name
-#define SUPPORT_TYPE_NUM    (9)
+#define SUPPORT_TYPE_NUM    (8)
 struct _typeValue
 {
     RRSet *A;
@@ -64,7 +64,7 @@ struct _typeValue
     RRSet *TXT;
     RRSet *AAAA;
     RRSet *SRV;
-    RRSet *PTR;
+    // RRSet *PTR;
 };
 
 typedef struct _dnsDictValue {

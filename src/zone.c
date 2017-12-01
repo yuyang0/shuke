@@ -63,8 +63,8 @@ RRSet *dnsDictValueGet(dnsDictValue *dv, int type) {
             return dv->v.tv.AAAA;
         case DNS_TYPE_SRV:
             return dv->v.tv.SRV;
-        case DNS_TYPE_PTR:
-            return dv->v.tv.PTR;
+        // case DNS_TYPE_PTR:
+        //     return dv->v.tv.PTR;
         default:
             LOG_FATAL("invalid RR type");
     }
@@ -98,9 +98,9 @@ void dnsDictValueSet(dnsDictValue *dv, RRSet *rs) {
         case DNS_TYPE_SRV:
             dv->v.tv.SRV = rs;
             break;
-        case DNS_TYPE_PTR:
-            dv->v.tv.PTR = rs;
-            break;
+        // case DNS_TYPE_PTR:
+        //     dv->v.tv.PTR = rs;
+        //     break;
         default:
             LOG_FATAL("invalid RR type");
     }

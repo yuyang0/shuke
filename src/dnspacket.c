@@ -436,15 +436,15 @@ int parseClientSubnet(char *buf, int size, struct clientInfo *cinfo) {
                           source_prefix_len);
                 return ERR_CODE;
             }
-            cinfo->edns_client.sa.sa_family = AF_INET;
-            memcpy(&cinfo->edns_client.sin.sin_addr.s_addr, p, addrlen);
+            cinfo->client_family = AF_INET;
+            memcpy(&cinfo->client_ip, p, addrlen);
             break;
         case 2:
             if (source_prefix_len > 128) {
                 LOG_DEBUG("edns_client_subnet: invalid src_mask of %u for IPv6",
                           source_prefix_len);
-                cinfo->edns_client.sa.sa_family = AF_INET6;
-                memcpy(cinfo->edns_client.sin6.sin6_addr.s6_addr, p, addrlen);
+                cinfo->client_family = AF_INET6;
+                memcpy(&cinfo->client_ip, p, addrlen);
                 return ERR_CODE;
             }
             break;
@@ -474,10 +474,12 @@ parseEdnsOptions(char *rdata, unsigned rdlength, struct context *ctx) {
             if (parseClientSubnet(rdata, rdlength, &ctx->cinfo) != OK_CODE) {
                 return ERR_CODE;
             }
-            ctx->hasClientSubnetOpt = true;
-            // copy ecs in query buffer to response buffer
-            rte_memcpy(ctx->opt_rr+ctx->opt_rr_len, rdata-4, opt_len+4);
-            ctx->opt_rr_len += (opt_len+4);
+            if (likely(sizeof(ctx->opt_rr) >= (size_t)(ctx->opt_rr_len+opt_len+4))) {
+                ctx->hasClientSubnetOpt = true;
+                // copy ecs in query buffer to response buffer
+                rte_memcpy(ctx->opt_rr+ctx->opt_rr_len, rdata-4, opt_len+4);
+                ctx->opt_rr_len += (opt_len+4);
+            }
         }
         rdata += opt_len;
         rdlength -= opt_len;
@@ -710,29 +712,3 @@ int dumpDnsError(struct context *ctx, int err) {
     return OK_CODE;
 }
 
-#if defined(SK_TEST)
-#include "testhelp.h"
-int dsTest(int argc, char *argv[]) {
-    ((void)argc); ((void) argv);
-    char origin[] = "\7example\3com";
-    zone *z = zoneCreate(origin, SOCKET_ID_HEAP);
-    char k[] = "\3www";
-    {
-        RRSet *rs1 = RRSetCreate(DNS_TYPE_A, SOCKET_ID_HEAP);
-        RRSet *rs2 = RRSetCreate(DNS_TYPE_AAAA, SOCKET_ID_HEAP);
-        zoneReplaceTypeVal(z, k, rs1);
-        zoneReplaceTypeVal(z, k, rs2);
-        test_cond("zone 1", zoneFetchValueRelative(z, "aaa") == NULL);
-    }
-    zfree(zmalloc(100000));
-    dnsDictValue *dv = zoneFetchValueRelative(z, k);
-    test_cond("zone 2", dnsDictValueGet(dv, DNS_TYPE_A)->type == DNS_TYPE_A);
-    test_cond("zone 3", dnsDictValueGet(dv, DNS_TYPE_AAAA)->type == DNS_TYPE_AAAA);
-    // {
-    //      char name1[] = "\3www\5baidu\3com";
-    //      char name2[] = "\6zhidao\5baidu\3com";
-    // }
-    test_report();
-    return 0;
-}
-#endif

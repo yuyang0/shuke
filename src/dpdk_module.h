@@ -47,6 +47,8 @@
 #endif
 #include <lua.h>
 
+#include "dnspacket.h"
+
 #define MAX_PKT_BURST     32
 #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
 
@@ -90,6 +92,8 @@ typedef struct lcore_conf {
     int64_t nr_dropped;
 
     int64_t received_req;
+    // context used to decode request and construct response
+    struct context ctx;
 } __rte_cache_aligned lcore_conf_t;
 
 struct hw_features {

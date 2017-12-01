@@ -74,11 +74,11 @@ int initAdminServer(void) {
     char *host = sk.admin_host;
     int port = sk.admin_port;
 
-    sk.commands = dictCreate(&commandTableDictType, NULL, sk.master_numa_id);
+    sk.commands = dictCreate(&dictTypeCaseStringCopyKey, NULL, sk.master_numa_id);
     int numcommands = sizeof(adminCommandTable)/sizeof(adminCommand);
     for (int j = 0; j < numcommands; j++) {
         adminCommand *c = adminCommandTable+j;
-        if (dictAdd(sk.commands, zstrdup(c->name), c) != DICT_OK) {
+        if (dictAdd(sk.commands, c->name, c) != DICT_OK) {
             LOG_FATAL("can't add command %s to dict", c->name);
         }
     }

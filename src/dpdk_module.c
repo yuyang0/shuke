@@ -719,8 +719,8 @@ __handle_packet(struct rte_mbuf *m, uint8_t portid,
     // move data end to the start of udp data.
     rte_pktmbuf_trim(m, (uint16_t)(data_end - udp_data));
 
-    res = processUDPDnsQuery(m, udp_data, udp_data_len, src_addr, udp_h->src_port,
-                             is_ipv4, qconf->node, qconf->lcore_id);
+    res = processUDPDnsQuery(m, udp_data, udp_data_len, src_addr,
+                             udp_h->src_port, is_ipv4, qconf);
     if(res == ERR_CODE) goto dropped;
 
     // ethernet frame should at least contain 64 bytes(include 4 byte CRC)
@@ -841,13 +841,6 @@ launch_one_lcore(__attribute__((unused)) void *dummy)
 
     rcu_register_thread();
     qconf->L = sk_lua_new_state(&sk.lconf);
-
-    /* if (luaL_loadstring(qconf->L, sk.lconf.access_by_lua_src)) { */
-    /*     LOG_ERR(DPDK, "ca't load string %s", lua_tostring(qconf->L, -1)); */
-    /* } */
-    /* if (lua_pcall (qconf->L, 0, 0, 0)){ */
-    /*     LOG_ERR(DPDK, "can't  pcall %s", lua_tostring(qconf->L, -1)); */
-    /* } */
 
     prev_tsc = 0;
 

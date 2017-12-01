@@ -54,18 +54,11 @@ enum ctxRespType {
     RESP_MBUF,
 };
 
-typedef struct {
-    union {
-        struct sockaddr_in6 sin6;
-        struct sockaddr_in  sin;
-        struct sockaddr     sa;
-    };
-    socklen_t len;
-} genericAddr_t;
-
 struct clientInfo {
-    genericAddr_t dns_source;       // address of last source DNS cache/forwarder
-    genericAddr_t edns_client;      // edns-client-subnet address portion
+    char forwarder_ip[16];          // address of last source DNS cache/forwarder
+
+    char client_ip[16];             // edns-client-subnet address portion
+    sa_family_t client_family;
     unsigned edns_client_mask; // edns-client-subnet mask portion
 };
 

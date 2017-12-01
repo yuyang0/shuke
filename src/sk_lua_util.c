@@ -50,6 +50,7 @@ sk_lua_inject_all_api(lua_State *L)
 
     sk_lua_inject_log_api(L);
     sk_lua_inject_variable_api(L);
+    sk_lua_inject_dns_api(L);
 
     lua_setglobal(L, "sk");
 }

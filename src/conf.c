@@ -187,7 +187,7 @@ static int _parse_toml_config(FILE *fp) {
             fprintf(stderr, "Config Error: zone_files_root must be an absolute path.\n");
             exit(1);
         }
-        sk.zone_files_dict = dictCreate(&zoneFileDictType, NULL, SOCKET_ID_HEAP);
+        sk.zone_files_dict = dictCreate(&dictTypeCaseStringCopyKeyVal, NULL, SOCKET_ID_HEAP);
         for (int i = 0; ; i++) {
             if ((entry = toml_table_at(file_list, i)) == NULL) break;
             char *k=NULL, *v=NULL;
