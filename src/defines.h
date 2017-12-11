@@ -18,10 +18,10 @@
 #define MIN(x1, x2) (x1) < (x2)? (x1): (x2)
 #define MAX(x1, x2) (x1) > (x2)? (x1): (x2)
 
-#define OK_CODE   0
-#define ERR_CODE -1
-#define EOF_CODE  -2
-#define NO_MEM_CODE -3
+#define OK_CODE      0
+#define ERR_CODE    (-1)
+#define EOF_CODE    (-2)
+#define NO_MEM_CODE (-3)
 
 /**
  * sk_container_of - cast a member of a structure out to the containing structure
